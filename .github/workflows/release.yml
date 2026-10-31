@@ -57,7 +57,7 @@ jobs:
         run: |
           set -eu
           PKG="viya-linux-amd64"
-          mkdir -p "dist/$PKG/bin" "dist/$PKG/deploy/systemd" "dist/$PKG/scripts"
+          mkdir -p "dist/$PKG/bin" "dist/$PKG/deploy/systemd" "dist/$PKG/scripts" release
           cp bin/viya-linux-amd64 "dist/$PKG/bin/"
           cp bin/caddy-linux-amd64 "dist/$PKG/bin/"
           cp deploy/install-debian.sh "dist/$PKG/deploy/"
