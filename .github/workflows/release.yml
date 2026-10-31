@@ -40,35 +40,58 @@ jobs:
           pnpm --dir web install --frozen-lockfile
           pnpm --dir web build
 
-      - name: Build Viya (linux/amd64)
+      - name: Build binaries (linux/amd64)
         run: |
+          set -eu
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -trimpath -buildvcs=false -ldflags "-s -w" \
             -o bin/viya-linux-amd64 ./cmd/viya
-
-      - name: Build Caddy (linux/amd64)
-        run: |
           cd build/caddy
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -trimpath -buildvcs=false -ldflags "-s -w" \
             -o ../../bin/caddy-linux-amd64 .
 
+      - name: Build binaries (linux/arm64)
+        run: |
+          set -eu
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+            go build -trimpath -buildvcs=false -ldflags "-s -w" \
+            -o bin/viya-linux-arm64 ./cmd/viya
+          cd build/caddy
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+            go build -trimpath -buildvcs=false -ldflags "-s -w" \
+            -o ../../bin/caddy-linux-arm64 .
+
+      - name: Build binaries (linux/armv7)
+        run: |
+          set -eu
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
+            go build -trimpath -buildvcs=false -ldflags "-s -w" \
+            -o bin/viya-linux-armv7 ./cmd/viya
+          cd build/caddy
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
+            go build -trimpath -buildvcs=false -ldflags "-s -w" \
+            -o ../../bin/caddy-linux-armv7 .
+
       - name: Package release
         run: |
           set -eu
-          PKG="viya-linux-amd64"
-          mkdir -p "dist/$PKG/bin" "dist/$PKG/deploy/systemd" "dist/$PKG/scripts" release
-          cp bin/viya-linux-amd64 "dist/$PKG/bin/"
-          cp bin/caddy-linux-amd64 "dist/$PKG/bin/"
-          cp deploy/install-debian.sh "dist/$PKG/deploy/"
-          cp deploy/systemd/viya.service "dist/$PKG/deploy/systemd/"
-          cp scripts/backup-linux.sh "dist/$PKG/scripts/"
-          cp scripts/restore-linux.sh "dist/$PKG/scripts/"
-          cp README.md LICENSE "dist/$PKG/"
-          tar -czf release/viya-linux-amd64.tar.gz -C dist "$PKG"
+          mkdir -p release
+          for arch in amd64 arm64 armv7; do
+            PKG="viya-linux-$arch"
+            mkdir -p "dist/$PKG/bin" "dist/$PKG/deploy/systemd" "dist/$PKG/scripts"
+            cp "bin/viya-linux-$arch" "dist/$PKG/bin/"
+            cp "bin/caddy-linux-$arch" "dist/$PKG/bin/"
+            cp deploy/install-debian.sh "dist/$PKG/deploy/"
+            cp deploy/systemd/viya.service "dist/$PKG/deploy/systemd/"
+            cp scripts/backup-linux.sh "dist/$PKG/scripts/"
+            cp scripts/restore-linux.sh "dist/$PKG/scripts/"
+            cp README.md LICENSE "dist/$PKG/"
+            tar -czf "release/$PKG.tar.gz" -C dist "$PKG"
+          done
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/viya-linux-amd64.tar.gz
+          files: release/*.tar.gz
           generate_release_notes: true

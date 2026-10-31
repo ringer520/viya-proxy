@@ -125,13 +125,13 @@ The `scripts/build-linux.ps1` script produces `bin/viya-linux-amd64` and the mat
 
 ## Installation
 
-### One-line install (Debian/Ubuntu)
+### One-line install (Linux, systemd)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sudo sh
 ```
 
-This downloads the latest prebuilt release and provisions the systemd service end to end. To pin a specific version:
+The installer detects your CPU architecture (`x86_64`, `aarch64`, or `armv7`) and downloads the matching prebuilt release, then provisions the systemd service end to end. To pin a specific version:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v1.0.0 sudo -E sh
@@ -139,14 +139,14 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 
 ### Prebuilt release
 
-Releases are built automatically by GitHub Actions whenever a `v*` tag is pushed (see [`.github/workflows/release.yml`](.github/workflows/release.yml)). Each release ships a `viya-linux-amd64.tar.gz` containing the Viya and Caddy binaries plus the Debian installer.
+Releases are built automatically by GitHub Actions whenever a `v*` tag is pushed (see [`.github/workflows/release.yml`](.github/workflows/release.yml)). Each release ships three archives — `viya-linux-amd64.tar.gz`, `viya-linux-arm64.tar.gz`, and `viya-linux-armv7.tar.gz` — each containing the Viya and Caddy binaries plus the installer.
 
-1. Download the latest `viya-linux-amd64.tar.gz` from [Releases](https://github.com/ringer520/viya-proxy/releases).
+1. Download the archive matching your architecture from [Releases](https://github.com/ringer520/viya-proxy/releases).
 2. Extract it and run the installer:
 
 ```sh
-tar -xzf viya-linux-amd64.tar.gz
-cd viya-linux-amd64/
+tar -xzf viya-linux-<arch>.tar.gz
+cd viya-linux-<arch>/
 sudo sh ./deploy/install-debian.sh
 ```
 
@@ -156,6 +156,8 @@ sudo sh ./deploy/install-debian.sh
 systemctl status viya
 journalctl -u viya -f
 ```
+
+Supported architectures: `amd64` (x86_64), `arm64` (aarch64), `armv7` (32-bit ARM, e.g. Raspberry Pi).
 
 ### Build from source
 
@@ -206,7 +208,7 @@ Backups use the SQLite online backup API and include Caddy certificate state and
 
 ## Documentation
 
-See [`docs/`](docs/) for the implementation plan, operation flow, and hardening notes. The console itself carries per-page guidance in both languages.
+The console carries per-page guidance in both Chinese and English.
 
 ## License
 

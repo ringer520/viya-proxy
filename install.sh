@@ -1,11 +1,12 @@
 #!/bin/sh
-# Viya one-line installer for Debian/Ubuntu.
+# Viya one-line installer for Linux (systemd), any CPU architecture.
 #
 #   curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sudo sh
 #
-# The script downloads the latest prebuilt release, extracts it, and hands off
-# to the bundled install-debian.sh (which provisions the service user, data
-# directory, master key, systemd unit and readiness check).
+# The script detects the CPU architecture, downloads the matching prebuilt
+# release, extracts it, and hands off to the bundled install-debian.sh (which
+# provisions the service user, data directory, master key, systemd unit and
+# readiness check).
 
 set -eu
 
@@ -14,8 +15,21 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+if [ "$(uname -s)" != "Linux" ]; then
+  echo "Error: Viya supports Linux (systemd) only." >&2
+  exit 1
+fi
+
+# Detect the CPU architecture and pick the matching prebuilt release.
+case "$(uname -m)" in
+  x86_64|amd64)  ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+  armv7l|armv6l) ARCH="armv7" ;;
+  *) echo "Error: unsupported architecture '$(uname -m)'. Viya supports x86_64, aarch64 and armv7." >&2; exit 1 ;;
+esac
+
 REPO="ringer520/viya-proxy"
-PKG="viya-linux-amd64"
+PKG="viya-linux-$ARCH"
 TARBALL="$PKG.tar.gz"
 BASE_URL="https://github.com/${REPO}/releases/latest/download/${TARBALL}"
 

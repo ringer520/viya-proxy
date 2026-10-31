@@ -106,8 +106,14 @@ chmod 0600 "$master_key"
 
 chown -R viya:viya /var/lib/viya
 chmod 0700 /var/lib/viya
-install -o root -g root -m 0755 "$ROOT/bin/viya-linux-amd64" /opt/viya/bin/viya
-install -o root -g root -m 0755 "$ROOT/bin/caddy-linux-amd64" /opt/viya/bin/caddy
+viya_bin=$(ls "$ROOT"/bin/viya-linux-* 2>/dev/null | head -1)
+caddy_bin=$(ls "$ROOT"/bin/caddy-linux-* 2>/dev/null | head -1)
+if [ -z "$viya_bin" ] || [ -z "$caddy_bin" ]; then
+  echo "Package binaries are missing." >&2
+  exit 1
+fi
+install -o root -g root -m 0755 "$viya_bin" /opt/viya/bin/viya
+install -o root -g root -m 0755 "$caddy_bin" /opt/viya/bin/caddy
 install -o root -g root -m 0644 "$ROOT/deploy/systemd/viya.service" /etc/systemd/system/viya.service
 
 systemctl daemon-reload
