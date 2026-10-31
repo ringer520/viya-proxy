@@ -8,7 +8,7 @@
 
 Viya is a self-hosted control panel for managing [Caddy](https://caddyserver.com/) reverse-proxy sites and Layer 4 (TCP/UDP) port forwards. It pairs a Go + SQLite control plane with a polished Vue 3 interface and runs Caddy as a supervised subprocess — deploy one binary, open the browser, and manage everything from a clean dashboard.
 
-**Install:** [One-line](#one-line-install-linux-systemd) · [Docker](#docker-installation) · [OpenWrt / LuCI](#openwrt-luci) · [Screenshots](#screenshots)
+**Install:** [Linux](#linux) · [Docker](#docker) · [Screenshots](#screenshots)
 
 ---
 
@@ -117,41 +117,57 @@ The dashboard combines live traffic visualization with everyday management tasks
 
 ## Installation
 
-### One-line install (Linux, systemd)
+Viya runs on any Linux distribution — the same release binary works with **systemd** (Debian/Ubuntu/Fedora/Arch etc.) and **procd** (OpenWrt routers). Supported architectures: `amd64` (x86_64), `arm64` (aarch64) and `armv7` (32-bit ARM, e.g. Raspberry Pi).
+
+### Linux
+
+**One-line install (systemd):**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sudo sh
 ```
 
-The installer detects your CPU architecture (`x86_64`, `aarch64`, or `armv7`) and downloads the matching prebuilt release, then provisions the systemd service end to end. To pin a specific version:
+The installer detects your CPU architecture and downloads the matching prebuilt release, then provisions the systemd service end to end. To pin a specific version:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v1.0.0 sudo -E sh
 ```
 
-### Prebuilt release
+**Manual install (systemd or OpenWrt):**
 
-Releases are built automatically by GitHub Actions whenever a `v*` tag is pushed (see [`.github/workflows/release.yml`](.github/workflows/release.yml)). Each release ships three archives — `viya-linux-amd64.tar.gz`, `viya-linux-arm64.tar.gz`, and `viya-linux-armv7.tar.gz` — each containing the Viya and Caddy binaries plus the installer.
+Releases are built automatically by GitHub Actions whenever a `v*` tag is pushed (see [`.github/workflows/release.yml`](.github/workflows/release.yml)). Each release ships `viya-linux-<arch>.tar.gz` containing the Viya and Caddy binaries, installers and init scripts.
 
-1. Download the archive matching your architecture from [Releases](https://github.com/ringer520/viya-proxy/releases).
-2. Extract it and run the installer:
+1. Download and extract the archive matching your architecture from [Releases](https://github.com/ringer520/viya-proxy/releases):
 
 ```sh
 tar -xzf viya-linux-<arch>.tar.gz
 cd viya-linux-<arch>/
-sudo sh ./deploy/install-debian.sh
 ```
 
-3. Confirm it is running:
+2. Install the service — pick the one matching your init system:
+
+**systemd** (Debian/Ubuntu/Fedora/Arch/…):
 
 ```sh
+sudo sh ./deploy/install-debian.sh
 systemctl status viya
 journalctl -u viya -f
 ```
 
-Supported architectures: `amd64` (x86_64), `arm64` (aarch64), `armv7` (32-bit ARM, e.g. Raspberry Pi).
+**procd** (OpenWrt):
 
-### Docker installation
+```sh
+mkdir -p /opt/viya/bin /etc/viya/secrets /var/lib/viya
+cp bin/viya-linux-* bin/caddy-linux-* /opt/viya/bin/
+cp deploy/openwrt/viya /etc/init.d/viya
+chmod +x /etc/init.d/viya /opt/viya/bin/*
+/etc/init.d/viya enable
+/etc/init.d/viya start
+```
+
+The panel then serves on `http://127.0.0.1:8181`. On OpenWrt it runs alongside LuCI — forward that port through LuCI or an SSH tunnel for remote access. The procd script creates the data directory and master key automatically and respawns the service on failure.
+
+### Docker
 
 The image is published automatically to Docker Hub on every release for `amd64`, `arm64` and `arm/v7`. Pull and run:
 
@@ -191,29 +207,6 @@ volumes:
   viya-data:
   viya-secrets:
 ```
-
-### OpenWrt / LuCI
-
-Viya also runs on OpenWrt routers — it is a single static binary and needs no systemd. Extract the release and register it with procd (OpenWrt's init system):
-
-```sh
-# on the router (arch: x86_64 / aarch64 / armv7)
-cd /tmp
-curl -fsSL -O https://github.com/ringer520/viya-proxy/releases/latest/download/viya-linux-<arch>.tar.gz
-tar -xzf viya-linux-<arch>.tar.gz
-
-# drop the binaries in place and install the procd init script
-mkdir -p /opt/viya/bin /etc/viya/secrets /var/lib/viya
-cp viya-linux-<arch>/bin/viya-linux-* /opt/viya/bin/
-cp viya-linux-<arch>/bin/caddy-linux-* /opt/viya/bin/
-cp viya-linux-<arch>/deploy/openwrt/viya /etc/init.d/viya
-chmod +x /etc/init.d/viya /opt/viya/bin/*
-
-/etc/init.d/viya enable
-/etc/init.d/viya start
-```
-
-Viya's own web panel then runs alongside LuCI on `http://127.0.0.1:8181` — forward that port through LuCI or an SSH tunnel for remote access. The procd script creates the data directory and master key automatically, and respawns the service on failure.
 
 ## Deployment
 
@@ -259,7 +252,7 @@ On Linux binary installs (systemd or OpenWrt procd), the panel can update itself
 
 Viya downloads the release archive for your architecture, verifies the SHA-256 checksum, replaces the running binary and its bundled Caddy, then exits. The service manager (systemd `Restart=always` / procd respawn) starts the new build automatically.
 
-> **Docker users:** auto-update is disabled inside containers. Pull the new image and recreate the container instead (see [Docker installation](#docker-installation)).
+> **Docker users:** auto-update is disabled inside containers. Pull the new image and recreate the container instead (see [Docker](#docker)).
 
 ## Documentation
 

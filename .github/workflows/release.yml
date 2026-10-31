@@ -79,11 +79,12 @@ jobs:
           mkdir -p release
           for arch in amd64 arm64 armv7; do
             PKG="viya-linux-$arch"
-            mkdir -p "dist/$PKG/bin" "dist/$PKG/deploy/systemd" "dist/$PKG/scripts"
+            mkdir -p "dist/$PKG/bin" "dist/$PKG/deploy/systemd" "dist/$PKG/deploy/openwrt" "dist/$PKG/scripts"
             cp "bin/viya-linux-$arch" "dist/$PKG/bin/"
             cp "bin/caddy-linux-$arch" "dist/$PKG/bin/"
             cp deploy/install-debian.sh "dist/$PKG/deploy/"
             cp deploy/systemd/viya.service "dist/$PKG/deploy/systemd/"
+            cp deploy/openwrt/viya "dist/$PKG/deploy/openwrt/"
             cp scripts/backup-linux.sh "dist/$PKG/scripts/"
             cp scripts/restore-linux.sh "dist/$PKG/scripts/"
             cp README.md LICENSE "dist/$PKG/"
