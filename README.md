@@ -103,6 +103,7 @@ The dashboard combines live traffic visualization with everyday management tasks
 - **Read-only accounts** — a `viewer` role that can read every page but is rejected on any write.
 - **Fail2Ban Lite** — auto-bans an IP that triggers repeated 400/401/403 for the same site, without touching manual rules.
 - **Configuration history** — every apply is snapshotted and diffable, and startup reconciliation restores the last-known-good config. If Caddy dies, Viya restarts it.
+- **One-click update** — the panel checks GitHub Releases and, on Linux binary installs, downloads the new release, verifies checksums and swaps the binaries in place with a single click.
 
 ## Tech stack
 
@@ -152,25 +153,44 @@ Supported architectures: `amd64` (x86_64), `arm64` (aarch64), `armv7` (32-bit AR
 
 ### Docker installation
 
-Viya is a single static binary, so it runs cleanly in a container. Build the image from a release archive:
+The image is published automatically to Docker Hub on every release for `amd64`, `arm64` and `arm/v7`. Pull and run:
 
 ```sh
-# download the release matching your host architecture
-curl -fsSL -O https://github.com/ringer520/viya-proxy/releases/latest/download/viya-linux-amd64.tar.gz
-tar -xzf viya-linux-amd64.tar.gz
-
-# build the image (use ARCH=arm64 or armv7 on those hosts)
-docker build --build-arg ARCH=amd64 -t viya-proxy ./viya-linux-amd64
-
-# run it, persisting data and the master key in named volumes
-docker run -d --name viya \
+docker run -d --name viya --restart unless-stopped \
   -p 8181:8181 -p 80:80 -p 443:443 \
   -v viya-data:/var/lib/viya \
   -v viya-secrets:/etc/viya/secrets \
-  viya-proxy
+  ringer520/viya-proxy:latest
 ```
 
 Open `http://127.0.0.1:8181` and create your admin account. SQLite and certificates live in the `viya-data` volume, and the DNS-credential master key in `viya-secrets` — keep that one safe, or encrypted credentials cannot be decrypted after a restore.
+
+To update to a new version:
+
+```sh
+docker pull ringer520/viya-proxy:latest
+docker stop viya && docker rm viya
+# then re-run the docker run command above
+```
+
+Or use `docker-compose`:
+
+```yaml
+services:
+  viya:
+    image: ringer520/viya-proxy:latest
+    restart: unless-stopped
+    ports:
+      - "8181:8181"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - viya-data:/var/lib/viya
+      - viya-secrets:/etc/viya/secrets
+volumes:
+  viya-data:
+  viya-secrets:
+```
 
 ### OpenWrt / LuCI
 
@@ -228,6 +248,18 @@ sudo sh ./scripts/restore-linux.sh /var/backups/viya/viya-YYYYMMDDTHHMMSSZ.tar.g
 ```
 
 Backups use the SQLite online backup API and include Caddy certificate state and custom certificates; the archive is `0600` and treated as sensitive (it contains private keys). The master key lives at `/etc/viya/secrets/master.key` and is **not** included in backups — keep it separately, or encrypted DNS credentials cannot be decrypted after a restore.
+
+## Auto-update
+
+On Linux binary installs (systemd or OpenWrt procd), the panel can update itself:
+
+1. Open **Panel Settings → 面板访问 → 版本与更新** (Panel Settings → Access → Version & Updates).
+2. Click **Check for updates** to query the latest GitHub release.
+3. If a new version is available, click **Update & restart**.
+
+Viya downloads the release archive for your architecture, verifies the SHA-256 checksum, replaces the running binary and its bundled Caddy, then exits. The service manager (systemd `Restart=always` / procd respawn) starts the new build automatically.
+
+> **Docker users:** auto-update is disabled inside containers. Pull the new image and recreate the container instead (see [Docker installation](#docker-installation)).
 
 ## Documentation
 

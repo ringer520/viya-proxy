@@ -310,6 +310,8 @@ func main() {
 	mux.Handle("PATCH /api/v1/proxy-hosts/{id}/enabled", app.requireAuth(http.HandlerFunc(app.toggleHostEnabled)))
 	mux.Handle("DELETE /api/v1/managed-certificates/{id}", app.requireAuth(http.HandlerFunc(app.deleteManagedCertificate)))
 	mux.Handle("DELETE /api/v1/ip-bans/{id}", app.requireAuth(http.HandlerFunc(app.removeIPBan)))
+	mux.Handle("GET /api/v1/version", app.requireAuth(http.HandlerFunc(app.versionInfoHandler)))
+	mux.Handle("POST /api/v1/version/update", app.requireAuth(http.HandlerFunc(app.versionUpdateHandler)))
 	go app.ddnsWorker()
 	go app.healthWorker()
 	go app.watchAccessLogs()

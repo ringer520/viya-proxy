@@ -8,6 +8,14 @@ if (-not $go -and (Test-Path 'C:\Program Files\Go\bin\go.exe')) {
 if (-not $go) { throw 'Go 1.27 or newer is required.' }
 if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) { throw 'pnpm is required to build the web UI.' }
 
+# Inject version via ldflags; fall back to git describe or 'dev'.
+$version = 'dev'
+try {
+    $tag = (git -C $repoRoot describe --tags --abbrev=0 2>$null)
+    if ($tag) { $version = $tag.Trim() }
+} catch {}
+Write-Host "Building version: $version"
+
 Push-Location $repoRoot
 try {
     pnpm --dir web build
@@ -19,7 +27,7 @@ try {
     try {
         $env:GOOS = 'linux'
         $env:GOARCH = 'amd64'
-        & $go build -trimpath -buildvcs=false -o (Join-Path $repoRoot 'bin/viya-linux-amd64') ./cmd/viya
+        & $go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$version" -o (Join-Path $repoRoot 'bin/viya-linux-amd64') ./cmd/viya
         if ($LASTEXITCODE -ne 0) { throw 'Linux Viya build failed.' }
 
         Push-Location (Join-Path $repoRoot 'build/caddy')

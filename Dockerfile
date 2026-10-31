@@ -1,22 +1,60 @@
-# Viya container image.
+# Viya multi-stage build — produces a minimal Alpine image.
 #
-# Build from the repository root after placing the target-architecture
-# binaries in bin/ (e.g. cp bin/viya-linux-amd64 bin/viya):
+# Multi-arch (CI / buildx):
+#   docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 \
+#     --build-arg VERSION=v1.0.0 -t ringer520/viya-proxy:latest --push .
 #
-#   docker build --build-arg ARCH=amd64 -t viya-proxy .
-#
-# Or, with the release archive extracted into ./viya-linux-amd64:
-#
-#   docker build --build-arg ARCH=amd64 -t viya-proxy -f Dockerfile viya-linux-amd64
+# Single-arch (local):
+#   docker build --build-arg VERSION=dev -t viya-proxy .
 
+# ---- Stage 1: frontend (Vue 3 + Vite) ----
+FROM node:22-alpine AS frontend
+RUN corepack enable && corepack prepare pnpm@9 --activate
+WORKDIR /src/web
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY web/ ./
+RUN pnpm build
+
+# ---- Stage 2: Caddy (separate Go module) ----
+FROM golang:1.27-alpine AS caddy-builder
+ARG TARGETARCH
+ARG TARGETVARIANT
+WORKDIR /src/build/caddy
+COPY build/caddy/go.mod build/caddy/go.sum ./
+RUN go mod download
+COPY build/caddy/ ./
+RUN set -e; \
+    GOARM=""; \
+    if [ "$TARGETARCH" = "arm" ]; then GOARM="GOARM=${TARGETVARIANT#v}"; fi; \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH $GOARM \
+      go build -trimpath -buildvcs=false -ldflags "-s -w" -o /out/caddy .
+
+# ---- Stage 3: Viya (control plane + embedded frontend) ----
+FROM golang:1.27-alpine AS viya-builder
+ARG TARGETARCH
+ARG TARGETVARIANT
+ARG VERSION=dev
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/ cmd/
+COPY internal/ internal/
+COPY --from=frontend /src/internal/web/dist internal/web/dist
+RUN set -e; \
+    GOARM=""; \
+    if [ "$TARGETARCH" = "arm" ]; then GOARM="GOARM=${TARGETVARIANT#v}"; fi; \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH $GOARM \
+      go build -trimpath -buildvcs=false \
+        -ldflags "-s -w -X main.version=${VERSION}" \
+        -o /out/viya ./cmd/viya
+
+# ---- Stage 4: runtime ----
 FROM alpine:3.20
-
-# ca-certificates for ACME/HTTPS, tzdata for correct log timestamps
 RUN apk add --no-cache ca-certificates tzdata
 
-ARG ARCH=amd64
-COPY bin/viya-linux-${ARCH} /opt/viya/bin/viya
-COPY bin/caddy-linux-${ARCH} /opt/viya/bin/caddy
+COPY --from=viya-builder /out/viya /opt/viya/bin/viya
+COPY --from=caddy-builder /out/caddy /opt/viya/bin/caddy
 RUN chmod +x /opt/viya/bin/viya /opt/viya/bin/caddy
 
 ENV VIYA_LISTEN=0.0.0.0:8181 \
@@ -27,10 +65,7 @@ ENV VIYA_LISTEN=0.0.0.0:8181 \
     HOME=/var/lib/viya
 
 WORKDIR /var/lib/viya
-
 VOLUME ["/var/lib/viya", "/etc/viya/secrets"]
-
-# 8181 admin UI/API, 80/443 for HTTP/HTTPS sites
 EXPOSE 8181 80 443
 
 ENTRYPOINT ["/opt/viya/bin/viya"]

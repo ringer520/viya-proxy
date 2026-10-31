@@ -222,6 +222,8 @@ const compactMode = ref(localStorage.getItem("viya-compact-mode") === "true");
 const panelAccessPort =
   window.location.port ||
   (window.location.protocol === "https:" ? "443" : "80");
+// App version stamped at build time; shown in the sidebar footer.
+const appVersion = ref("");
 const showPanelSettings = ref(false);
 const panelListenPort = ref(Number(panelAccessPort) || 8181),
   panelSettingsError = ref(""),
@@ -2820,6 +2822,13 @@ onMounted(() => {
   themeMedia.addEventListener("change", applyPanelSettings);
   initializeAuth();
   restartTrafficTimer();
+  // Fetch the build version once for the sidebar footer.
+  fetch("/api/v1/version")
+    .then((r) => (r.ok ? r.json() : Promise.resolve({})))
+    .then((d: Record<string, unknown>) => {
+      if (d && typeof d.current === "string") appVersion.value = d.current;
+    })
+    .catch(() => {});
   // Progress/DNS polling: 2s is still perceived as live and halves the request
   // volume compared with the old 1s tick.
   certificateProgressTimer = setInterval(() => {
@@ -2962,6 +2971,7 @@ onBeforeUnmount(() => {
         >
           <LogOut :size="16" />
         </button>
+        <span v-if="appVersion" class="sidebar-version">{{ appVersion }}</span>
       </div>
     </aside>
     <PanelSettingsDrawer

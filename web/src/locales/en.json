@@ -881,5 +881,21 @@
   "正在读取转发日志…": "Reading forward logs…",
   "该转发已被其他会话修改，请关闭后重新打开": "This forward was modified in another session; close and reopen it",
   "站点已被其他会话修改，请关闭后重新打开编辑": "This site was modified in another session; close and reopen the editor",
-  "暂无转发日志；连接失败时会记录到这里。": "No forward logs yet; connection failures are recorded here."
+  "暂无转发日志；连接失败时会记录到这里。": "No forward logs yet; connection failures are recorded here.",
+  "版本与更新": "Version & Updates",
+  "当前版本": "Current version",
+  "最新版本": "Latest version",
+  "检查更新": "Check for updates",
+  "正在检查…": "Checking…",
+  "正在更新…": "Updating…",
+  "更新并重启": "Update & restart",
+  "更新完成，服务正在重启…": "Update complete, service is restarting…",
+  "发现新版本": "New version available",
+  "当前已是最新版本": "You are on the latest version",
+  "检查更新失败，请检查服务器网络": "Update check failed; please check the server network",
+  "读取版本信息失败": "Failed to load version info",
+  "检测到 Docker 环境：自动更新不可用，请拉取新镜像并重建容器。": "Docker detected: auto-update is unavailable. Pull the new image and recreate the container instead.",
+  "当前环境不支持自动更新，请手动替换二进制。": "Auto-update is not supported in this environment. Please replace the binary manually.",
+  "只读账号不能执行更新，请联系管理员。": "Read-only accounts cannot run updates; contact an administrator.",
+  "查看更新日志": "View release notes"
 }

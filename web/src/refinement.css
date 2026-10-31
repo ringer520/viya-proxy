@@ -656,3 +656,13 @@
   color: var(--muted);
   font-size: 12.5px;
 }
+
+/* sidebar 版本号：低调的小字，不影响现有布局 */
+.sidebar-version {
+  font-size: 10px;
+  color: var(--muted, #8c9ab0);
+  opacity: 0.6;
+  white-space: nowrap;
+  flex: none;
+  margin-left: 6px;
+}
