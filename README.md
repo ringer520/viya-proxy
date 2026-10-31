@@ -8,13 +8,15 @@
 
 Viya is a self-hosted control panel for managing [Caddy](https://caddyserver.com/) reverse-proxy sites and Layer 4 (TCP/UDP) port forwards. It pairs a Go + SQLite control plane with a polished Vue 3 interface and runs Caddy as a supervised subprocess — deploy one binary, open the browser, and manage everything from a clean dashboard.
 
+**Install:** [One-line](#one-line-install-linux-systemd) · [Docker](#docker-installation) · [OpenWrt / LuCI](#openwrt-luci) · [Screenshots](#screenshots)
+
 ---
 
 ## Why Viya?
 
 Most reverse proxies are configured by hand-editing text files. Viya replaces that with a **safe, self-hosted web console**:
 
-- **One binary, zero runtime dependencies** — the Vue frontend is embedded, the database is a single SQLite file, and Caddy ships alongside. No Node, no Docker, no external database.
+- **One binary, zero runtime dependencies** — the Vue frontend is embedded, the database is a single SQLite file, and Caddy ships alongside. No Node, no external database.
 - **Native Chinese UI with full English support** — the interface is designed Chinese-first and switches to English in one click, with per-panel bilingual copy.
 - **Web sites and port forwards unified** — HTTPS sites and raw TCP/UDP forwards live in the same console and share the same traffic statistics.
 - **Secure by default** — the admin API and Caddy's admin endpoint bind to loopback only; sessions, CSRF, rate limiting, read-only accounts and Fail2Ban-style auto-bans are built in.
@@ -28,6 +30,14 @@ The dashboard combines live traffic visualization with everyday management tasks
 **Run overview** — engine health, CPU/memory/disk gauges, a 24-hour traffic trend and a "needs attention" roll-up.
 
 <img src="docs/screenshots/02-overview.png" alt="Viya run overview" width="820">
+
+</div>
+
+<details>
+<summary><strong>More screenshots</strong> — web services, port forwarding, DNS, certificates, logs and settings</summary>
+<br>
+
+<div align="center">
 
 **Web services** — sites grouped by HTTP/HTTPS listener, each with per-site access control and 24-hour traffic.
 
@@ -58,6 +68,8 @@ The dashboard combines live traffic visualization with everyday management tasks
 <img src="docs/screenshots/11-panel-settings.png" alt="Viya panel settings" width="820">
 
 </div>
+
+</details>
 
 ## Highlights
 
@@ -102,27 +114,6 @@ The dashboard combines live traffic visualization with everyday management tasks
 | Engine | Caddy (custom build with `caddy-l4`, DNS provider and rate-limit modules) |
 | Delivery | Single static binary, frontend embedded via `go:embed` |
 
-## Quick start
-
-```sh
-# 1. Fetch dependencies and build the frontend
-pnpm --dir web install
-pnpm --dir web build
-
-# 2. Build the Viya binary (embeds the frontend)
-go build -trimpath -o bin/viya ./cmd/viya
-
-# 3. Build the custom Caddy binary (from build/caddy)
-cd build/caddy && go build -trimpath -o ../../bin/caddy .
-
-# 4. Run against a local data directory
-VIYA_CADDY_BIN="$(pwd)/bin/caddy" ./bin/viya
-```
-
-Open `http://127.0.0.1:8181`, create your first admin account (password ≥ 8 characters), and start adding sites.
-
-The `scripts/build-linux.ps1` script produces `bin/viya-linux-amd64` and the matching `bin/caddy-linux-amd64`, and `scripts/package-linux.ps1` bundles them into a `release/` tarball.
-
 ## Installation
 
 ### One-line install (Linux, systemd)
@@ -159,18 +150,50 @@ journalctl -u viya -f
 
 Supported architectures: `amd64` (x86_64), `arm64` (aarch64), `armv7` (32-bit ARM, e.g. Raspberry Pi).
 
-### Build from source
+### Docker installation
 
-Requirements: Go 1.27+, Node.js and pnpm. The Caddy plugin versions are pinned in `build/caddy/go.mod`.
+Viya is a single static binary, so it runs cleanly in a container. Build the image from a release archive:
 
-```powershell
-pnpm --dir web install
-pnpm --dir web typecheck
-pnpm --dir web build
-go build ./...
-./scripts/build-linux.ps1
-./scripts/package-linux.ps1
+```sh
+# download the release matching your host architecture
+curl -fsSL -O https://github.com/ringer520/viya-proxy/releases/latest/download/viya-linux-amd64.tar.gz
+tar -xzf viya-linux-amd64.tar.gz
+
+# build the image (use ARCH=arm64 or armv7 on those hosts)
+docker build --build-arg ARCH=amd64 -t viya-proxy ./viya-linux-amd64
+
+# run it, persisting data and the master key in named volumes
+docker run -d --name viya \
+  -p 8181:8181 -p 80:80 -p 443:443 \
+  -v viya-data:/var/lib/viya \
+  -v viya-secrets:/etc/viya/secrets \
+  viya-proxy
 ```
+
+Open `http://127.0.0.1:8181` and create your admin account. SQLite and certificates live in the `viya-data` volume, and the DNS-credential master key in `viya-secrets` — keep that one safe, or encrypted credentials cannot be decrypted after a restore.
+
+### OpenWrt / LuCI
+
+Viya also runs on OpenWrt routers — it is a single static binary and needs no systemd. Extract the release and register it with procd (OpenWrt's init system):
+
+```sh
+# on the router (arch: x86_64 / aarch64 / armv7)
+cd /tmp
+curl -fsSL -O https://github.com/ringer520/viya-proxy/releases/latest/download/viya-linux-<arch>.tar.gz
+tar -xzf viya-linux-<arch>.tar.gz
+
+# drop the binaries in place and install the procd init script
+mkdir -p /opt/viya/bin /etc/viya/secrets /var/lib/viya
+cp viya-linux-<arch>/bin/viya-linux-* /opt/viya/bin/
+cp viya-linux-<arch>/bin/caddy-linux-* /opt/viya/bin/
+cp viya-linux-<arch>/deploy/openwrt/viya /etc/init.d/viya
+chmod +x /etc/init.d/viya /opt/viya/bin/*
+
+/etc/init.d/viya enable
+/etc/init.d/viya start
+```
+
+Viya's own web panel then runs alongside LuCI on `http://127.0.0.1:8181` — forward that port through LuCI or an SSH tunnel for remote access. The procd script creates the data directory and master key automatically, and respawns the service on failure.
 
 ## Deployment
 

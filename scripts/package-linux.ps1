@@ -15,8 +15,7 @@ Copy-Item (Join-Path $repoRoot 'deploy/systemd/viya.service') (Join-Path $packag
 Copy-Item (Join-Path $repoRoot 'scripts/backup-linux.sh') (Join-Path $packageRoot 'scripts/backup-linux.sh')
 Copy-Item (Join-Path $repoRoot 'scripts/restore-linux.sh') (Join-Path $packageRoot 'scripts/restore-linux.sh')
 Copy-Item (Join-Path $repoRoot 'README.md') (Join-Path $packageRoot 'README.md')
-Copy-Item (Join-Path $repoRoot 'docs/implementation-plan.zh-CN.md') (Join-Path $packageRoot 'docs/implementation-plan.zh-CN.md')
-Copy-Item (Join-Path $repoRoot 'docs/operation-flow.zh-CN.md') (Join-Path $packageRoot 'docs/operation-flow.zh-CN.md')
+Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $packageRoot 'LICENSE')
 
 $archive = Join-Path $releaseRoot "$packageName.tar.gz"
 & tar.exe -czf $archive -C $releaseRoot $packageName
