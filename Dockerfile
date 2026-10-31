@@ -7,8 +7,8 @@
 # Single-arch (local):
 #   docker build --build-arg VERSION=dev -t viya-proxy .
 
-# ---- Stage 1: frontend (Vue 3 + Vite) ----
-FROM node:22-alpine AS frontend
+# ---- Stage 1: frontend (Vue 3 + Vite) — always built natively ----
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 RUN corepack enable && corepack prepare pnpm@9 --activate
 WORKDIR /src/web
 COPY web/package.json web/pnpm-lock.yaml ./
@@ -16,8 +16,8 @@ RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm build
 
-# ---- Stage 2: Caddy (separate Go module) ----
-FROM golang:1.27-alpine AS caddy-builder
+# ---- Stage 2: Caddy (separate Go module, cross-compiled) ----
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS caddy-builder
 ARG TARGETARCH
 ARG TARGETVARIANT
 WORKDIR /src/build/caddy
@@ -30,8 +30,8 @@ RUN set -e; \
     CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH GOARM=$ARMV \
       go build -trimpath -buildvcs=false -ldflags "-s -w" -o /out/caddy .
 
-# ---- Stage 3: Viya (control plane + embedded frontend) ----
-FROM golang:1.27-alpine AS viya-builder
+# ---- Stage 3: Viya (control plane + embedded frontend, cross-compiled) ----
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS viya-builder
 ARG TARGETARCH
 ARG TARGETVARIANT
 ARG VERSION=dev
