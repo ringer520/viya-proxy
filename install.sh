@@ -16,7 +16,15 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 if [ "$(uname -s)" != "Linux" ]; then
-  echo "Error: Viya supports Linux (systemd) only." >&2
+  echo "Error: Viya supports Linux only." >&2
+  exit 1
+fi
+
+# The bundled installer provisions a systemd unit. On procd (OpenWrt) or other
+# init systems, install manually — see the README's procd section.
+if [ ! -d /run/systemd/system ] && ! command -v systemctl >/dev/null 2>&1; then
+  echo "Error: this installer needs systemd (systemctl not found)." >&2
+  echo "For OpenWrt / procd, follow the manual install steps in the README." >&2
   exit 1
 fi
 

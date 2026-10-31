@@ -158,9 +158,10 @@ journalctl -u viya -f
 
 ```sh
 mkdir -p /opt/viya/bin /etc/viya/secrets /var/lib/viya
-cp bin/viya-linux-* bin/caddy-linux-* /opt/viya/bin/
+cp bin/viya-linux-* /opt/viya/bin/viya
+cp bin/caddy-linux-* /opt/viya/bin/caddy
 cp deploy/openwrt/viya /etc/init.d/viya
-chmod +x /etc/init.d/viya /opt/viya/bin/*
+chmod +x /etc/init.d/viya /opt/viya/bin/viya /opt/viya/bin/caddy
 /etc/init.d/viya enable
 /etc/init.d/viya start
 ```
@@ -216,7 +217,7 @@ The admin UI/API binds to `127.0.0.1:8181` by default. From a trusted workstatio
 ssh -L 8181:127.0.0.1:8181 root@YOUR_HOST
 ```
 
-Caddy's admin API listens on loopback only. The service serves sites on `:8080` by default and `:80` for plain HTTP and ACME HTTP-01; TLS sites use the configured listener ports. For a standard production setup, set `VIYA_HTTP_LISTEN=:80` via a systemd drop-in so Caddy uses ports 80/443, then configure NAT/firewall rules as needed.
+Caddy's admin API listens on loopback only. Web sites are served on the panel's **Web listeners** — plain HTTP on `:80` and HTTPS on `:443` by default (change them in the panel, or set `VIYA_DEFAULT_HTTP_PORT` / `VIYA_DEFAULT_HTTPS_PORT` before the first start). Open those ports on your firewall or NAT as needed.
 
 > **Never expose the admin port or Caddy's admin API to an untrusted network.** If you reverse-proxy the panel itself, set `VIYA_COOKIE_SECURE=true` and `VIYA_TRUSTED_PROXIES` to the proxy's IP.
 
@@ -225,7 +226,8 @@ Caddy's admin API listens on loopback only. The service serves sites on `:8080` 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
 | `VIYA_LISTEN` | `127.0.0.1:8181` | Admin UI/API address |
-| `VIYA_HTTP_LISTEN` | `:8080` | Caddy site listener; HTTP-only sites also serve on `:80` |
+| `VIYA_DEFAULT_HTTP_PORT` | `80` | Initial Web listener port for plain HTTP sites |
+| `VIYA_DEFAULT_HTTPS_PORT` | `443` | Initial Web listener port for HTTPS sites |
 | `VIYA_DATA_DIR` | `./data` | SQLite, certificates and Caddy runtime data |
 | `VIYA_MASTER_KEY_FILE` | `$VIYA_DATA_DIR/master.key` | Master key for DNS credential encryption (`/etc/viya/secrets/master.key` on installed setups) |
 | `VIYA_CADDY_BIN` | `./bin/caddy` | Custom Caddy executable |

@@ -62,6 +62,10 @@ fi
 # Rename the copied database using SQLite's online backup API so the new file
 # is self-contained and never depends on leftover WAL/SHM files.
 if [ ! -s /var/lib/viya/viya.db ] && [ -s /var/lib/viya/crpm.db ]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to migrate the legacy crpm database." >&2
+    exit 1
+  fi
   python3 - /var/lib/viya/crpm.db /var/lib/viya/viya.db <<'PY'
 import sqlite3, sys
 src = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True, timeout=15)
@@ -120,43 +124,50 @@ systemctl daemon-reload
 systemctl enable viya.service
 systemctl restart viya.service
 
-if ! python3 - <<'PY'
-import json, shlex, subprocess, time, urllib.request
-environment = subprocess.check_output(
-    ["systemctl", "show", "viya.service", "--property=Environment", "--value"],
-    text=True,
-)
-listen = next(
-    (item.split("=", 1)[1] for item in shlex.split(environment) if item.startswith("VIYA_LISTEN=")),
-    "127.0.0.1:8181",
-)
-if listen.startswith("["):
-    host, separator, port = listen[1:].partition("]:")
-else:
-    host, separator, port = listen.rpartition(":")
-if not separator:
-    raise SystemExit("Invalid VIYA_LISTEN value: " + listen)
-if host in ("", "0.0.0.0", "::", "[::]"):
-    host = "127.0.0.1"
-if ":" in host:
-    host = "[" + host + "]"
-url = f"http://{host}:{port}/api/v1/health"
-deadline = time.time() + 30
-last_error = "service did not become ready"
-while time.time() < deadline:
-    try:
-        with urllib.request.urlopen(url, timeout=2) as response:
-            state = json.load(response)
-        if state.get("ok") and state.get("caddy_ready"):
-            break
-        last_error = "Viya or Caddy is not ready: " + repr(state)
-    except Exception as error:
-        last_error = str(error)
-    time.sleep(1)
-else:
-    raise SystemExit("Viya installation failed readiness check: " + last_error)
-PY
-then
+# Readiness probe: the health endpoint returns {"ok":true,"caddy_ready":true,...}.
+# curl/wget are far more common than python3 on minimal systems, so probe with
+# whichever is available and only shell out to python3 as a last resort.
+probe_health() {
+  url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS -m 2 "$url" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T 2 -O - "$url" 2>/dev/null
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import sys,urllib.request;print(urllib.request.urlopen(sys.argv[1],timeout=2).read().decode())' "$url" 2>/dev/null
+  else
+    echo "Viya installation needs curl, wget or python3 for the readiness check." >&2
+    return 2
+  fi
+}
+
+LISTEN=$(systemctl show viya.service --property=Environment --value | tr ' ' '\n' | sed -n 's/^VIYA_LISTEN=//p' | head -1)
+[ -n "$LISTEN" ] || LISTEN="127.0.0.1:8181"
+case "$LISTEN" in
+  \[*\]:*) HOST=${LISTEN#\[}; HOST=${HOST%%\]*}; PORT=${LISTEN##*:} ;;
+  *:*)     HOST=${LISTEN%:*}; PORT=${LISTEN##*:} ;;
+  *)       echo "Invalid VIYA_LISTEN value: $LISTEN" >&2; exit 1 ;;
+esac
+case "$HOST" in ""|0.0.0.0|::) HOST=127.0.0.1 ;; esac
+case "$HOST" in *:*) HOST="[$HOST]" ;; esac
+HEALTH_URL="http://$HOST:$PORT/api/v1/health"
+
+ready=0
+last_error="service did not become ready"
+i=0
+while [ "$i" -lt 30 ]; do
+  i=$((i + 1))
+  body=$(probe_health "$HEALTH_URL") || body=""
+  case "$body" in
+    *'"ok":true'*'"caddy_ready":true'*|*'"caddy_ready":true'*'"ok":true'*)
+      ready=1; break ;;
+    *)
+      [ -n "$body" ] && last_error="Viya or Caddy is not ready: $body" ;;
+  esac
+  sleep 1
+done
+if [ "$ready" -ne 1 ]; then
+  echo "Viya installation failed readiness check: $last_error" >&2
   systemctl stop viya.service >/dev/null 2>&1 || true
   if systemctl list-unit-files "$legacy_service" --no-legend 2>/dev/null | grep -q "$legacy_service"; then
     systemctl enable "$legacy_service" >/dev/null 2>&1 || true
