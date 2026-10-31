@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"runtime"
@@ -18,6 +19,9 @@ import (
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/mem"
 )
+
+// diskAlertPercent is the data-directory usage that triggers a notification.
+const diskAlertPercent = 90
 
 //go:embed cn-ranges.txt
 var chinaRangesRaw string
@@ -121,6 +125,14 @@ func (a *App) collectMetrics(r *http.Request) map[string]any {
 		d, e := disk.UsageWithContext(ctx, path)
 		if e == nil {
 			result["disk"] = map[string]any{"percent": d.UsedPercent, "used": d.Used, "total": d.Total, "path": path}
+			// Alerting on the data directory matters because it holds the
+			// database and the certificate store; a full disk there means
+			// every write, including renewals, starts failing.
+			if d.UsedPercent >= diskAlertPercent {
+				a.notify("disk_full", "数据目录磁盘接近写满",
+					fmt.Sprintf("%s 已使用 %.0f%%（剩余 %.1f GiB）。数据库与证书存储位于此处，请尽快清理。",
+						path, d.UsedPercent, float64(d.Free)/1024/1024/1024))
+			}
 		} else {
 			errs = append(errs, "Disk unavailable")
 		}

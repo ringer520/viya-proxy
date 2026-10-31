@@ -64,30 +64,32 @@ type Layer4Rule struct {
 }
 
 type App struct {
-	configMu          sync.RWMutex
-	monitorMu         sync.Mutex
-	monitorGeneration atomic.Uint64
-	listenerMu        sync.Mutex
-	db                *sql.DB
-	adminURL          string
-	adminListen       string
-	httpListen        string
-	caddyBin          string
-	mu                sync.Mutex
-	loginMu           sync.Mutex
-	logins            map[string]loginWindow
-	secureCookies     bool
-	trustedProxies    []*net.IPNet
-	ctx               context.Context
-	caddyReady        atomic.Bool
-	masterKey         []byte
-	ddnsMu            sync.Mutex
-	certProgressMu    sync.RWMutex
-	certProgress      map[string]certificateProgress
-	dataDir           string
-	failCounts        map[string][]time.Time
-	applyKick         chan struct{}
-	ddnsRunning       map[int64]bool
+	configMu       sync.RWMutex
+	listenerMu     sync.Mutex
+	db             *sql.DB
+	adminURL       string
+	adminListen    string
+	httpListen     string
+	caddyBin       string
+	mu             sync.Mutex
+	secureCookies  bool
+	trustedProxies []*net.IPNet
+	ctx            context.Context
+	caddyReady     atomic.Bool
+	masterKey      []byte
+	ddnsMu         sync.Mutex
+	certProgressMu sync.RWMutex
+	certProgress   map[string]certificateProgress
+	dataDir        string
+	failCounts     map[string][]time.Time
+	applyKick      chan struct{}
+	ddnsRunning    map[int64]bool
+	ddnsFailures   map[int64]int
+	totp           totpState
+	alertMu        sync.Mutex
+	alertLast      map[string]time.Time
+	healthMu       sync.RWMutex
+	health         map[int64]upstreamHealth
 }
 
 var domainRE = regexp.MustCompile(`(?i)^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
@@ -132,6 +134,21 @@ func main() {
 	// CURRENT_TIMESTAMP so the UI never has to guess the timezone.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS login_audit(id INTEGER PRIMARY KEY, username TEXT NOT NULL DEFAULT '', ip TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', result TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT 0)`); err != nil {
 		slog.Error("migrate login audit", "error", err)
+		os.Exit(1)
+	}
+	// Login throttling state lives in SQLite so a service restart cannot be
+	// used by an attacker to reset the window and resume guessing passwords.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS login_attempts(ip TEXT PRIMARY KEY, window_start INTEGER NOT NULL DEFAULT 0, count INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		slog.Error("migrate login attempts", "error", err)
+		os.Exit(1)
+	}
+	// The service-monitor feature is gone, but its tables are still part of the
+	// configuration archive format. Creating them keeps archives exported before
+	// the removal importable; nothing reads them any more.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS monitors(id INTEGER PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL,target TEXT NOT NULL,interval INTEGER NOT NULL DEFAULT 60,timeout INTEGER NOT NULL DEFAULT 5,enabled INTEGER NOT NULL DEFAULT 1,next_check INTEGER NOT NULL DEFAULT 0,last_check INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',latency REAL NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '');
+		CREATE TABLE IF NOT EXISTS monitor_samples(id INTEGER PRIMARY KEY,monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,ok INTEGER NOT NULL,latency REAL NOT NULL,at INTEGER NOT NULL);
+		CREATE INDEX IF NOT EXISTS idx_monitor_samples ON monitor_samples(monitor_id,id DESC)`); err != nil {
+		slog.Error("migrate legacy monitor tables", "error", err)
 		os.Exit(1)
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS layer4_rules(id INTEGER PRIMARY KEY, name TEXT NOT NULL, listen_address TEXT NOT NULL DEFAULT "0.0.0.0", listen_port INTEGER NOT NULL, upstream TEXT NOT NULL, protocol TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
@@ -188,6 +205,15 @@ func main() {
 		slog.Error("migrate DDNS comment", "error", err)
 		os.Exit(1)
 	}
+	// Empty totp_secret means the account has not enabled two-factor login.
+	if err := ensureColumn(db, "users", "totp_secret", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		slog.Error("migrate user TOTP secret", "error", err)
+		os.Exit(1)
+	}
+	if err := ensureColumn(db, "users", "role", "TEXT NOT NULL DEFAULT 'admin'"); err != nil {
+		slog.Error("migrate user role", "error", err)
+		os.Exit(1)
+	}
 	masterKeyPath := env("VIYA_MASTER_KEY_FILE", filepath.Join(dataDir, "master.key"))
 	if err := os.MkdirAll(filepath.Dir(masterKeyPath), 0700); err != nil {
 		slog.Error("create master key directory", "error", err)
@@ -219,14 +245,10 @@ func main() {
 		slog.Error("invalid Caddy HTTP listener", "error", err)
 		os.Exit(1)
 	}
-	app := &App{db: db, adminURL: adminURL, adminListen: adminListen, httpListen: httpListen, caddyBin: env("VIYA_CADDY_BIN", filepath.Join("bin", "caddy")), logins: make(map[string]loginWindow), secureCookies: secureCookies, trustedProxies: trustedProxies, ctx: runCtx, masterKey: masterKey, dataDir: dataDir, failCounts: make(map[string][]time.Time), certProgress: make(map[string]certificateProgress), applyKick: make(chan struct{}, 1), ddnsRunning: make(map[int64]bool)}
+	app := &App{db: db, adminURL: adminURL, adminListen: adminListen, httpListen: httpListen, caddyBin: env("VIYA_CADDY_BIN", filepath.Join("bin", "caddy")), secureCookies: secureCookies, trustedProxies: trustedProxies, ctx: runCtx, masterKey: masterKey, dataDir: dataDir, failCounts: make(map[string][]time.Time), certProgress: make(map[string]certificateProgress), applyKick: make(chan struct{}, 1), ddnsRunning: make(map[int64]bool)}
 	app.configureProgramLogging()
 	if err := app.initListenerSites(); err != nil {
 		slog.Error("migrate listener sites", "error", err)
-		os.Exit(1)
-	}
-	if err := app.initMonitors(); err != nil {
-		slog.Error("initialize monitors", "error", err)
 		os.Exit(1)
 	}
 	if err := app.initTraffic(); err != nil {
@@ -269,6 +291,12 @@ func main() {
 	mux.Handle("PUT /api/v1/logs/settings", app.requireAuth(http.HandlerFunc(app.updateLogSettings)))
 	mux.Handle("PATCH /api/v1/layer4-rules/{id}/enabled", app.requireAuth(http.HandlerFunc(app.toggleLayer4Enabled)))
 	mux.Handle("GET /api/v1/proxy-hosts/traffic", app.requireAuth(http.HandlerFunc(app.siteTraffic)))
+	mux.Handle("GET /api/v1/proxy-hosts/health", app.requireAuth(http.HandlerFunc(app.upstreamHealthReport)))
+	mux.Handle("POST /api/v1/proxy-hosts/health", app.requireAuth(http.HandlerFunc(app.forceProbeUpstreams)))
+	mux.Handle("GET /api/v1/alert-settings", app.requireAuth(http.HandlerFunc(app.getAlertSettings)))
+	mux.Handle("PUT /api/v1/alert-settings", app.requireAuth(http.HandlerFunc(app.updateAlertSettings)))
+	mux.Handle("POST /api/v1/alert-settings/test", app.requireAuth(http.HandlerFunc(app.testAlertSettings)))
+	mux.Handle("GET /api/v1/certificates/expiring", app.requireAuth(http.HandlerFunc(app.expiringCertificates)))
 	mux.Handle("GET /api/v1/proxy-hosts/{id}/logs", app.requireAuth(http.HandlerFunc(app.siteAccessLogs)))
 	mux.Handle("GET /api/v1/logs/stream", app.requireAuth(http.HandlerFunc(app.streamLogs)))
 	mux.Handle("GET /api/v1/ip-bans", app.requireAuth(http.HandlerFunc(app.listIPBans)))
@@ -282,7 +310,7 @@ func main() {
 	mux.Handle("DELETE /api/v1/managed-certificates/{id}", app.requireAuth(http.HandlerFunc(app.deleteManagedCertificate)))
 	mux.Handle("DELETE /api/v1/ip-bans/{id}", app.requireAuth(http.HandlerFunc(app.removeIPBan)))
 	go app.ddnsWorker()
-	go app.monitorWorker()
+	go app.healthWorker()
 	go app.watchAccessLogs()
 	go app.watchBanExpiry()
 	go app.watchTraffic()
@@ -290,6 +318,11 @@ func main() {
 	mux.HandleFunc("GET /api/v1/auth/status", app.authStatus)
 	mux.HandleFunc("POST /api/v1/auth/setup", app.setupAdmin)
 	mux.HandleFunc("POST /api/v1/auth/login", app.login)
+	mux.HandleFunc("POST /api/v1/auth/login/totp", app.loginTOTP)
+	mux.Handle("GET /api/v1/auth/totp", app.requireAuth(http.HandlerFunc(app.totpStatus)))
+	mux.Handle("POST /api/v1/auth/totp/setup", app.requireAuth(http.HandlerFunc(app.totpSetup)))
+	mux.Handle("POST /api/v1/auth/totp/enable", app.requireAuth(http.HandlerFunc(app.totpEnable)))
+	mux.Handle("POST /api/v1/auth/totp/disable", app.requireAuth(http.HandlerFunc(app.totpDisable)))
 	mux.Handle("POST /api/v1/auth/logout", app.requireAuth(http.HandlerFunc(app.logout)))
 	mux.Handle("GET /api/v1/auth/me", app.requireAuth(http.HandlerFunc(app.me)))
 	mux.Handle("GET /api/v1/auth/audit", app.requireAuth(http.HandlerFunc(app.listLoginAudit)))
@@ -299,6 +332,8 @@ func main() {
 	mux.Handle("POST /api/v1/auth/password", app.requireAuth(http.HandlerFunc(app.changeAdminPassword)))
 	mux.Handle("GET /api/v1/proxy-hosts", app.requireAuth(http.HandlerFunc(app.listHosts)))
 	mux.Handle("GET /api/v1/config/revisions", app.requireAuth(http.HandlerFunc(app.listRevisions)))
+	mux.Handle("GET /api/v1/config/revisions/{id}", app.requireAuth(http.HandlerFunc(app.configRevision)))
+	mux.Handle("GET /api/v1/config/revisions/{id}/diff", app.requireAuth(http.HandlerFunc(app.configRevisionDiff)))
 	mux.Handle("POST /api/v1/config/apply", app.requireAuth(http.HandlerFunc(app.reapplyConfig)))
 	mux.Handle("GET /api/v1/dns-providers", app.requireAuth(http.HandlerFunc(app.listDNSProviders)))
 	mux.Handle("GET /api/v1/dns-providers/{id}/zones", app.requireAuth(http.HandlerFunc(app.listDNSZones)))
@@ -310,15 +345,14 @@ func main() {
 	mux.Handle("PUT /api/v1/proxy-hosts/{id}", app.requireAuth(http.HandlerFunc(app.updateHost)))
 	mux.Handle("GET /api/v1/certificate-inventory", app.requireAuth(http.HandlerFunc(app.certificateInventory)))
 	mux.Handle("DELETE /api/v1/certificate-inventory/{domain}", app.requireAuth(http.HandlerFunc(app.deleteAutomaticCertificate)))
-	mux.Handle("GET /api/v1/monitors", app.requireAuth(http.HandlerFunc(app.listMonitors)))
-	mux.Handle("POST /api/v1/monitors", app.requireAuth(http.HandlerFunc(app.saveMonitor)))
-	mux.Handle("PUT /api/v1/monitors/{id}", app.requireAuth(http.HandlerFunc(app.saveMonitor)))
-	mux.Handle("DELETE /api/v1/monitors/{id}", app.requireAuth(http.HandlerFunc(app.deleteMonitor)))
-	mux.Handle("POST /api/v1/monitors/check", app.requireAuth(http.HandlerFunc(app.checkMonitors)))
 	mux.Handle("POST /api/v1/config/export", app.requireAuth(http.HandlerFunc(app.exportConfiguration)))
 	mux.Handle("POST /api/v1/config/import/inspect", app.requireAuth(http.HandlerFunc(app.inspectConfiguration)))
 	mux.Handle("POST /api/v1/config/import", app.requireAuthUnlocked(http.HandlerFunc(app.importConfiguration)))
 	mux.Handle("POST /api/v1/auth/username", app.requireAuth(http.HandlerFunc(app.changeUsername)))
+	mux.Handle("GET /api/v1/users", app.requireAuth(http.HandlerFunc(app.listUsers)))
+	mux.Handle("POST /api/v1/users", app.requireAuth(http.HandlerFunc(app.createUser)))
+	mux.Handle("PUT /api/v1/users/{id}", app.requireAuth(http.HandlerFunc(app.updateUser)))
+	mux.Handle("DELETE /api/v1/users/{id}", app.requireAuth(http.HandlerFunc(app.deleteUser)))
 	mux.Handle("GET /api/v1/web-listeners", app.requireAuth(http.HandlerFunc(app.getWebListeners)))
 	mux.Handle("PUT /api/v1/web-listeners", app.requireAuth(http.HandlerFunc(app.saveWebListeners)))
 	mux.Handle("GET /api/v1/web-listeners/check", app.requireAuth(http.HandlerFunc(app.checkWebListener)))
@@ -439,6 +473,8 @@ func (a *App) superviseCaddy(configPath string, firstReady chan<- error) {
 			}
 			a.setCaddyReady(false)
 			slog.Error("Caddy exited; restarting", "error", processErr, "retry_in", backoff)
+			a.notify("caddy_exited", "Caddy 进程退出",
+				fmt.Sprintf("代理引擎已退出，将在 %.0f 秒后重启。错误：%v", backoff.Seconds(), processErr))
 		case <-a.ctx.Done():
 			_ = cmd.Process.Signal(os.Interrupt)
 			select {

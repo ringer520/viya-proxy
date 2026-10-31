@@ -4,7 +4,7 @@ import { t } from '../i18n'
 import { TrendingUp } from '@lucide/vue'
 import { formatBytes } from '../format'
 
-const props = defineProps<{ points: { hour: number; bytes: number }[] }>()
+const props = defineProps<{ points: { hour: number; bytes: number }[]; granularity?: 'hour' | 'day' }>()
 
 const W = 720
 const H = 190
@@ -21,6 +21,16 @@ const total = computed(() => props.points.reduce((sum, p) => sum + p.bytes, 0))
 const peak = computed(() => props.points.reduce((best, p) => (p.bytes > best.bytes ? p : best), props.points[0] || { hour: 0, bytes: 0 }))
 const hasData = computed(() => props.points.some((p) => p.bytes > 0))
 
+// The same card draws 24 hours or N days; only the axis label differs.
+function label(unix: number) {
+  const at = new Date(unix * 1000)
+  return props.granularity === 'day'
+    ? `${at.getMonth() + 1}/${at.getDate()}`
+    : at.getHours().toString().padStart(2, '0') + ':00'
+}
+const peakLabel = computed(() =>
+  props.granularity === 'day' ? t('峰值日期') : t('峰值时段'),
+)
 function x(i: number) {
   const last = Math.max(1, props.points.length - 1)
   return PAD_X + (i / last) * (W - PAD_X * 2)
@@ -61,7 +71,7 @@ const peakPoint = computed(() => {
 const labels = computed(() =>
   [0, 6, 12, 18, 23].map((i) => {
     const p = props.points[i]
-    return { i, text: p ? new Date(p.hour * 1000).getHours().toString().padStart(2, '0') + ':00' : '' }
+    return { i, text: p ? label(p.hour) : '' }
   }),
 )
 </script>
@@ -76,7 +86,7 @@ const labels = computed(() =>
       </div>
       <div class="trend-meta">
         <span><small>{{ t('近 24 小时') }}</small><strong>{{ formatBytes(total) }}</strong></span>
-        <span><small>{{ t('峰值时段') }}</small><strong>{{ hasData ? new Date(peak.hour * 1000).getHours().toString().padStart(2, '0') + ':00' : '—' }}</strong></span>
+        <span><small>{{ peakLabel }}</small><strong>{{ hasData ? label(peak.hour) : '—' }}</strong></span>
       </div>
     </header>
     <div class="trend-chart">

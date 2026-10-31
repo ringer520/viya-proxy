@@ -3,7 +3,7 @@ import {t,tr} from '../i18n'
 
 import LanguagePicker from './LanguagePicker.vue'
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { X, Settings, Palette, RefreshCw, Server, KeyRound, Copy } from '@lucide/vue'
+import { X, Settings, Palette, RefreshCw, Server, KeyRound, Copy, Bell, Trash2 } from '@lucide/vue'
 const theme=defineModel<'system'|'light'|'dark'|'aurora'|'ember'|'cyber'>('theme',{required:true})
 const compact=defineModel<boolean>('compact',{required:true})
 const interval=defineModel<number>('interval',{required:true})
@@ -14,12 +14,77 @@ const previewLimit=defineModel<number>('previewLimit',{required:true})
 const landing=defineModel<string>('landing',{required:true})
 const port=defineModel<number>('port',{required:true})
 const password=defineModel<{current:string;next:string;confirm:string}>('password',{required:true})
-const props=defineProps<{busy:boolean;loading:boolean;error:string;message:string;accessAddress:string;accessPort:string;username:string;sessions:number|null;pages:{id:string;label:string}[]}>()
+const props=defineProps<{busy:boolean;loading:boolean;error:string;message:string;accessAddress:string;accessPort:string;username:string;sessions:number|null;csrf:string;role:'admin'|'viewer';pages:{id:string;label:string}[]}>()
+// Extra accounts are how a household shares the panel without handing out the
+// administrator password; viewers can read every page but cannot save anything.
+const users=ref<{id:number;username:string;role:string;created_at:string}[]>([])
+const userForm=ref({username:'',password:'',role:'viewer'})
+const userBusy=ref(false),userNote=ref(''),userError=ref('')
+async function loadUsers(){
+ if(props.role!=='admin')return
+ try{const r=await fetch('/api/v1/users');if(r.ok)users.value=await r.json()}catch{userError.value=t('读取账号列表失败')}
+}
+async function addUser(){
+ userBusy.value=true;userError.value='';userNote.value=''
+ try{const r=await fetch('/api/v1/users',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify(userForm.value)});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'create failed');userForm.value={username:'',password:'',role:'viewer'};userNote.value=t('账号已创建');await loadUsers()}catch(e){userError.value=e instanceof Error?t(e.message):t('创建失败')}finally{userBusy.value=false}
+}
+async function setUserRole(id:number,role:string){
+ userBusy.value=true;userError.value='';userNote.value=''
+ try{const r=await fetch(`/api/v1/users/${id}`,{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify({role})});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'update failed');userNote.value=t('权限已更新');await loadUsers()}catch(e){userError.value=e instanceof Error?t(e.message):t('更新失败')}finally{userBusy.value=false}
+}
+async function removeUser(id:number,username:string){
+ if(!confirm(tr`确定删除账号 ${username} 吗？`))return
+ userBusy.value=true;userError.value='';userNote.value=''
+ try{const r=await fetch(`/api/v1/users/${id}`,{method:'DELETE',headers:{'X-CSRF-Token':props.csrf}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'delete failed');userNote.value=t('账号已删除');await loadUsers()}catch(e){userError.value=e instanceof Error?t(e.message):t('删除失败')}finally{userBusy.value=false}
+}
 const emit=defineEmits<{close:[];savePort:[];changePassword:[];changeUsername:[username:string,password:string];revokeSessions:[];copyAddress:[];resetPreferences:[]}>()
 const usernameForm=ref({username:props.username,password:''})
+// Two-factor state is owned by the drawer: it is account-scoped, not a
+// preference, and only lives as long as the panel is open.
+const totpEnabled=ref(false),totpSecret=ref(''),totpInput=ref(''),totpPassword=ref(''),totpBusy=ref(false),totpNote=ref(''),totpError=ref('')
+async function totpRequest(path:string,body?:unknown,method='POST'){
+ const response=await fetch('/api/v1/auth/totp'+path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:body===undefined?undefined:JSON.stringify(body)})
+ const data=await response.json().catch(()=>({}))
+ if(!response.ok)throw Error(data.error||'request failed')
+ return data
+}
+async function loadTOTP(){
+ try{const data=await totpRequest('',undefined,'GET');totpEnabled.value=!!data.enabled}catch{totpEnabled.value=false}
+}
+async function startTOTP(){
+ totpBusy.value=true;totpError.value='';totpNote.value=''
+ try{const data=await totpRequest('/setup');totpSecret.value=data.secret;totpInput.value=''}catch(e){totpError.value=e instanceof Error?t(e.message):t('无法开始绑定')}finally{totpBusy.value=false}
+}
+async function confirmTOTP(){
+ totpBusy.value=true;totpError.value='';totpNote.value=''
+ try{await totpRequest('/enable',{code:totpInput.value.trim()});totpEnabled.value=true;totpSecret.value='';totpInput.value='';totpNote.value=t('两步验证已开启')}catch(e){totpError.value=e instanceof Error?t(e.message):t('验证失败')}finally{totpBusy.value=false}
+}
+async function cancelTOTP(){totpSecret.value='';totpInput.value='';totpError.value=''}
+async function copyTOTPSecret(){
+ try{await navigator.clipboard.writeText(totpSecret.value);totpNote.value=t('密钥已复制')}catch{totpError.value=t('复制失败，请手动选择文本')}
+}
+async function disableTOTP(){
+ totpBusy.value=true;totpError.value='';totpNote.value=''
+ try{await totpRequest('/disable',{password:totpPassword.value});totpEnabled.value=false;totpPassword.value='';totpNote.value=t('两步验证已关闭')}catch(e){totpError.value=e instanceof Error?t(e.message):t('无法关闭两步验证')}finally{totpBusy.value=false}
+}
+// Alert delivery is the only channel that reaches the operator when the panel
+// is closed, so it is configured here next to the account it belongs to.
+const alertForm=ref({enabled:false,webhook_url:'',notify_recovery:false}),alertBusy=ref(false),alertNote=ref(''),alertError=ref('')
+async function loadAlerts(){
+ try{const r=await fetch('/api/v1/alert-settings');const d=await r.json();alertForm.value={enabled:!!d.enabled,webhook_url:typeof d.webhook_url==='string'?d.webhook_url:'',notify_recovery:!!d.notify_recovery}}catch{alertError.value=t('读取通知设置失败')}
+}
+async function saveAlerts(){
+ alertBusy.value=true;alertError.value='';alertNote.value=''
+ try{const r=await fetch('/api/v1/alert-settings',{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify(alertForm.value)});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'save failed');alertNote.value=t('通知设置已保存')}catch(e){alertError.value=e instanceof Error?t(e.message):t('保存失败')}finally{alertBusy.value=false}
+}
+async function testAlerts(){
+ alertBusy.value=true;alertError.value='';alertNote.value=''
+ try{const r=await fetch('/api/v1/alert-settings/test',{method:'POST',headers:{'X-CSRF-Token':props.csrf}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'send failed');alertNote.value=t('测试通知已发送，请检查接收端')}catch(e){alertError.value=e instanceof Error?t(e.message):t('发送失败')}finally{alertBusy.value=false}
+}
+onMounted(()=>{loadTOTP();loadAlerts();loadUsers()})
 watch(()=>props.username,value=>{usernameForm.value={username:value,password:''}})
 const tab=ref('appearance'),root=ref<HTMLElement|null>(null),body=ref<HTMLElement|null>(null),restartConfirmed=ref(false)
-const tabs=[{id:'appearance',label:t('外观与显示'),icon:Palette},{id:'refresh',label:t('刷新与日志'),icon:RefreshCw},{id:'access',label:t('面板访问'),icon:Server},{id:'account',label:t('账户与会话'),icon:KeyRound}]
+const tabs=[{id:'appearance',label:t('外观与显示'),icon:Palette},{id:'refresh',label:t('刷新与日志'),icon:RefreshCw},{id:'access',label:t('面板访问'),icon:Server},{id:'account',label:t('账户与会话'),icon:KeyRound},{id:'alerts',label:t('通知'),icon:Bell}]
 // label/description drive the picker; the swatches show the real palette.
 const themeOptions=[
  {id:'system',label:t('跟随系统'),hint:t('随系统深浅切换'),base:'linear-gradient(135deg,#f4f6fb 0 50%,#0b1220 50% 100%)',accent:'#6fa3ff'},
@@ -72,7 +137,21 @@ onBeforeUnmount(()=>{document.body.style.overflow=previousOverflow;if(previousFo
     <section v-show="tab==='account'" id="settings-section-account" role="tabpanel" aria-labelledby="settings-tab-account">
      <div class="settings-section-intro"><h3>{{t('账户与会话')}}</h3><p>{{t('当前管理员：')}}{{ username||t('管理员') }}</p></div>
      <form class="settings-card" @submit.prevent="emit('changeUsername',usernameForm.username,usernameForm.password);usernameForm.password=''"><h4>{{t('修改管理员账号')}}</h4><label class="drawer-input-label">{{t('新账号')}}<input v-model="usernameForm.username" minlength="3" maxlength="64" pattern="[A-Za-z0-9_.-]+" autocomplete="username" required :disabled="busy"/></label><label class="drawer-input-label">{{t('当前密码')}}<input v-model="usernameForm.password" type="password" autocomplete="current-password" required :disabled="busy"/></label><p class="drawer-field-help">{{t('支持字母、数字、点、横线和下划线，3–64 位。修改后当前会话保留，其他会话退出。')}}</p><button class="primary" :disabled="busy||usernameForm.username===username">{{t('修改账号')}}</button></form><form class="settings-card drawer-password-form" @submit.prevent="emit('changePassword')"><h4>{{t('修改管理员密码')}}</h4><label class="drawer-input-label">{{t('当前密码')}}<input v-model="password.current" type="password" autocomplete="current-password" required :disabled="busy"/></label><label class="drawer-input-label">{{t('新密码')}}<input v-model="password.next" type="password" autocomplete="new-password" minlength="8" maxlength="72" required :disabled="busy"/></label><label class="drawer-input-label">{{t('确认新密码')}}<input v-model="password.confirm" type="password" autocomplete="new-password" minlength="8" maxlength="72" required :disabled="busy"/></label><p class="drawer-field-help">{{t('至少 8 位。修改成功后其他会话退出，当前会话保留。')}}</p><button class="primary" :disabled="busy">{{t('修改密码')}}</button></form>
+     <div class="settings-card drawer-totp"><h4>{{t('两步验证')}}</h4><p class="drawer-field-help">{{ totpEnabled ? t('已开启。每次登录除密码外，还需要验证器应用生成的 6 位验证码。') : t('为面板登录增加一层保护：开启后，除密码外还需要验证器应用生成的 6 位验证码。') }}</p><p v-if="totpError" class="settings-alert" role="alert">{{ totpError }}</p><p v-if="totpNote" class="settings-notice success" role="status">{{ totpNote }}</p><template v-if="!totpEnabled&&!totpSecret"><button class="primary" :disabled="totpBusy" @click="startTOTP">{{ totpBusy?t('正在处理…'):t('开启两步验证') }}</button></template><template v-else-if="!totpEnabled"><p class="drawer-field-help">{{t('在验证器应用中手动添加以下密钥，然后输入应用生成的验证码完成绑定。')}}</p><div class="drawer-address"><code>{{ totpSecret }}</code><button class="icon-btn" :aria-label="t('复制密钥')" @click="copyTOTPSecret"><Copy :size="17"/></button></div><label class="drawer-input-label">{{t('验证码')}}<input v-model="totpInput" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" minlength="6" required :disabled="totpBusy"/></label><button class="primary" :disabled="totpBusy||totpInput.length!==6" @click="confirmTOTP">{{t('确认并开启')}}</button><button class="secondary" :disabled="totpBusy" @click="cancelTOTP">{{t('取消')}}</button></template><template v-else><label class="drawer-input-label">{{t('当前密码')}}<input v-model="totpPassword" type="password" autocomplete="current-password" required :disabled="totpBusy"/></label><p class="drawer-field-help">{{t('关闭前需要验证当前密码；仅凭已登录的会话不足以移除这层保护。')}}</p><button class="secondary" :disabled="totpBusy||!totpPassword" @click="disableTOTP">{{t('关闭两步验证')}}</button></template></div>
+     <div v-if="role==='admin'" class="settings-card"><h4>{{t('面板账号')}}</h4><p class="drawer-field-help">{{t('只读账号可以查看所有页面，但不能保存任何修改。至少保留一个管理员账号。')}}</p><p v-if="userError" class="settings-alert" role="alert">{{ userError }}</p><p v-if="userNote" class="settings-notice success" role="status">{{ userNote }}</p><ul v-if="users.length" class="panel-user-list"><li v-for="item in users" :key="item.id"><span class="panel-user-name">{{ item.username }}<small>{{ item.role==='viewer'?t('只读'):t('管理员') }}</small></span><template v-if="item.username!==username"><select :value="item.role" :disabled="userBusy" @change="setUserRole(item.id,($event.target as HTMLSelectElement).value)"><option value="admin">{{t('管理员')}}</option><option value="viewer">{{t('只读')}}</option></select><button class="icon-btn" :disabled="userBusy" :aria-label="t('删除账号')" @click="removeUser(item.id,item.username)"><Trash2 :size="16"/></button></template><small v-else class="panel-user-self">{{t('当前登录')}}</small></li></ul><form class="panel-user-form" @submit.prevent="addUser"><label class="drawer-input-label">{{t('新账号')}}<input v-model="userForm.username" minlength="3" maxlength="64" pattern="[A-Za-z0-9_.-]+" autocomplete="username" required :disabled="userBusy"/></label><label class="drawer-input-label">{{t('密码')}}<input v-model="userForm.password" type="password" autocomplete="new-password" minlength="8" maxlength="72" required :disabled="userBusy"/></label><label class="drawer-input-label">{{t('权限')}}<select v-model="userForm.role" :disabled="userBusy"><option value="viewer">{{t('只读')}}</option><option value="admin">{{t('管理员')}}</option></select></label><button class="primary" :disabled="userBusy">{{t('添加账号')}}</button></form></div>
      <div class="settings-card"><h4>{{t('登录会话')}}</h4><p class="drawer-field-help">{{ sessions===null?t('读取当前会话数量后可管理其他登录。'):tr`当前有 ${sessions} 个有效会话（含当前会话）。` }}</p><button class="secondary" :disabled="busy||loading||sessions===null||sessions<=1" @click="emit('revokeSessions')">{{t('退出其他登录会话')}}</button></div>
+    </section>
+    <section v-show="tab==='alerts'" id="settings-section-alerts" role="tabpanel" aria-labelledby="settings-tab-alerts">
+     <div class="settings-section-intro"><h3>{{t('通知')}}</h3><p>{{t('服务异常时主动推送，不必一直打开面板查看。')}}</p></div>
+     <form class="settings-card" @submit.prevent="saveAlerts">
+      <h4>{{t('告警 Webhook')}}</h4>
+      <label class="drawer-setting-row"><span><strong>{{t('启用通知')}}</strong><small>{{t('覆盖上游故障、证书申请失败、DDNS 连续失败、数据目录磁盘接近写满、Caddy 进程退出')}}</small></span><input v-model="alertForm.enabled" type="checkbox" :disabled="alertBusy"/></label>
+      <label class="drawer-input-label">{{t('Webhook 地址')}}<input v-model="alertForm.webhook_url" type="url" placeholder="https://" :disabled="alertBusy||!alertForm.enabled"/></label>
+      <label class="drawer-setting-row"><span><strong>{{t('恢复时也通知')}}</strong><small>{{t('故障消除后再发送一条恢复消息')}}</small></span><input v-model="alertForm.notify_recovery" type="checkbox" :disabled="alertBusy||!alertForm.enabled"/></label>
+      <p v-if="alertError" class="settings-alert" role="alert">{{ alertError }}</p><p v-if="alertNote" class="settings-notice success" role="status">{{ alertNote }}</p>
+      <p class="drawer-field-help">{{t('以 JSON 形式 POST 到该地址，内容为 source / event / title / detail / at。同一事件 10 分钟内只推送一次，避免故障抖动造成刷屏。')}}</p>
+      <button class="primary" :disabled="alertBusy">{{t('保存通知设置')}}</button><button type="button" class="secondary" :disabled="alertBusy||!alertForm.enabled" @click="testAlerts">{{t('发送测试通知')}}</button>
+     </form>
     </section>
    </div>
    <footer class="settings-drawer-footer"><span>{{t('偏好即时保存 · 端口和密码需单独提交')}}</span><button class="secondary" :disabled="busy" @click="close">{{t('完成')}}</button></footer>
@@ -88,6 +167,7 @@ onBeforeUnmount(()=>{document.body.style.overflow=previousOverflow;if(previousFo
 .drawer-theme-options button.selected{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft),0 10px 24px -18px var(--glow)}
 .theme-swatch{position:relative;display:block;height:44px;border-radius:8px;border:1px solid var(--line);overflow:hidden}
 .theme-swatch i{position:absolute;left:9px;top:9px;width:24px;height:7px;border-radius:999px;background:var(--swatch-accent);opacity:.85}
+.panel-user-list{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:8px}.panel-user-list li{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2)}.panel-user-list select{margin-left:auto}.panel-user-name{display:flex;flex-direction:column;font-size:12.5px;font-weight:600}.panel-user-name small{font-weight:400;color:var(--muted);font-size:11px}.panel-user-self{margin-left:auto;font-size:11px;color:var(--muted)}.panel-user-form{display:grid;gap:11px}.panel-user-form .primary{margin-top:2px}
 .theme-swatch b{position:absolute;right:8px;bottom:8px;width:10px;height:10px;border-radius:50%;background:var(--swatch-accent);box-shadow:0 0 12px var(--swatch-accent)}
 .theme-name{font-size:12.5px;font-weight:650;color:var(--text);line-height:1.2}
 .drawer-theme-options button small{font-size:10px;color:var(--muted);line-height:1.3}

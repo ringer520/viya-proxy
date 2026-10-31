@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -20,6 +22,17 @@ import (
 
 const sessionLifetime = 12 * time.Hour
 
+const (
+	// loginWindowLength is the rolling window used by login throttling.
+	loginWindowLength = 5 * time.Minute
+	// loginMaxAttempts is how many attempts a single IP may make per window.
+	loginMaxAttempts = 8
+	// sessionRenewAfter is how much of a session may elapse before the expiry
+	// is pushed forward. Renewing only in the second half keeps the common case
+	// to zero extra writes.
+	sessionRenewAfter = sessionLifetime / 2
+)
+
 // dummyPasswordHash is compared when the username does not exist so both
 // branches spend the same bcrypt time.
 var dummyPasswordHash = func() []byte {
@@ -29,11 +42,6 @@ var dummyPasswordHash = func() []byte {
 	}
 	return hash
 }()
-
-type loginWindow struct {
-	started time.Time
-	count   int
-}
 
 type credentials struct {
 	Username string `json:"username"`
@@ -134,7 +142,8 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var userID int64
 	var storedHash []byte
-	err := a.db.QueryRowContext(r.Context(), `SELECT id,password_hash FROM users WHERE username=?`, strings.TrimSpace(input.Username)).Scan(&userID, &storedHash)
+	var totpSecret string
+	err := a.db.QueryRowContext(r.Context(), `SELECT id,password_hash,totp_secret FROM users WHERE username=?`, strings.TrimSpace(input.Username)).Scan(&userID, &storedHash, &totpSecret)
 	if err != nil {
 		// Run a throwaway comparison so a missing user costs the same bcrypt
 		// time as a wrong password; otherwise response timing enumerates them.
@@ -146,6 +155,18 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	if bcrypt.CompareHashAndPassword(storedHash, []byte(input.Password)) != nil {
 		a.recordLoginAudit(r, input.Username, auditFailure, auditReasonPassword)
 		fail(w, http.StatusUnauthorized, errors.New("username or password is incorrect"))
+		return
+	}
+	if totpSecret != "" {
+		// Password is correct, so the throttling window is cleared; the second
+		// step then gets a fresh budget for the verification code.
+		a.clearLoginAttempts(r)
+		challenge, tokenErr := a.issueTOTPChallenge(userID, input.Username)
+		if tokenErr != nil {
+			fail(w, http.StatusInternalServerError, errors.New("could not start two-factor verification"))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "totp_required": true, "challenge": challenge})
 		return
 	}
 	if err := a.createSessionForUser(w, r, userID); err != nil {
@@ -203,7 +224,11 @@ func (a *App) createSessionForUser(w http.ResponseWriter, r *http.Request, userI
 
 func (a *App) me(w http.ResponseWriter, r *http.Request) {
 	session := r.Context().Value(sessionContextKey{}).(sessionContext)
-	writeJSON(w, http.StatusOK, map[string]string{"username": session.username, "csrf_token": session.csrf})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"username":   session.username,
+		"csrf_token": session.csrf,
+		"role":       session.role,
+	})
 }
 
 func (a *App) logout(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +246,33 @@ func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 type sessionContextKey struct{}
-type sessionContext struct{ username, csrf string }
+type sessionContext struct{ username, csrf, role string }
+
+// Roles. A viewer may read everything but cannot change any configuration.
+const (
+	roleAdmin  = "admin"
+	roleViewer = "viewer"
+)
+
+// viewerWritePaths are the only mutations a read-only account may perform:
+// ending its own session and changing its own password.
+var viewerWritePaths = map[string]bool{
+	"/api/v1/auth/logout":   true,
+	"/api/v1/auth/password": true,
+}
+
+func isViewerRole(role string) bool {
+	return role == roleViewer
+}
+
+// isWriteRequest reports whether a method would change server state.
+func isWriteRequest(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	return true
+}
 
 // requireAuth guards the panel API. Mutating requests also take the
 // configuration read lock so a concurrent reload cannot interleave with an
@@ -252,10 +303,18 @@ func (a *App) requireSession(next http.Handler, holdConfigLock bool) http.Handle
 		hash := sha256.Sum256([]byte(secret))
 		var session sessionContext
 		var expires int64
-		if err := a.db.QueryRowContext(r.Context(), `SELECT users.username,sessions.csrf_token,sessions.expires_at FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=?`, hash[:]).Scan(&session.username, &session.csrf, &expires); err != nil || expires <= time.Now().Unix() {
+		if err := a.db.QueryRowContext(r.Context(), `SELECT users.username,sessions.csrf_token,sessions.expires_at,COALESCE(users.role,'admin') FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=?`, hash[:]).Scan(&session.username, &session.csrf, &expires, &session.role); err != nil || expires <= time.Now().Unix() {
 			fail(w, http.StatusUnauthorized, errors.New("session expired; log in again"))
 			return
 		}
+		if session.role != roleAdmin && session.role != roleViewer {
+			session.role = roleAdmin
+		}
+		if isViewerRole(session.role) && isWriteRequest(r.Method) && !viewerWritePaths[r.URL.Path] {
+			fail(w, http.StatusForbidden, errors.New("this account is read-only"))
+			return
+		}
+		a.renewSession(w, r, secret, expires)
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			if !validOrigin(r, a.trustedProxies) {
 				fail(w, http.StatusForbidden, errors.New("request origin rejected"))
@@ -269,6 +328,24 @@ func (a *App) requireSession(next http.Handler, holdConfigLock bool) http.Handle
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionContextKey{}, session)))
 	})
+}
+
+// renewSession slides the expiry forward once a session passes halfway, so an
+// operator filling in a long form is not thrown back to the login screen at the
+// 12 hour mark. Renewing only in the second half keeps the common request path
+// free of extra writes.
+func (a *App) renewSession(w http.ResponseWriter, r *http.Request, secret string, expires int64) {
+	now := time.Now()
+	if expires-now.Unix() > int64(sessionRenewAfter.Seconds()) {
+		return
+	}
+	next := now.Add(sessionLifetime)
+	hash := sha256.Sum256([]byte(secret))
+	if _, err := a.db.ExecContext(r.Context(), `UPDATE sessions SET expires_at=? WHERE token_hash=?`, next.Unix(), hash[:]); err != nil {
+		slog.Warn("renew session", "error", err)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: "viya_session", Value: secret, Path: "/", Expires: next, MaxAge: int(sessionLifetime.Seconds()), HttpOnly: true, Secure: a.secureCookies, SameSite: http.SameSiteStrictMode})
 }
 
 func sessionCookie(r *http.Request) (string, bool) {
@@ -369,33 +446,38 @@ func parseTrustedProxies(value string) ([]*net.IPNet, error) {
 
 func (a *App) allowLogin(r *http.Request) bool {
 	ip := remoteIP(r)
-	now := time.Now()
-	a.loginMu.Lock()
-	defer a.loginMu.Unlock()
-	window := a.logins[ip]
-	if now.Sub(window.started) >= 5*time.Minute {
-		window = loginWindow{started: now}
+	now := time.Now().Unix()
+	windowStart, count := now, 0
+	err := a.db.QueryRowContext(r.Context(), `SELECT window_start,count FROM login_attempts WHERE ip=?`, ip).Scan(&windowStart, &count)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		// Refusing every login because the counter is unreadable would lock the
+		// operator out of their own panel. Log it and let the password check run.
+		slog.Warn("read login attempts", "error", err)
+		return true
 	}
-	if window.count >= 8 {
-		a.logins[ip] = window
+	if now-windowStart >= int64(loginWindowLength.Seconds()) {
+		windowStart, count = now, 0
+	}
+	if count >= loginMaxAttempts {
 		return false
 	}
-	window.count++
-	a.logins[ip] = window
-	if len(a.logins) > 10000 {
-		for key, value := range a.logins {
-			if now.Sub(value.started) >= 5*time.Minute {
-				delete(a.logins, key)
-			}
+	count++
+	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO login_attempts(ip,window_start,count) VALUES(?,?,?)
+		ON CONFLICT(ip) DO UPDATE SET window_start=excluded.window_start, count=excluded.count`, ip, windowStart, count); err != nil {
+		slog.Warn("record login attempt", "error", err)
+	}
+	if count == 1 {
+		if _, err := a.db.ExecContext(r.Context(), `DELETE FROM login_attempts WHERE window_start < ?`, now-3600); err != nil {
+			slog.Warn("prune login attempts", "error", err)
 		}
 	}
 	return true
 }
 
 func (a *App) clearLoginAttempts(r *http.Request) {
-	a.loginMu.Lock()
-	delete(a.logins, remoteIP(r))
-	a.loginMu.Unlock()
+	if _, err := a.db.ExecContext(r.Context(), `DELETE FROM login_attempts WHERE ip=?`, remoteIP(r)); err != nil {
+		slog.Warn("clear login attempts", "error", err)
+	}
 }
 
 func remoteIP(r *http.Request) string {

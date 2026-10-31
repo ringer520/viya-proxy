@@ -10,6 +10,8 @@ import {
   watch,
 } from "vue";
 import AccessLogTable from "./components/AccessLogTable.vue";
+import AttentionPanel from "./components/AttentionPanel.vue";
+import TrafficRangeBar from "./components/TrafficRangeBar.vue";
 import PanelSettingsDrawer from "./components/PanelSettingsDrawer.vue";
 import ConfigTransfer from "./components/ConfigTransfer.vue";
 import LogWorkspace from "./components/LogWorkspace.vue";
@@ -161,6 +163,23 @@ const managedCertificates = ref<ManagedCertificate[]>([]),
   showManagedCert = ref(false),
   managedCertError = ref(""),
   managedCertBusy = ref(false);
+type ExpiringCertificate = {
+  domain: string;
+  kind: string;
+  label: string;
+  not_after: string;
+  days_left: number;
+  expired: boolean;
+  sites: string[];
+};
+type UpstreamHealth = {
+  ok: boolean;
+  latency_ms: number;
+  checked_at: number;
+  target: string;
+  error?: string;
+  failures: number;
+};
 type Palette = "light" | "dark" | "aurora" | "ember" | "cyber";
 type ThemeChoice = "system" | Palette;
 const paletteChoices: Palette[] = [
@@ -190,8 +209,12 @@ const autoRefresh = ref(localStorage.getItem("viya-auto-refresh") !== "false"),
   landingPage = ref(localStorage.getItem("viya-landing-page") || "overview");
 const panelSettingsLoading = ref(false),
   panelUsername = ref(""),
+  panelRole = ref<"admin" | "viewer">("admin"),
   panelSessions = ref<number | null>(null),
   storedPanelPort = ref(8181);
+// Read-only accounts cannot save anything, so the panel starts in a sealed mode
+// instead of letting every button fail one request later.
+const readOnly = computed(() => panelRole.value === "viewer");
 const documentHidden = ref(document.hidden);
 const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
 const panelAccessURL = window.location.origin;
@@ -387,6 +410,8 @@ const hosts = ref<Host[]>([]),
   l4Rules = ref<Layer4Rule[]>([]),
   ddnsRecords = ref<DDNSRecord[]>([]),
   certificates = ref<Certificate[]>([]),
+  certExpiring = ref<ExpiringCertificate[]>([]),
+  upstreamHealth = ref<Record<string, UpstreamHealth>>({}),
   networkInterfaces = ref<NetworkInterface[]>([]),
   online = ref(false),
   show = ref(false),
@@ -911,6 +936,8 @@ type SiteTraffic = {
   total: Counters;
   recent: Counters;
   hourly: ({ hour: number } & Counters)[];
+  // Present only for the 7d and 30d ranges.
+  daily?: ({ day: number } & Counters)[];
 };
 const traffic = ref<Record<string, SiteTraffic>>({}),
   trafficError = ref("");
@@ -1153,15 +1180,105 @@ function emptyHourPoints() {
 function hourlyTraffic(host: Host) {
   return trafficHourIndex.value[host.id]?.points || emptyHourPoints();
 }
-// Whole-site 24h series for the overview trend card.
+// Longer windows reuse the same card but aggregate by day: traffic_hours keeps
+// 90 days, so 30d is the widest honest window.
+const trafficRange = ref<"24h" | "7d" | "30d">("24h");
+// The window is chosen by the backend, so the series has to be re-fetched.
+watch(trafficRange, () => {
+  void refreshTraffic();
+});
+const trafficDays = computed(() =>
+  trafficRange.value === "30d" ? 30 : trafficRange.value === "7d" ? 7 : 0,
+);
+const trafficDayStart = computed(() =>
+  Math.floor(Date.now() / 86400000) * 86400,
+);
+// Whole-site series for the overview trend card.
 const trafficTrend = computed(() => {
-  const totals = Array.from({ length: 24 }, () => 0);
-  for (const current of Object.values(trafficHourIndex.value))
-    current.points.forEach((point, i) => {
-      totals[i] = (totals[i] || 0) + point.upload + point.download;
-    });
-  const hourStart = Math.floor(Date.now() / 3600000) * 3600;
-  return totals.map((bytes, i) => ({ hour: hourStart - (23 - i) * 3600, bytes }));
+  const days = trafficDays.value;
+  if (!days) {
+    const totals = Array.from({ length: 24 }, () => 0);
+    for (const current of Object.values(trafficHourIndex.value))
+      current.points.forEach((point, i) => {
+        totals[i] = (totals[i] || 0) + point.upload + point.download;
+      });
+    const hourStart = Math.floor(Date.now() / 3600000) * 3600;
+    return totals.map((bytes, i) => ({
+      hour: hourStart - (23 - i) * 3600,
+      bytes,
+    }));
+  }
+  const totals = Array.from({ length: days }, () => 0);
+  for (const summary of Object.values(traffic.value))
+    for (const point of summary.daily || []) {
+      const index = days - 1 - Math.round((trafficDayStart.value - point.day) / 86400);
+      if (index >= 0 && index < days)
+        totals[index] += point.upload + point.download;
+    }
+  return totals.map((bytes, i) => ({
+    hour: trafficDayStart.value - (days - 1 - i) * 86400,
+    bytes,
+  }));
+});
+// Stored revisions are redacted, so the panel can only compare them, not replay
+// them. Real rollback goes through the encrypted archive above this list.
+const revisionDiff = ref<{
+  id: number;
+  from: number;
+  to: number;
+  added: { path: string; to: string }[];
+  removed: { path: string; from: string }[];
+  changed: { path: string; from: string; to: string }[];
+  truncated: boolean;
+} | null>(null);
+const revisionDiffBusy = ref(false),
+  revisionDiffError = ref("");
+async function loadRevisionDiff(id: number, against = "current") {
+  revisionDiffBusy.value = true;
+  revisionDiffError.value = "";
+  try {
+    const r = await fetch(
+      `/api/v1/config/revisions/${id}/diff?against=${encodeURIComponent(
+        String(against),
+      )}`,
+    );
+    const data = await r.json();
+    if (!r.ok) throw Error(data.error || t("对比失败"));
+    revisionDiff.value = {
+      id,
+      from: data.from,
+      to: data.to,
+      added: data.added || [],
+      removed: data.removed || [],
+      changed: data.changed || [],
+      truncated: !!data.truncated,
+    };
+  } catch (e) {
+    revisionDiffError.value =
+      e instanceof Error ? t(e.message) : t("对比失败");
+  } finally {
+    revisionDiffBusy.value = false;
+  }
+}
+function diffValue(value: string) {
+  return value.length > 160 ? value.slice(0, 160) + "…" : value;
+}
+// Sites ranked by the volume inside the selected window.
+const trafficRanking = computed(() => {
+  const rows = hosts.value
+    .map((host) => {
+      const summary = traffic.value[host.id];
+      const recent = summary?.recent;
+      return {
+        id: host.id,
+        domain: host.domain,
+        bytes: recent ? recent.upload + recent.download : 0,
+        requests: recent ? recent.requests : 0,
+      };
+    })
+    .filter((row) => row.bytes > 0);
+  rows.sort((a, b) => b.bytes - a.bytes);
+  return rows.slice(0, 6);
 });
 function barHeight(host: Host, bytes: number) {
   // Empty hours stay invisible so the sparkline reads as a chart instead of a
@@ -1175,7 +1292,9 @@ function barHeight(host: Host, bytes: number) {
 async function refreshTraffic() {
   if (!authenticated.value) return;
   try {
-    const r = await fetch("/api/v1/proxy-hosts/traffic");
+    const r = await fetch(
+      `/api/v1/proxy-hosts/traffic?range=${trafficRange.value}`,
+    );
     if (!r.ok) throw Error(t("流量统计暂不可用"));
     traffic.value = await r.json();
     trafficError.value = "";
@@ -1232,6 +1351,10 @@ const authChecked = ref(false),
 const authNotice = ref(sessionStorage.getItem("viya-restored-message") || "");
 sessionStorage.removeItem("viya-restored-message");
 const authForm = ref({ username: "", password: "", confirm: "" });
+// Set after the password step when the account has two-factor enabled; while it
+// holds a token the login card shows the verification code field instead.
+const totpChallenge = ref("");
+const totpCode = ref("");
 const activeSection = ref("overview");
 const navigationGroups = [
   t("概览"),
@@ -1317,6 +1440,26 @@ const navigationItems = [
   },
 ];
 // Grouping and filtering used to run inside the template on every render.
+function upstreamLabel(id: number) {
+  const state = upstreamHealth.value[String(id)];
+  if (!state) return "";
+  return state.ok
+    ? tr`上游 ${Math.round(state.latency_ms)} ms`
+    : t("上游无响应");
+}
+// Sites whose upstream refused a TCP connection. Showing this on the overview
+// is the whole point: the proxy itself is healthy, the thing behind it is not.
+const attentionSites = computed(() =>
+  hosts.value
+    .map((host) => ({
+      domain: host.domain,
+      target: upstreamHealth.value[String(host.id)]?.target || host.upstream,
+      error: upstreamHealth.value[String(host.id)]?.error || "",
+      health: upstreamHealth.value[String(host.id)],
+    }))
+    .filter((entry) => entry.health && !entry.health.ok)
+    .map(({ domain, target, error }) => ({ domain, target, error })),
+);
 const groupedNavigation = computed(() =>
   navigationGroups.map((group) => ({
     group,
@@ -1588,6 +1731,7 @@ async function refreshSession() {
   }
   const data = await r.json();
   panelUsername.value = data.username || authForm.value.username;
+  panelRole.value = data.role === "viewer" ? "viewer" : "admin";
   csrfToken.value = data.csrf_token;
   authenticated.value = true;
   try {
@@ -1783,12 +1927,46 @@ async function authenticate() {
     });
     const data = await r.json();
     if (!r.ok) throw Error(t(data.error) || t("认证失败"));
+    if (data.totp_required) {
+      totpChallenge.value = String(data.challenge || "");
+      totpCode.value = "";
+      return;
+    }
     await refreshSession();
   } catch (e) {
     authError.value = e instanceof Error ? t(e.message) : t("认证失败");
   } finally {
     authBusy.value = false;
   }
+}
+async function submitTOTP() {
+  authBusy.value = true;
+  authError.value = "";
+  try {
+    const r = await fetch("/api/v1/auth/login/totp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        challenge: totpChallenge.value,
+        code: totpCode.value.trim(),
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw Error(t(data.error) || t("验证失败"));
+    totpChallenge.value = "";
+    totpCode.value = "";
+    await refreshSession();
+  } catch (e) {
+    authError.value = e instanceof Error ? t(e.message) : t("验证失败");
+  } finally {
+    authBusy.value = false;
+  }
+}
+function cancelTOTP() {
+  totpChallenge.value = "";
+  totpCode.value = "";
+  authError.value = "";
+  authForm.value.password = "";
 }
 async function logout() {
   await fetch("/api/v1/auth/logout", {
@@ -1817,6 +1995,8 @@ async function load() {
       "/api/v1/ddns-records",
       "/api/v1/custom-certificates",
       "/api/v1/ip-bans",
+      "/api/v1/certificates/expiring?days=30",
+      "/api/v1/proxy-hosts/health",
     ];
     const responses = await Promise.all(urls.map((url) => fetch(url)));
     if (requestSequence !== loadRequestSequence) return;
@@ -1826,9 +2006,8 @@ async function load() {
       return;
     }
     if (responses.some((r) => !r.ok)) throw Error(t("后端暂不可用"));
-    const [h, health, history, dns, l4, ddns, certs, bans] = await Promise.all(
-      responses.map((r) => r.json()),
-    );
+    const [h, health, history, dns, l4, ddns, certs, bans, expiring, upstream] =
+      await Promise.all(responses.map((r) => r.json()));
     if (requestSequence !== loadRequestSequence) return;
     hosts.value = h;
     revisions.value = history.slice(0, 10);
@@ -1837,6 +2016,11 @@ async function load() {
     if (ddnsSequence === ddnsRefreshSequence) ddnsRecords.value = ddns;
     certificates.value = certs;
     ipBans.value = bans;
+    certExpiring.value = Array.isArray(expiring?.certificates)
+      ? expiring.certificates
+      : [];
+    upstreamHealth.value =
+      upstream && typeof upstream === "object" ? upstream : {};
     online.value = health.ok && health.caddy_ready;
     // These four used to run one after another, adding their latencies to every
     // refresh. They are independent reads, so fan them out instead.
@@ -2632,52 +2816,91 @@ onBeforeUnmount(() => {
 <template>
   <div v-if="authChecked && !authenticated" class="auth-screen">
     <LanguagePicker class="login-language" />
-    <form class="modal auth-modal" @submit.prevent="authenticate">
+    <form
+      class="modal auth-modal"
+      @submit.prevent="totpChallenge ? submitTOTP() : authenticate()"
+    >
       <img
         class="brand-logo auth-logo"
         src="/viya-fox-icon.png"
         alt="Viya"
       /><span class="eyebrow">{{ t("Viya 管理面板") }}</span>
-      <h1>{{ setupRequired ? t("创建管理员") : t("管理员登录") }}</h1>
+      <h1>
+        {{
+          totpChallenge
+            ? t("两步验证")
+            : setupRequired
+              ? t("创建管理员")
+              : t("管理员登录")
+        }}
+      </h1>
       <p class="auth-hint">
         {{
-          setupRequired
-            ? t("首次使用请创建唯一管理员账户，密码至少 8 位。")
-            : t("登录以管理代理站点和 Caddy 配置。")
+          totpChallenge
+            ? t("请输入验证器应用中当前显示的 6 位验证码。")
+            : setupRequired
+              ? t("首次使用请创建唯一管理员账户，密码至少 8 位。")
+              : t("登录以管理代理站点和 Caddy 配置。")
         }}
       </p>
-      <label
-        >{{ t("用户名")
-        }}<input
-          v-model="authForm.username"
-          autocomplete="username"
-          minlength="3"
-          maxlength="64"
-          required /></label
-      ><label
-        >{{ t("密码")
-        }}<input
-          v-model="authForm.password"
-          :autocomplete="setupRequired ? 'new-password' : 'current-password'"
-          type="password"
-          minlength="8"
-          required /></label
-      ><label v-if="setupRequired"
-        >{{ t("确认密码")
-        }}<input
-          v-model="authForm.confirm"
-          type="password"
-          autocomplete="new-password"
-          minlength="8"
-          required
-      /></label>
+      <template v-if="!totpChallenge">
+        <label
+          >{{ t("用户名")
+          }}<input
+            v-model="authForm.username"
+            autocomplete="username"
+            minlength="3"
+            maxlength="64"
+            required /></label
+        ><label
+          >{{ t("密码")
+          }}<input
+            v-model="authForm.password"
+            :autocomplete="setupRequired ? 'new-password' : 'current-password'"
+            type="password"
+            minlength="8"
+            required /></label
+        ><label v-if="setupRequired"
+          >{{ t("确认密码")
+          }}<input
+            v-model="authForm.confirm"
+            type="password"
+            autocomplete="new-password"
+            minlength="8"
+            required
+        /></label>
+      </template>
+      <template v-else>
+        <label
+          >{{ t("验证码")
+          }}<input
+            v-model="totpCode"
+            class="totp-code"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            pattern="[0-9]{6}"
+            maxlength="6"
+            minlength="6"
+            required
+            autofocus
+        /></label>
+        <button type="button" class="auth-back" @click="cancelTOTP">
+          {{ t("返回上一步") }}
+        </button>
+      </template>
       <p v-if="authNotice" class="auth-notice" role="status">
         {{ authNotice }}
       </p>
       <p v-if="authError" class="error">{{ authError }}</p>
       <button class="primary auth-submit" :disabled="authBusy">
         {{
-          authBusy ? t("请稍候…") : setupRequired ? t("创建并登录") : t("登录")
+          authBusy
+            ? t("请稍候…")
+            : totpChallenge
+              ? t("验证并登录")
+              : setupRequired
+                ? t("创建并登录")
+                : t("登录")
         }}
       </button>
     </form>
@@ -2763,6 +2986,8 @@ onBeforeUnmount(() => {
       :access-port="panelAccessPort"
       :username="panelUsername"
       :sessions="panelSessions"
+      :csrf="csrfToken"
+      :role="panelRole"
       :pages="
         navigationItems.map((item) => ({ id: item.id, label: item.label }))
       "
@@ -2905,8 +3130,16 @@ onBeforeUnmount(() => {
         <SystemGauges
           :auto-refresh="autoRefresh && (!pauseHidden || !documentHidden)"
         />
-        <TrafficTrend :points="trafficTrend" />
+        <TrafficTrend
+          :points="trafficTrend"
+          :granularity="trafficRange === '24h' ? 'hour' : 'day'"
+        />
       </div>
+      <AttentionPanel
+        v-if="activeSection === 'overview'"
+        :certificates="certExpiring"
+        :sites="attentionSites"
+      />
       <section v-if="activeSection === 'overview'" class="stats kpi-row">
         <article>
           <span>{{ t("代理站点") }}</span
@@ -2928,6 +3161,9 @@ onBeforeUnmount(() => {
           ><small>{{ t("配置版本") }}</small>
         </article>
       </section>
+      <p v-if="readOnly" class="readonly-banner" role="status">
+        {{ t("当前账号为只读，可以查看全部配置，但不能保存任何修改。") }}
+      </p>
       <div v-if="error" class="error global-error" role="alert">
         <span>{{ error }}</span
         ><button
@@ -2985,6 +3221,7 @@ onBeforeUnmount(() => {
             >
           </article>
         </div>
+        <TrafficRangeBar v-model:range="trafficRange" :ranking="trafficRanking" />
       </section>
       <section v-if="activeSection === 'proxy-sites'" class="panel site-panel">
         <div class="panel-head">
@@ -3118,6 +3355,15 @@ onBeforeUnmount(() => {
                   </div>
                   <span class="site-upstream">{{ host.upstream }}</span>
                   <div class="site-badges">
+                    <span
+                      v-if="upstreamHealth[String(host.id)]"
+                      class="upstream-state"
+                      :class="
+                        upstreamHealth[String(host.id)].ok ? 'ok' : 'down'
+                      "
+                      :title="upstreamHealth[String(host.id)].error || ''"
+                      ><i class="dot"></i>{{ upstreamLabel(host.id) }}</span
+                    >
                     <span
                       v-if="host.certificate_source"
                       class="cert-line"
@@ -3872,10 +4118,84 @@ onBeforeUnmount(() => {
             ><span class="revision-error" v-if="revision.error">{{
               revision.error
             }}</span
-            ><time>{{ revision.created_at }}</time>
+            ><time>{{ revision.created_at }}</time
+            ><button
+              class="secondary revision-diff-btn"
+              type="button"
+              :disabled="revisionDiffBusy"
+              @click="loadRevisionDiff(revision.id)"
+            >
+              {{ t("与当前对比") }}
+            </button>
           </div>
         </div>
         <div v-else class="revision-empty">{{ t("尚无配置变更记录") }}</div>
+        <p v-if="revisionDiffError" class="error" role="alert">
+          {{ revisionDiffError }}
+        </p>
+        <div v-if="revisionDiff" class="revision-diff">
+          <div class="revision-diff-head">
+            <strong>{{
+              tr`版本 #${revisionDiff.from} → #${revisionDiff.to}`
+            }}</strong
+            ><button
+              type="button"
+              class="secondary"
+              @click="revisionDiff = null"
+            >
+              {{ t("关闭对比") }}
+            </button>
+          </div>
+          <p class="drawer-field-help">
+            {{
+              t(
+                "历史快照已脱敏（密码与凭据被替换），因此只能用于对比，不能直接回滚。需要恢复到旧配置请使用上方的配置恢复。",
+              )
+            }}
+          </p>
+          <p v-if="revisionDiff.truncated" class="drawer-field-help">
+            {{ t("差异较多，每组仅显示前 200 项。") }}
+          </p>
+          <p
+            v-if="
+              !revisionDiff.added.length &&
+              !revisionDiff.removed.length &&
+              !revisionDiff.changed.length
+            "
+            class="revision-diff-empty"
+          >
+            {{ t("两个版本内容相同。") }}
+          </p>
+          <div v-if="revisionDiff.added.length" class="diff-group added">
+            <h5>{{ t("新增") }} · {{ revisionDiff.added.length }}</h5>
+            <ul>
+              <li v-for="item in revisionDiff.added" :key="'a' + item.path">
+                <code>{{ item.path }}</code
+                ><span>{{ diffValue(item.to) }}</span>
+              </li>
+            </ul>
+          </div>
+          <div v-if="revisionDiff.removed.length" class="diff-group removed">
+            <h5>{{ t("移除") }} · {{ revisionDiff.removed.length }}</h5>
+            <ul>
+              <li v-for="item in revisionDiff.removed" :key="'r' + item.path">
+                <code>{{ item.path }}</code
+                ><span>{{ diffValue(item.from) }}</span>
+              </li>
+            </ul>
+          </div>
+          <div v-if="revisionDiff.changed.length" class="diff-group changed">
+            <h5>{{ t("变更") }} · {{ revisionDiff.changed.length }}</h5>
+            <ul>
+              <li v-for="item in revisionDiff.changed" :key="'c' + item.path">
+                <code>{{ item.path }}</code
+                ><span>{{ diffValue(item.from) }}</span
+                ><span class="diff-arrow">→</span
+                ><span>{{ diffValue(item.to) }}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
       </section>
       <LogWorkspace
         v-if="activeSection === 'access-logs'"

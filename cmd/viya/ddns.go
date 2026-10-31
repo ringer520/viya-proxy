@@ -698,6 +698,7 @@ func (a *App) executeDDNSRecord(ctx context.Context, id int64, manual bool) (str
 	if dbErr = tx.Commit(); dbErr != nil {
 		return observed, dbErr
 	}
+	a.trackDDNSOutcome(v.ID, v.Name, status, message)
 	if err != nil {
 		if message == "" {
 			message = "DDNS update failed"
@@ -733,4 +734,25 @@ func (a *App) toggleDDNSEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"enabled": *input.Enabled})
+}
+
+// trackDDNSOutcome raises one alert after two consecutive failures, so a single
+// transient lookup does not notify while a broken provider credential does.
+func (a *App) trackDDNSOutcome(id int64, name, status, message string) {
+	a.ddnsMu.Lock()
+	if a.ddnsFailures == nil {
+		a.ddnsFailures = make(map[int64]int)
+	}
+	if status != "failed" {
+		delete(a.ddnsFailures, id)
+		a.ddnsMu.Unlock()
+		return
+	}
+	count := a.ddnsFailures[id] + 1
+	a.ddnsFailures[id] = count
+	a.ddnsMu.Unlock()
+	if count == 2 {
+		a.notify("ddns_failed:"+fmt.Sprint(id), "DDNS 更新失败",
+			fmt.Sprintf("任务 %s 连续 2 次更新失败：%s", name, message))
+	}
 }

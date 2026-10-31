@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -263,4 +266,108 @@ func (a *App) certificateInventory(w http.ResponseWriter, r *http.Request) {
 		out = append(out, AutomaticCertificate{Domain: h.Domain, Source: source, Sites: []string{h.Domain}})
 	}
 	writeJSON(w, 200, out)
+}
+
+// expiringCertificate is one certificate that either already expired or will
+// expire inside the requested window. Sites that share a wildcard certificate
+// are grouped so the operator renews one thing, not eight.
+type expiringCertificate struct {
+	Domain   string   `json:"domain"`
+	Kind     string   `json:"kind"`
+	Label    string   `json:"label"`
+	NotAfter string   `json:"not_after"`
+	DaysLeft int      `json:"days_left"`
+	Expired  bool     `json:"expired"`
+	Sites    []string `json:"sites"`
+}
+
+// expiringCertificates answers "what is about to break?" for the overview and
+// the certificate page. It reads the same inventory the SSL page shows, so the
+// two views cannot disagree.
+func (a *App) expiringCertificates(w http.ResponseWriter, r *http.Request) {
+	days := 30
+	if raw := strings.TrimSpace(r.URL.Query().Get("days")); raw != "" {
+		if value, err := strconv.Atoi(raw); err == nil && value > 0 && value <= 365 {
+			days = value
+		}
+	}
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,domain,tls_mode,custom_certificate_id FROM proxy_hosts ORDER BY domain`)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, errors.New("certificate inventory unavailable"))
+		return
+	}
+	hosts := []Host{}
+	for rows.Next() {
+		var host Host
+		var certID sql.NullInt64
+		if err := rows.Scan(&host.ID, &host.Domain, &host.TLSMode, &certID); err != nil {
+			rows.Close()
+			fail(w, http.StatusInternalServerError, errors.New("certificate inventory unavailable"))
+			return
+		}
+		if certID.Valid {
+			host.CustomCertificateID = &certID.Int64
+		}
+		hosts = append(hosts, host)
+	}
+	rows.Close()
+
+	sources, err := a.certificateSources(r.Context(), hosts)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, errors.New("certificate inventory unavailable"))
+		return
+	}
+
+	now := time.Now()
+	index := map[string]*expiringCertificate{}
+	for _, host := range hosts {
+		source, ok := sources[host.ID]
+		if !ok || source.NotAfter == "" {
+			continue
+		}
+		notAfter, err := time.Parse(time.RFC3339, source.NotAfter)
+		if err != nil {
+			continue
+		}
+		daysLeft := int(notAfter.Sub(now).Hours() / 24)
+		if daysLeft > days {
+			continue
+		}
+		key := source.Domain
+		if key == "" {
+			key = host.Domain
+		}
+		item, exists := index[key]
+		if !exists {
+			item = &expiringCertificate{
+				Domain:   key,
+				Kind:     source.Kind,
+				Label:    source.Label,
+				NotAfter: source.NotAfter,
+				DaysLeft: daysLeft,
+				Expired:  notAfter.Before(now),
+			}
+			index[key] = item
+		}
+		// Keep the earliest expiry when several sites report the same name.
+		if daysLeft < item.DaysLeft {
+			item.DaysLeft = daysLeft
+			item.NotAfter = source.NotAfter
+			item.Expired = notAfter.Before(now)
+		}
+		item.Sites = append(item.Sites, host.Domain)
+	}
+
+	result := make([]expiringCertificate, 0, len(index))
+	for _, item := range index {
+		sort.Strings(item.Sites)
+		result = append(result, *item)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].DaysLeft == result[j].DaysLeft {
+			return result[i].Domain < result[j].Domain
+		}
+		return result[i].DaysLeft < result[j].DaysLeft
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"days": days, "certificates": result})
 }

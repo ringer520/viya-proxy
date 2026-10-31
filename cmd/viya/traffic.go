@@ -51,6 +51,13 @@ type trafficSummary struct {
 	Total  trafficCounters `json:"total"`
 	Recent trafficCounters `json:"recent"`
 	Hourly []trafficPoint  `json:"hourly"`
+	// Daily is populated for the 7d and 30d ranges, where 720 hourly points
+	// would be more resolution than the panel can draw.
+	Daily []trafficDay `json:"daily,omitempty"`
+}
+type trafficDay struct {
+	Day int64 `json:"day"`
+	trafficCounters
 }
 
 func (a *App) initTraffic() error {
@@ -296,7 +303,19 @@ func (a *App) ingestTrafficFile(path string) error {
 	return tx.Commit()
 }
 func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
-	cutoff := time.Now().Unix()/3600*3600 - 23*3600
+	// hourly keeps the 24-hour shape the overview already renders; 7d and 30d
+	// aggregate by day. traffic_hours retains 90 days, so 30d is the ceiling.
+	window := strings.TrimSpace(r.URL.Query().Get("range"))
+	hours := 24
+	switch window {
+	case "7d":
+		hours = 24 * 7
+	case "30d":
+		hours = 24 * 30
+	default:
+		window = "24h"
+	}
+	cutoff := time.Now().Unix()/3600*3600 - int64(hours-1)*3600
 	out := map[int64]*trafficSummary{}
 	summaryFor := func(id int64) *trafficSummary {
 		s := out[id]
@@ -329,7 +348,32 @@ func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, errors.New("could not read traffic statistics"))
 		return
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT site_id,hour,requests,errors,upload,download FROM traffic_hours WHERE hour>=? ORDER BY hour`, cutoff)
+	if window == "24h" {
+		rows, err := a.db.QueryContext(r.Context(), `SELECT site_id,hour,requests,errors,upload,download FROM traffic_hours WHERE hour>=? ORDER BY hour`, cutoff)
+		if err != nil {
+			fail(w, 500, errors.New("could not read traffic statistics"))
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			var p trafficPoint
+			if err = rows.Scan(&id, &p.Hour, &p.Requests, &p.Errors, &p.Upload, &p.Download); err != nil {
+				fail(w, 500, err)
+				return
+			}
+			s := summaryFor(id)
+			addTraffic(&s.Recent, p.trafficCounters)
+			s.Hourly = append(s.Hourly, p)
+		}
+		if err = rows.Err(); err != nil {
+			fail(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, out)
+		return
+	}
+	rows, err := a.db.QueryContext(r.Context(), `SELECT site_id,hour-hour%86400 AS day,SUM(requests),SUM(errors),SUM(upload),SUM(download) FROM traffic_hours WHERE hour>=? GROUP BY site_id,day ORDER BY day`, cutoff)
 	if err != nil {
 		fail(w, 500, errors.New("could not read traffic statistics"))
 		return
@@ -337,14 +381,14 @@ func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	for rows.Next() {
 		var id int64
-		var p trafficPoint
-		if err = rows.Scan(&id, &p.Hour, &p.Requests, &p.Errors, &p.Upload, &p.Download); err != nil {
+		var d trafficDay
+		if err = rows.Scan(&id, &d.Day, &d.Requests, &d.Errors, &d.Upload, &d.Download); err != nil {
 			fail(w, 500, err)
 			return
 		}
 		s := summaryFor(id)
-		addTraffic(&s.Recent, p.trafficCounters)
-		s.Hourly = append(s.Hourly, p)
+		addTraffic(&s.Recent, d.trafficCounters)
+		s.Daily = append(s.Daily, d)
 	}
 	if err = rows.Err(); err != nil {
 		fail(w, 500, err)
