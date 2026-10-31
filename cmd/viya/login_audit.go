@@ -39,7 +39,6 @@ const (
 	auditReasonLogout       = "logout"
 	auditReasonPasswordEdit = "password_changed"
 	auditReasonSessionOff   = "sessions_revoked"
-	auditReasonTOTP         = "totp"
 )
 
 type loginAuditEntry struct {

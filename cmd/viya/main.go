@@ -85,7 +85,6 @@ type App struct {
 	applyKick      chan struct{}
 	ddnsRunning    map[int64]bool
 	ddnsFailures   map[int64]int
-	totp           totpState
 	alertMu        sync.Mutex
 	alertLast      map[string]time.Time
 	healthMu       sync.RWMutex
@@ -205,10 +204,11 @@ func main() {
 		slog.Error("migrate DDNS comment", "error", err)
 		os.Exit(1)
 	}
-	// Empty totp_secret means the account has not enabled two-factor login.
-	if err := ensureColumn(db, "users", "totp_secret", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		slog.Error("migrate user TOTP secret", "error", err)
-		os.Exit(1)
+	// Two-factor authentication was removed; drop the column it used to live in
+	// so no dormant secret lingers in the database. Installs created without the
+	// column simply report an error here, which is safe to ignore.
+	if _, err := db.Exec(`ALTER TABLE users DROP COLUMN totp_secret`); err != nil {
+		slog.Debug("drop legacy two-factor column", "error", err)
 	}
 	if err := ensureColumn(db, "users", "role", "TEXT NOT NULL DEFAULT 'admin'"); err != nil {
 		slog.Error("migrate user role", "error", err)
@@ -291,6 +291,7 @@ func main() {
 	mux.Handle("PUT /api/v1/logs/settings", app.requireAuth(http.HandlerFunc(app.updateLogSettings)))
 	mux.Handle("PATCH /api/v1/layer4-rules/{id}/enabled", app.requireAuth(http.HandlerFunc(app.toggleLayer4Enabled)))
 	mux.Handle("GET /api/v1/proxy-hosts/traffic", app.requireAuth(http.HandlerFunc(app.siteTraffic)))
+	mux.Handle("GET /api/v1/layer4-rules/traffic", app.requireAuth(http.HandlerFunc(app.l4Traffic)))
 	mux.Handle("GET /api/v1/proxy-hosts/health", app.requireAuth(http.HandlerFunc(app.upstreamHealthReport)))
 	mux.Handle("POST /api/v1/proxy-hosts/health", app.requireAuth(http.HandlerFunc(app.forceProbeUpstreams)))
 	mux.Handle("GET /api/v1/alert-settings", app.requireAuth(http.HandlerFunc(app.getAlertSettings)))
@@ -318,11 +319,6 @@ func main() {
 	mux.HandleFunc("GET /api/v1/auth/status", app.authStatus)
 	mux.HandleFunc("POST /api/v1/auth/setup", app.setupAdmin)
 	mux.HandleFunc("POST /api/v1/auth/login", app.login)
-	mux.HandleFunc("POST /api/v1/auth/login/totp", app.loginTOTP)
-	mux.Handle("GET /api/v1/auth/totp", app.requireAuth(http.HandlerFunc(app.totpStatus)))
-	mux.Handle("POST /api/v1/auth/totp/setup", app.requireAuth(http.HandlerFunc(app.totpSetup)))
-	mux.Handle("POST /api/v1/auth/totp/enable", app.requireAuth(http.HandlerFunc(app.totpEnable)))
-	mux.Handle("POST /api/v1/auth/totp/disable", app.requireAuth(http.HandlerFunc(app.totpDisable)))
 	mux.Handle("POST /api/v1/auth/logout", app.requireAuth(http.HandlerFunc(app.logout)))
 	mux.Handle("GET /api/v1/auth/me", app.requireAuth(http.HandlerFunc(app.me)))
 	mux.Handle("GET /api/v1/auth/audit", app.requireAuth(http.HandlerFunc(app.listLoginAudit)))
@@ -1131,17 +1127,29 @@ func (a *App) applyLocked(ctx context.Context) error {
 	}
 	noTLSHosts := []string{}
 	usesInternalTLS := managedInternal
-	_, _ = a.db.ExecContext(ctx, `DELETE FROM ip_bans WHERE expires_at>0 AND expires_at<=?`, time.Now().Unix())
-	banRows, banErr := a.db.QueryContext(ctx, `SELECT domain,ip FROM ip_bans WHERE expires_at=0 OR expires_at>? ORDER BY domain,ip`, time.Now().Unix())
+	// Ban rules are a security policy: if they cannot be read, refuse to push a
+	// configuration that silently drops every rule. Capture all errors instead
+	// of continuing with an empty map.
+	now := time.Now().Unix()
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM ip_bans WHERE expires_at>0 AND expires_at<=?`, now); err != nil {
+		return err
+	}
+	banRows, err := a.db.QueryContext(ctx, `SELECT domain,ip FROM ip_bans WHERE expires_at=0 OR expires_at>? ORDER BY domain,ip`, now)
+	if err != nil {
+		return err
+	}
 	bansByDomain := map[string][]string{}
-	if banErr == nil {
-		for banRows.Next() {
-			var d, ip string
-			if banRows.Scan(&d, &ip) == nil {
-				bansByDomain[d] = append(bansByDomain[d], ip)
-			}
+	for banRows.Next() {
+		var d, ip string
+		if err := banRows.Scan(&d, &ip); err != nil {
+			banRows.Close()
+			return err
 		}
-		banRows.Close()
+		bansByDomain[d] = append(bansByDomain[d], ip)
+	}
+	banRows.Close()
+	if err := banRows.Err(); err != nil {
+		return err
 	}
 	for _, host := range hosts {
 		if host.TLSMode == "none" {
@@ -1316,6 +1324,9 @@ func (a *App) applyLocked(ctx context.Context) error {
 		if err := a.db.QueryRowContext(ctx, `SELECT cert_path,key_path FROM custom_certificates WHERE id=?`, *host.CustomCertificateID).Scan(&certPath, &keyPath); err != nil {
 			return errors.New("custom certificate files are unavailable")
 		}
+		if certPath == "" || keyPath == "" {
+			return fmt.Errorf("custom certificate %d has no stored file paths; remove or re-upload it", *host.CustomCertificateID)
+		}
 		certificates = append(certificates, map[string]any{"certificate": certPath, "key": keyPath})
 		seenCerts[*host.CustomCertificateID] = true
 	}
@@ -1338,7 +1349,7 @@ func (a *App) applyLocked(ctx context.Context) error {
 	if logErr != nil {
 		return logErr
 	}
-	config["logging"] = map[string]any{"logs": map[string]any{"default": map[string]any{"level": logConfig.Level}, "viya_access": map[string]any{"level": "INFO", "writer": map[string]any{"output": "file", "filename": filepath.Join(a.dataDir, "access.log"), "roll_size_mb": logConfig.AccessMB, "roll_keep": logConfig.Backups, "roll_keep_days": logConfig.Days, "roll_compression": "gzip"}, "encoder": map[string]any{"format": "json"}}}}
+	config["logging"] = map[string]any{"logs": map[string]any{"default": map[string]any{"level": logConfig.Level}, "viya_access": map[string]any{"level": "INFO", "writer": map[string]any{"output": "file", "filename": filepath.Join(a.dataDir, "access.log"), "roll_size_mb": logConfig.AccessMB, "roll_keep": logConfig.Backups, "roll_keep_days": logConfig.Days, "roll_compression": "gzip"}, "encoder": map[string]any{"format": "json"}}, "layer4": map[string]any{"level": "DEBUG", "writer": map[string]any{"output": "file", "filename": filepath.Join(a.dataDir, "l4-access.log"), "roll_size_mb": logConfig.AccessMB, "roll_keep": logConfig.Backups, "roll_keep_days": logConfig.Days, "roll_compression": "gzip"}, "encoder": map[string]any{"format": "json"}}}}
 	body, err := json.Marshal(config)
 	if err != nil {
 		return err

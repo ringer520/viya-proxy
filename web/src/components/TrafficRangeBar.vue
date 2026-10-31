@@ -6,7 +6,13 @@ import { formatBytes } from "../format";
 // owns the fetch, this only renders and reports the chosen range.
 const range = defineModel<"24h" | "7d" | "30d">("range", { required: true });
 defineProps<{
-  ranking: { id: number; domain: string; bytes: number; requests: number }[];
+  ranking: {
+    key: string;
+    kind: "site" | "forward";
+    label: string;
+    bytes: number;
+    requests: number;
+  }[];
 }>();
 const options = [
   { value: "24h", label: t("24 小时") },
@@ -31,10 +37,17 @@ const options = [
       </button>
     </div>
     <ol v-if="ranking.length" class="traffic-ranking">
-      <li v-for="row in ranking" :key="row.id">
-        <span>{{ row.domain }}</span
+      <li v-for="row in ranking" :key="row.key">
+        <span
+          ><b v-if="row.kind === 'forward'" class="rank-kind">{{
+            t("转发")
+          }}</b
+          >{{ row.label }}</span
         ><strong>{{ formatBytes(row.bytes) }}</strong
-        ><small>{{ row.requests.toLocaleString() }} {{ t("次") }}</small>
+        ><small
+          >{{ row.requests.toLocaleString() }}
+          {{ row.kind === "forward" ? t("连接") : t("次") }}</small
+        >
       </li>
     </ol>
     <p v-else class="traffic-ranking-empty">

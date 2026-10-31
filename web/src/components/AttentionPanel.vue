@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { t, tr } from "../i18n";
+import { computed } from "vue";
 
 // The overview's "what is broken right now" card. It is deliberately fed plain
 // data shapes rather than the Host type so it can stay independent of App.vue.
@@ -12,7 +13,9 @@ const props = defineProps<{
   }[];
   sites: { domain: string; target: string; error?: string }[];
 }>();
-const total = props.certificates.length + props.sites.length;
+// Reactive: the panel mounts on the first shell render, before the async load()
+// has populated the lists, so a snapshot taken here would freeze at zero.
+const total = computed(() => props.certificates.length + props.sites.length);
 </script>
 
 <template>

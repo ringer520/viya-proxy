@@ -37,6 +37,18 @@ type accessEntry struct {
 		ClientIP string `json:"client_ip"`
 	} `json:"request"`
 }
+
+// layer4ConnStat is the per-connection accounting Caddy's layer4 app writes at
+// debug level once a connection closes. read maps to client→upstream bytes and
+// written to upstream→client bytes; local is "host:port" and network is the
+// lower-case protocol name ("tcp"/"udp").
+type layer4ConnStat struct {
+	Msg     string `json:"msg"`
+	Network string `json:"network"`
+	Local   string `json:"local"`
+	Read    uint64 `json:"read"`
+	Written uint64 `json:"written"`
+}
 type trafficCounters struct {
 	Requests int64 `json:"requests"`
 	Errors   int64 `json:"errors"`
@@ -66,7 +78,9 @@ func (a *App) initTraffic() error {
 	CREATE TABLE IF NOT EXISTS traffic_cursors(generation TEXT PRIMARY KEY,offset INTEGER NOT NULL,complete INTEGER NOT NULL DEFAULT 0);
 	CREATE TABLE IF NOT EXISTS traffic_files(path TEXT PRIMARY KEY,size INTEGER NOT NULL,mtime INTEGER NOT NULL,offset INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0);
 	CREATE TABLE IF NOT EXISTS site_access_events(id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES proxy_hosts(id) ON DELETE CASCADE,event TEXT NOT NULL);
-	CREATE INDEX IF NOT EXISTS idx_site_access_events ON site_access_events(site_id,id DESC);`)
+	CREATE INDEX IF NOT EXISTS idx_site_access_events ON site_access_events(site_id,id DESC);
+	CREATE TABLE IF NOT EXISTS layer4_traffic_hours(rule_id INTEGER NOT NULL REFERENCES layer4_rules(id) ON DELETE CASCADE,hour INTEGER NOT NULL,connections INTEGER NOT NULL,upload INTEGER NOT NULL,download INTEGER NOT NULL,PRIMARY KEY(rule_id,hour));
+	CREATE INDEX IF NOT EXISTS idx_layer4_traffic_hours_hour ON layer4_traffic_hours(hour);`)
 	return err
 }
 func normalizedLogHost(host string) string {
@@ -116,13 +130,20 @@ const trafficRetention = 90 * 24 * time.Hour
 
 func (a *App) pruneTraffic(ctx context.Context) error {
 	cutoff := time.Now().Add(-trafficRetention).Unix()
-	_, err := a.db.ExecContext(ctx, `DELETE FROM traffic_hours WHERE hour<?`, cutoff)
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM traffic_hours WHERE hour<?`, cutoff); err != nil {
+		return err
+	}
+	_, err := a.db.ExecContext(ctx, `DELETE FROM layer4_traffic_hours WHERE hour<?`, cutoff)
 	return err
 }
 func (a *App) ingestTraffic() error {
-	paths, err := filepath.Glob(filepath.Join(a.dataDir, "access*.log*"))
-	if err != nil {
-		return err
+	var paths []string
+	for _, pattern := range []string{"access*.log*", "l4*.log*"} {
+		found, err := filepath.Glob(filepath.Join(a.dataDir, pattern))
+		if err != nil {
+			return err
+		}
+		paths = append(paths, found...)
 	}
 	sort.Strings(paths)
 	for _, path := range paths {
@@ -232,6 +253,31 @@ func (a *App) ingestTrafficFile(path string) error {
 	if err != nil {
 		return err
 	}
+	// Map Caddy's layer4 connection lines back to rules. The log carries the
+	// protocol as "network" and the listen address as "local", which together
+	// disambiguate rules that share a port across tcp and udp.
+	l4PortToRule := map[string]int64{}
+	l4Rows, err := a.db.QueryContext(a.ctx, `SELECT id,listen_port,protocol FROM layer4_rules`)
+	if err != nil {
+		return err
+	}
+	for l4Rows.Next() {
+		var id int64
+		var port int
+		var protocol string
+		if err = l4Rows.Scan(&id, &port, &protocol); err != nil {
+			l4Rows.Close()
+			return err
+		}
+		for _, p := range l4Protocols(protocol) {
+			l4PortToRule[p+":"+strconv.Itoa(port)] = id
+		}
+	}
+	err = l4Rows.Err()
+	l4Rows.Close()
+	if err != nil {
+		return err
+	}
 	tx, err := a.db.BeginTx(a.ctx, nil)
 	if err != nil {
 		return err
@@ -241,7 +287,7 @@ func (a *App) ingestTrafficFile(path string) error {
 	for offset-start < 4<<20 {
 		line, e := reader.ReadBytes('\n')
 		if e == io.EOF {
-			if filepath.Base(path) != "access.log" {
+			if filepath.Base(path) != "access.log" && filepath.Base(path) != "l4-access.log" {
 				complete = 1
 			}
 			break
@@ -251,7 +297,28 @@ func (a *App) ingestTrafficFile(path string) error {
 		}
 		offset += int64(len(line))
 		var event accessEntry
-		if json.Unmarshal(line, &event) != nil || event.Time <= 0 || event.Status < 100 || event.Status > 599 {
+		if json.Unmarshal(line, &event) != nil || event.Time <= 0 {
+			continue
+		}
+		// Layer4 connection accounting is emitted under the "layer4" logger and
+		// has no HTTP status; route it to the per-rule counters instead. Only the
+		// "stopped" line carries byte counts — the "started" line is skipped.
+		if event.Logger == "layer4" {
+			var l4 layer4ConnStat
+			if json.Unmarshal(line, &l4) != nil || l4.Local == "" || l4.Msg != "stopped handling connection; connection stats" {
+				continue
+			}
+			ruleID := l4PortToRule[l4.Network+":"+strconv.Itoa(logEventPort(l4.Local))]
+			if ruleID == 0 {
+				continue
+			}
+			hour := int64(event.Time) / 3600 * 3600
+			if _, err = tx.ExecContext(a.ctx, `INSERT INTO layer4_traffic_hours(rule_id,hour,connections,upload,download) VALUES(?,?,1,?,?) ON CONFLICT(rule_id,hour) DO UPDATE SET connections=connections+1,upload=upload+excluded.upload,download=download+excluded.download`, ruleID, hour, int64(l4.Read), int64(l4.Written)); err != nil {
+				return err
+			}
+			continue
+		}
+		if event.Status < 100 || event.Status > 599 {
 			continue
 		}
 		listenerID := strings.TrimPrefix(event.Logger, "http.log.access.viya_access_")
@@ -401,6 +468,99 @@ func addTraffic(to *trafficCounters, from trafficCounters) {
 	to.Errors += from.Errors
 	to.Upload += from.Upload
 	to.Download += from.Download
+}
+
+// l4Traffic mirrors siteTraffic for layer4 rules. "requests" carries the
+// connection count so the panel can reuse the same rendering for both.
+func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
+	window := strings.TrimSpace(r.URL.Query().Get("range"))
+	hours := 24
+	switch window {
+	case "7d":
+		hours = 24 * 7
+	case "30d":
+		hours = 24 * 30
+	default:
+		window = "24h"
+	}
+	cutoff := time.Now().Unix()/3600*3600 - int64(hours-1)*3600
+	out := map[int64]*trafficSummary{}
+	summaryFor := func(id int64) *trafficSummary {
+		s := out[id]
+		if s == nil {
+			s = &trafficSummary{Hourly: []trafficPoint{}}
+			out[id] = s
+		}
+		return s
+	}
+	totals, err := a.db.QueryContext(r.Context(), `SELECT rule_id,SUM(connections),SUM(upload),SUM(download) FROM layer4_traffic_hours GROUP BY rule_id`)
+	if err != nil {
+		fail(w, 500, errors.New("could not read traffic statistics"))
+		return
+	}
+	for totals.Next() {
+		var id int64
+		var c trafficCounters
+		if err = totals.Scan(&id, &c.Requests, &c.Upload, &c.Download); err != nil {
+			totals.Close()
+			fail(w, 500, errors.New("could not read traffic statistics"))
+			return
+		}
+		summaryFor(id).Total = c
+	}
+	err = totals.Err()
+	totals.Close()
+	if err != nil {
+		fail(w, 500, errors.New("could not read traffic statistics"))
+		return
+	}
+	if window == "24h" {
+		rows, err := a.db.QueryContext(r.Context(), `SELECT rule_id,hour,connections,upload,download FROM layer4_traffic_hours WHERE hour>=? ORDER BY hour`, cutoff)
+		if err != nil {
+			fail(w, 500, errors.New("could not read traffic statistics"))
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			var p trafficPoint
+			if err = rows.Scan(&id, &p.Hour, &p.Requests, &p.Upload, &p.Download); err != nil {
+				fail(w, 500, err)
+				return
+			}
+			s := summaryFor(id)
+			addTraffic(&s.Recent, p.trafficCounters)
+			s.Hourly = append(s.Hourly, p)
+		}
+		if err = rows.Err(); err != nil {
+			fail(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, out)
+		return
+	}
+	rows, err := a.db.QueryContext(r.Context(), `SELECT rule_id,hour-hour%86400 AS day,SUM(connections),SUM(upload),SUM(download) FROM layer4_traffic_hours WHERE hour>=? GROUP BY rule_id,day ORDER BY day`, cutoff)
+	if err != nil {
+		fail(w, 500, errors.New("could not read traffic statistics"))
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var d trafficDay
+		if err = rows.Scan(&id, &d.Day, &d.Requests, &d.Upload, &d.Download); err != nil {
+			fail(w, 500, err)
+			return
+		}
+		s := summaryFor(id)
+		addTraffic(&s.Recent, d.trafficCounters)
+		s.Daily = append(s.Daily, d)
+	}
+	if err = rows.Err(); err != nil {
+		fail(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, out)
 }
 func (a *App) siteAccessLogs(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

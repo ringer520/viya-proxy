@@ -39,7 +39,7 @@ func (a *App) recentLogs(w http.ResponseWriter, r *http.Request) {
 
 // layer4RuleLogs returns the engine entries Caddy emitted for one forwarding
 // rule. Layer4 has no per-request access record, so these are the connection
-// errors and reload notices that mention the rule's listening port.
+// errors, reload notices and (once logging is enabled) per-connection stats.
 func (a *App) layer4RuleLogs(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
@@ -51,7 +51,7 @@ func (a *App) layer4RuleLogs(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, errors.New("转发规则不存在"))
 		return
 	}
-	events, err := readRecentLogFileWhere(filepathJoin(a.dataDir, "access.log"), 600, func(event map[string]any) bool {
+	events, err := readRecentLogFileWhere(filepathJoin(a.dataDir, "l4-access.log"), 600, func(event map[string]any) bool {
 		return caddyLogKind(event) == "layer4" && logEventPort(event["local"]) == port
 	})
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

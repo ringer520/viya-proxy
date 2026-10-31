@@ -1,96 +1,195 @@
-# Viya — Caddy Reverse Proxy Manager
+# Viya
 
-Viya 是面向 Linux 原生部署的 Caddy 管理服务。Go + SQLite 控制面负责校验、保存和发布配置；Vue 3 中文界面嵌入 Go 程序；Caddy 作为受监督的子进程运行并通过 loopback Admin API 应用 JSON 配置。Docker 留待原生版本稳定后再打包。
+**A modern, single-binary reverse proxy manager built on Caddy.**
 
-## 已实现
+Viya is a self-hosted control panel for managing [Caddy](https://caddyserver.com/) reverse-proxy sites and Layer 4 (TCP/UDP) port forwards. It pairs a Go + SQLite control plane with a polished Vue 3 interface and runs Caddy as a supervised subprocess — deploy one binary, open the browser, and manage everything from a clean dashboard.
 
-- 代理站点 CRUD、自动 HTTPS、HTTP-01、DNS-01、内部 CA、HTTP-only 和自定义证书；支持上游请求头。
-- Cloudflare、腾讯云 DNSPod、阿里云凭据 AES-256-GCM 加密存储。
-- DDNS A/AAAA 公网地址探测，默认 5 分钟周期；三家 DNS Provider 适配、手动更新、运行历史。检测到同名同类型多值 RRset 时拒绝更新，避免覆盖其他地址。
-- Caddy Layer4 TCP、UDP、TCP+UDP 端口转发，冲突校验。
-- 站点 Basic Auth、CIDR 白名单/黑名单、每 IP 限流；访问日志、SSE 实时流及 Fail2Ban Lite。5 分钟内对同一站点/IP 达到 20 次 400/401/403 时临时封禁 15 分钟；404、502 不计入，管理端回环地址不自动封禁。
-- SQLite 配置历史、启动对账、Caddy 进程异常恢复、首启管理员、bcrypt、服务器端会话、CSRF 与登录限速。
-- 登录限速落在 SQLite 上，服务重启不会重置计数；会话在后半程自动续期，长时间操作不会被踢出。
-- TOTP 两步验证（RFC 6238，自行实现，无新增依赖）：面板设置内开启，登录时在密码之后追加 6 位验证码。
-- 附加的只读账号：可查看全部页面，任何保存操作都会被拒绝，只能退出登录和修改自己的密码。
-- 站点上游健康探测（每 60 秒 TCP 拨号）、证书到期聚合（默认 30 天窗口）、概览页「需要关注」汇总。
-- 告警 Webhook：上游连续故障、DDNS 连续失败、证书申请失败、数据目录磁盘接近写满、Caddy 进程退出时主动推送，同一事件 10 分钟内只发一次。
-- 流量统计支持 24 小时 / 7 天 / 30 天，并按周期给出站点流量排行。
-- 配置版本对比：任意两个历史快照的结构化差异（新增 / 移除 / 变更）。快照已脱敏，不能回放，回滚请使用加密配置恢复。
-- Linux systemd 非 root 运行、amd64 构建、安装与数据库一致性备份/恢复脚本。
+---
 
-## 已在 Debian 12 VM 验证
+## Why Viya?
 
-工作目录测试 VM：`192.168.1.16`。已构建并部署发布包，systemd 下以非 root 用户运行，管理 API 健康状态和 Caddy 就绪状态均通过。已实测 HTTPS 反代 200、Layer4 TCP/UDP echo 往返、TLS none 的 HTTP 访问控制、Fail2Ban 从 401 到封禁 403、自定义证书 TLS 200、Caddy 配置验证、日志写入与服务启动恢复；通过浏览器完成首启管理员、站点新增/真实 HTTP 转发、DNS 凭据保存且密钥不回显。在线备份后执行完整恢复，恢复服务健康检查通过。前端 TypeScript 检查和 Go 构建通过。
+Most reverse proxies are configured by hand-editing text files. Viya replaces that with a **safe, self-hosted web console**:
 
-外部真实 DNS 更新与公网 ACME 签发需要用户自己的域名和最小权限 DNS 凭据；本项目不带默认凭据，也未把没有执行的公网签发标记为通过。其他 DNS Provider 的真实授权、完整表单逐项 UI 验收、干净 Debian 安装及机器重启演练仍待补充。内部 CA 在非 root 服务中不会自动写入系统信任库，管理员需自行分发并信任根证书。
+- **One binary, zero runtime dependencies** — the Vue frontend is embedded, the database is a single SQLite file, and Caddy ships alongside. No Node, no Docker, no external database.
+- **Native Chinese UI with full English support** — the interface is designed Chinese-first and switches to English in one click, with per-panel bilingual copy.
+- **Web sites and port forwards unified** — HTTPS sites and raw TCP/UDP forwards live in the same console and share the same traffic statistics.
+- **Secure by default** — the admin API and Caddy's admin endpoint bind to loopback only; sessions, CSRF, rate limiting, read-only accounts and Fail2Ban-style auto-bans are built in.
 
-## 本地开发与构建
+## Screenshots
 
-要求 Go 1.27+、Node.js 和 pnpm。Caddy 插件版本锁定于 `build/caddy/go.mod`。
+The dashboard combines live traffic visualization with everyday management tasks in a single overview.
+
+<div align="center">
+
+**Run overview** — engine health, CPU/memory/disk gauges, a 24-hour traffic trend and a "needs attention" roll-up.
+
+<img src="docs/screenshots/02-overview.png" alt="Viya run overview" width="820">
+
+**Web services** — sites grouped by HTTP/HTTPS listener, each with per-site access control and 24-hour traffic.
+
+<img src="docs/screenshots/03-proxy-sites.png" alt="Viya web services" width="820">
+
+**Port forwarding** — TCP/UDP rules with the same traffic block as web sites, unified in one list.
+
+<img src="docs/screenshots/04-layer4.png" alt="Viya port forwarding" width="820">
+
+**Dynamic DNS** — scheduled public-IP detection with per-record update history.
+
+<img src="docs/screenshots/05-ddns.png" alt="Viya dynamic DNS" width="820">
+
+**SSL certificates** — automatic and custom certificates, issuance progress and expiry tracking.
+
+<img src="docs/screenshots/06-certificates.png" alt="Viya SSL certificates" width="820">
+
+**Logs** — live access logs, application logs, login audit and rotation settings.
+
+<img src="docs/screenshots/09-logs.png" alt="Viya logs" width="820">
+
+**Configuration history** — every applied change is snapshotted and can be diffed (sensitive values are redacted).
+
+<img src="docs/screenshots/10-config-history.png" alt="Viya configuration history" width="820">
+
+**Panel settings** — five themes, light/dark, compact layout, accounts and alerting in one drawer.
+
+<img src="docs/screenshots/11-panel-settings.png" alt="Viya panel settings" width="820">
+
+</div>
+
+## Highlights
+
+### Reverse proxy, done right
+
+- **Proxy sites** — full CRUD with automatic HTTPS (HTTP-01, DNS-01, internal CA, HTTP-only, custom certificates) and upstream request headers.
+- **Multiple listeners** — independent HTTP/HTTPS listeners, each managing its own set of sites.
+- **Layer 4 forwarding** — TCP, UDP and TCP+UDP port forwards with conflict detection.
+- **Per-site security** — Basic Auth, CIDR allow/deny lists and per-IP rate limiting.
+
+### DNS, integrated
+
+- **DNS providers** — Cloudflare, Tencent Cloud DNSPod and Alibaba Cloud credentials, encrypted at rest with AES-256-GCM.
+- **Dynamic DNS** — A/AAAA/CNAME records with public-IP detection (or a pinned interface address) on a configurable schedule, plus full run history.
+
+### Traffic you can see
+
+- **Unified statistics** — web sites and port forwards are aggregated into one overview with 24h / 7d / 30d windows and a per-period ranking.
+- **Live charts** — per-site/per-rule sparklines and a whole-instance trend line.
+
+### Observability
+
+- **Upstream health** — periodic TCP probes with latency shown per site.
+- **Certificate expiry** — aggregated "needs attention" roll-up with a configurable warning window.
+- **Alerting webhook** — JSON push on upstream failures, repeated DDNS failures, certificate order failures, a nearly-full data directory, or a Caddy crash (de-duplicated per event for 10 minutes).
+- **System metrics** — CPU, memory and disk gauges on the overview.
+
+### Safe by design
+
+- **Session auth** — bcrypt, server-side sessions, CSRF tokens, and SQLite-persisted login throttling (survives restarts).
+- **Read-only accounts** — a `viewer` role that can read every page but is rejected on any write.
+- **Fail2Ban Lite** — auto-bans an IP that triggers repeated 400/401/403 for the same site, without touching manual rules.
+- **Configuration history** — every apply is snapshotted and diffable, and startup reconciliation restores the last-known-good config. If Caddy dies, Viya restarts it.
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| Control plane | Go 1.27 |
+| Storage | SQLite (WAL, single connection, no external DB) |
+| Frontend | Vue 3 + TypeScript + Vite |
+| Engine | Caddy (custom build with `caddy-l4`, DNS provider and rate-limit modules) |
+| Delivery | Single static binary, frontend embedded via `go:embed` |
+
+## Quick start
+
+```sh
+# 1. Fetch dependencies and build the frontend
+pnpm --dir web install
+pnpm --dir web build
+
+# 2. Build the Viya binary (embeds the frontend)
+go build -trimpath -o bin/viya ./cmd/viya
+
+# 3. Build the custom Caddy binary (from build/caddy)
+cd build/caddy && go build -trimpath -o ../../bin/caddy .
+
+# 4. Run against a local data directory
+VIYA_CADDY_BIN="$(pwd)/bin/caddy" ./bin/viya
+```
+
+Open `http://127.0.0.1:8181`, create your first admin account (password ≥ 8 characters), and start adding sites.
+
+The `scripts/build-linux.ps1` script produces `bin/viya-linux-amd64` and the matching `bin/caddy-linux-amd64`, and `scripts/package-linux.ps1` bundles them into a `release/` tarball.
+
+## Installation
+
+### Prebuilt release
+
+1. Download the latest `viya-linux-amd64-*.tar.gz` from [Releases](https://github.com/ringer520/viya-proxy/releases).
+2. Extract it and run the Debian installer:
+
+```sh
+tar -xzf viya-linux-amd64-*.tar.gz
+cd viya-linux-amd64-*/
+sudo sh ./deploy/install-debian.sh
+```
+
+3. Confirm it is running:
+
+```sh
+systemctl status viya
+journalctl -u viya -f
+```
+
+### Build from source
+
+Requirements: Go 1.27+, Node.js and pnpm. The Caddy plugin versions are pinned in `build/caddy/go.mod`.
 
 ```powershell
 pnpm --dir web install
 pnpm --dir web typecheck
 pnpm --dir web build
-& 'C:\Program Files\Go\bin\go.exe' build ./...
+go build ./...
 ./scripts/build-linux.ps1
 ./scripts/package-linux.ps1
 ```
 
-`build-linux.ps1` 生成 `bin/viya-linux-amd64` 和包含 Layer4、DNS、限流插件的 `bin/caddy-linux-amd64`。发布压缩包输出到 `release/`，运行时不需要 Node、Go 或 xcaddy。
+## Deployment
 
-## Debian 12 安装
-
-解压发布包，进入包目录后运行：
+The admin UI/API binds to `127.0.0.1:8181` by default. From a trusted workstation, use an SSH tunnel:
 
 ```sh
-sudo sh ./deploy/install-debian.sh
-systemctl status viya
-journalctl -u viya -f
+ssh -L 8181:127.0.0.1:8181 root@YOUR_HOST
 ```
 
-管理界面/API 默认只绑定 `127.0.0.1:8181`。从可信工作站使用 SSH 隧道访问：
+Caddy's admin API listens on loopback only. The service serves sites on `:8080` by default and `:80` for plain HTTP and ACME HTTP-01; TLS sites use the configured listener ports. For a standard production setup, set `VIYA_HTTP_LISTEN=:80` via a systemd drop-in so Caddy uses ports 80/443, then configure NAT/firewall rules as needed.
 
-```sh
-ssh -L 8181:127.0.0.1:8181 root@DEBIAN_HOST
-```
+> **Never expose the admin port or Caddy's admin API to an untrusted network.** If you reverse-proxy the panel itself, set `VIYA_COOKIE_SECURE=true` and `VIYA_TRUSTED_PROXIES` to the proxy's IP.
 
-首次访问创建唯一管理员账户，密码至少 8 位。Caddy Admin API 仅监听 loopback。服务默认站点监听 `:8080`，同时开放 `:80` 用于普通 HTTP 与 ACME HTTP-01；TLS 站点使用配置的站点监听端口。生产部署建议通过 systemd drop-in 将 `VIYA_HTTP_LISTEN=:80`，让 Caddy 使用标准 80/443 端口；NAT、防火墙和云安全组仍需按网络拓扑设置。
+### Configuration
 
-登录后可从侧栏左下角打开“面板设置”：管理界面监听端口可修改为 `1024–65535`，保存后服务会自动重启；管理员密码可在验证当前密码后修改，至少 8 位。通过域名反代访问管理面板时，修改监听端口后还需同步更新该代理站点的上游端口。
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `VIYA_LISTEN` | `127.0.0.1:8181` | Admin UI/API address |
+| `VIYA_HTTP_LISTEN` | `:8080` | Caddy site listener; HTTP-only sites also serve on `:80` |
+| `VIYA_DATA_DIR` | `./data` | SQLite, certificates and Caddy runtime data |
+| `VIYA_MASTER_KEY_FILE` | `$VIYA_DATA_DIR/master.key` | Master key for DNS credential encryption (`/etc/viya/secrets/master.key` on installed setups) |
+| `VIYA_CADDY_BIN` | `./bin/caddy` | Custom Caddy executable |
+| `VIYA_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy admin API (must be loopback) |
+| `VIYA_COOKIE_SECURE` | `false` | Set `true` when the panel is served over HTTPS |
+| `VIYA_TRUSTED_PROXIES` | `127.0.0.1,::1` | Comma-separated trusted proxy IPs/CIDRs that may set `X-Forwarded-Proto` |
 
-管理员可在“面板设置 → 账户与会话”开启两步验证：系统会给出 base32 密钥与 otpauth 链接，用任意验证器应用添加后输入 6 位验证码完成绑定。密钥只在绑定时显示一次；关闭两步验证需要验证当前密码。若验证码全部失效（例如更换手机），只能用恢复流程处理——请妥善保存密钥。
-
-同一页面可以创建附加账号。只读账号适合给家人查看状态：它能打开所有页面，但保存时会收到 403，且无法删除自己或降级最后一个管理员。
-
-“通知”页可配置一个 Webhook。告警以 JSON 形式 POST，包含 `source`、`event`、`title`、`detail`、`at` 五个字段；同一 `event` 在 10 分钟内只推送一次。绝大多数家庭场景可以接到企业微信机器人、Bark、Telegram Bot 或自建转发服务。
-
-选择“Caddy 内部 CA”时，服务不会自动修改系统信任库。根证书位于 `/var/lib/viya/.local/share/caddy/pki/authorities/local/root.crt`；请通过安全渠道复制到需要访问站点的客户端，并按操作系统/浏览器要求手动信任。
-
-## 备份与恢复
+## Backup & restore
 
 ```sh
 sudo sh ./scripts/backup-linux.sh
 sudo sh ./scripts/restore-linux.sh /var/backups/viya/viya-YYYYMMDDTHHMMSSZ.tar.gz
 ```
 
-备份使用 SQLite online backup API，并包含 Caddy 证书状态和自定义证书；压缩包权限为 0600，视为包含私钥的敏感文件。安装版主密钥单独存放在 `/etc/viya/secrets/master.key`，不进入备份；必须另外安全保管并在恢复前保留原密钥，否则数据库里的 DNS 凭据无法解密。旧版 `/etc/crpm/secrets/master.key` 和 `/var/lib/crpm/master.key` 会随数据迁移复制，DNS 凭据的加密关联数据也会在 Viya 首次启动时安全迁移。访问日志不进入备份。恢复前脚本会自动生成当前数据备份；旧版备份中的 `crpm.db` 也可直接恢复。
+Backups use the SQLite online backup API and include Caddy certificate state and custom certificates; the archive is `0600` and treated as sensitive (it contains private keys). The master key lives at `/etc/viya/secrets/master.key` and is **not** included in backups — keep it separately, or encrypted DNS credentials cannot be decrypted after a restore.
 
-## 运行配置
+## Documentation
 
-| 环境变量 | 默认值 | 用途 |
-| --- | --- | --- |
-| `VIYA_LISTEN` | `127.0.0.1:8181` | 管理界面/API |
-| `VIYA_HTTP_LISTEN` | `:8080` | Caddy 站点监听端口；HTTP-only 站点另在 `:80` 服务 |
-| `VIYA_DATA_DIR` | `./data` | SQLite、证书与 Caddy 运行数据 |
-| `VIYA_MASTER_KEY_FILE` | `$VIYA_DATA_DIR/master.key` | DNS 凭据加密主密钥；systemd 安装使用 `/etc/viya/secrets/master.key` |
-| `VIYA_CADDY_BIN` | `./bin/caddy` | 定制 Caddy 可执行文件 |
-| `VIYA_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy Admin API，必须 loopback |
-| `VIYA_COOKIE_SECURE` | `false` | 管理端经 HTTPS 提供时设为 `true` |
-| `VIYA_TRUSTED_PROXIES` | `127.0.0.1,::1` | 可提供 `X-Forwarded-Proto` 的可信反代 IP/CIDR，逗号分隔 |
+See [`docs/`](docs/) for the implementation plan, operation flow, and hardening notes. The console itself carries per-page guidance in both languages.
 
-不要将管理端口或 Caddy Admin API 暴露到不可信网络。完整架构、需求验收状态和遗留的外部验收条件见 [实施计划](docs/implementation-plan.zh-CN.md)；管理员日常配置顺序和失败恢复路径见 [操作流程](docs/operation-flow.zh-CN.md)。
+## License
 
-
-
+[MIT](LICENSE) © 2026 ringer520

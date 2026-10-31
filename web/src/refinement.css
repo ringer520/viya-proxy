@@ -386,32 +386,6 @@
   }
 }
 
-
-/* 两步验证：等宽数字便于逐位核对，返回入口保持文本按钮的轻量层级 */
-.auth-modal .totp-code {
-  font-family: var(--font-mono, ui-monospace, "SFMono-Regular", monospace);
-  font-size: 20px;
-  letter-spacing: 0.32em;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.auth-modal .auth-back {
-  align-self: flex-start;
-  margin-top: -4px;
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  font-size: 12.5px;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.auth-modal .auth-back:hover {
-  color: var(--text);
-}
-
 /* 概览「需要关注」：把上游故障与证书到期从列表里提到最前面 */
 .attention-panel {
   margin-top: 16px;
@@ -564,6 +538,18 @@
 .traffic-ranking li small {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+.traffic-ranking .rank-kind {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--accent-2, var(--muted));
+  background: color-mix(in srgb, var(--accent-2, var(--muted)) 10%, transparent);
+  vertical-align: 1px;
 }
 .traffic-ranking-empty {
   margin: 0;

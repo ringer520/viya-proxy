@@ -39,34 +39,6 @@ async function removeUser(id:number,username:string){
 }
 const emit=defineEmits<{close:[];savePort:[];changePassword:[];changeUsername:[username:string,password:string];revokeSessions:[];copyAddress:[];resetPreferences:[]}>()
 const usernameForm=ref({username:props.username,password:''})
-// Two-factor state is owned by the drawer: it is account-scoped, not a
-// preference, and only lives as long as the panel is open.
-const totpEnabled=ref(false),totpSecret=ref(''),totpInput=ref(''),totpPassword=ref(''),totpBusy=ref(false),totpNote=ref(''),totpError=ref('')
-async function totpRequest(path:string,body?:unknown,method='POST'){
- const response=await fetch('/api/v1/auth/totp'+path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:body===undefined?undefined:JSON.stringify(body)})
- const data=await response.json().catch(()=>({}))
- if(!response.ok)throw Error(data.error||'request failed')
- return data
-}
-async function loadTOTP(){
- try{const data=await totpRequest('',undefined,'GET');totpEnabled.value=!!data.enabled}catch{totpEnabled.value=false}
-}
-async function startTOTP(){
- totpBusy.value=true;totpError.value='';totpNote.value=''
- try{const data=await totpRequest('/setup');totpSecret.value=data.secret;totpInput.value=''}catch(e){totpError.value=e instanceof Error?t(e.message):t('无法开始绑定')}finally{totpBusy.value=false}
-}
-async function confirmTOTP(){
- totpBusy.value=true;totpError.value='';totpNote.value=''
- try{await totpRequest('/enable',{code:totpInput.value.trim()});totpEnabled.value=true;totpSecret.value='';totpInput.value='';totpNote.value=t('两步验证已开启')}catch(e){totpError.value=e instanceof Error?t(e.message):t('验证失败')}finally{totpBusy.value=false}
-}
-async function cancelTOTP(){totpSecret.value='';totpInput.value='';totpError.value=''}
-async function copyTOTPSecret(){
- try{await navigator.clipboard.writeText(totpSecret.value);totpNote.value=t('密钥已复制')}catch{totpError.value=t('复制失败，请手动选择文本')}
-}
-async function disableTOTP(){
- totpBusy.value=true;totpError.value='';totpNote.value=''
- try{await totpRequest('/disable',{password:totpPassword.value});totpEnabled.value=false;totpPassword.value='';totpNote.value=t('两步验证已关闭')}catch(e){totpError.value=e instanceof Error?t(e.message):t('无法关闭两步验证')}finally{totpBusy.value=false}
-}
 // Alert delivery is the only channel that reaches the operator when the panel
 // is closed, so it is configured here next to the account it belongs to.
 const alertForm=ref({enabled:false,webhook_url:'',notify_recovery:false}),alertBusy=ref(false),alertNote=ref(''),alertError=ref('')
@@ -81,7 +53,7 @@ async function testAlerts(){
  alertBusy.value=true;alertError.value='';alertNote.value=''
  try{const r=await fetch('/api/v1/alert-settings/test',{method:'POST',headers:{'X-CSRF-Token':props.csrf}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'send failed');alertNote.value=t('测试通知已发送，请检查接收端')}catch(e){alertError.value=e instanceof Error?t(e.message):t('发送失败')}finally{alertBusy.value=false}
 }
-onMounted(()=>{loadTOTP();loadAlerts();loadUsers()})
+onMounted(()=>{loadAlerts();loadUsers()})
 watch(()=>props.username,value=>{usernameForm.value={username:value,password:''}})
 const tab=ref('appearance'),root=ref<HTMLElement|null>(null),body=ref<HTMLElement|null>(null),restartConfirmed=ref(false)
 const tabs=[{id:'appearance',label:t('外观与显示'),icon:Palette},{id:'refresh',label:t('刷新与日志'),icon:RefreshCw},{id:'access',label:t('面板访问'),icon:Server},{id:'account',label:t('账户与会话'),icon:KeyRound},{id:'alerts',label:t('通知'),icon:Bell}]
@@ -137,7 +109,6 @@ onBeforeUnmount(()=>{document.body.style.overflow=previousOverflow;if(previousFo
     <section v-show="tab==='account'" id="settings-section-account" role="tabpanel" aria-labelledby="settings-tab-account">
      <div class="settings-section-intro"><h3>{{t('账户与会话')}}</h3><p>{{t('当前管理员：')}}{{ username||t('管理员') }}</p></div>
      <form class="settings-card" @submit.prevent="emit('changeUsername',usernameForm.username,usernameForm.password);usernameForm.password=''"><h4>{{t('修改管理员账号')}}</h4><label class="drawer-input-label">{{t('新账号')}}<input v-model="usernameForm.username" minlength="3" maxlength="64" pattern="[A-Za-z0-9_.-]+" autocomplete="username" required :disabled="busy"/></label><label class="drawer-input-label">{{t('当前密码')}}<input v-model="usernameForm.password" type="password" autocomplete="current-password" required :disabled="busy"/></label><p class="drawer-field-help">{{t('支持字母、数字、点、横线和下划线，3–64 位。修改后当前会话保留，其他会话退出。')}}</p><button class="primary" :disabled="busy||usernameForm.username===username">{{t('修改账号')}}</button></form><form class="settings-card drawer-password-form" @submit.prevent="emit('changePassword')"><h4>{{t('修改管理员密码')}}</h4><label class="drawer-input-label">{{t('当前密码')}}<input v-model="password.current" type="password" autocomplete="current-password" required :disabled="busy"/></label><label class="drawer-input-label">{{t('新密码')}}<input v-model="password.next" type="password" autocomplete="new-password" minlength="8" maxlength="72" required :disabled="busy"/></label><label class="drawer-input-label">{{t('确认新密码')}}<input v-model="password.confirm" type="password" autocomplete="new-password" minlength="8" maxlength="72" required :disabled="busy"/></label><p class="drawer-field-help">{{t('至少 8 位。修改成功后其他会话退出，当前会话保留。')}}</p><button class="primary" :disabled="busy">{{t('修改密码')}}</button></form>
-     <div class="settings-card drawer-totp"><h4>{{t('两步验证')}}</h4><p class="drawer-field-help">{{ totpEnabled ? t('已开启。每次登录除密码外，还需要验证器应用生成的 6 位验证码。') : t('为面板登录增加一层保护：开启后，除密码外还需要验证器应用生成的 6 位验证码。') }}</p><p v-if="totpError" class="settings-alert" role="alert">{{ totpError }}</p><p v-if="totpNote" class="settings-notice success" role="status">{{ totpNote }}</p><template v-if="!totpEnabled&&!totpSecret"><button class="primary" :disabled="totpBusy" @click="startTOTP">{{ totpBusy?t('正在处理…'):t('开启两步验证') }}</button></template><template v-else-if="!totpEnabled"><p class="drawer-field-help">{{t('在验证器应用中手动添加以下密钥，然后输入应用生成的验证码完成绑定。')}}</p><div class="drawer-address"><code>{{ totpSecret }}</code><button class="icon-btn" :aria-label="t('复制密钥')" @click="copyTOTPSecret"><Copy :size="17"/></button></div><label class="drawer-input-label">{{t('验证码')}}<input v-model="totpInput" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" minlength="6" required :disabled="totpBusy"/></label><button class="primary" :disabled="totpBusy||totpInput.length!==6" @click="confirmTOTP">{{t('确认并开启')}}</button><button class="secondary" :disabled="totpBusy" @click="cancelTOTP">{{t('取消')}}</button></template><template v-else><label class="drawer-input-label">{{t('当前密码')}}<input v-model="totpPassword" type="password" autocomplete="current-password" required :disabled="totpBusy"/></label><p class="drawer-field-help">{{t('关闭前需要验证当前密码；仅凭已登录的会话不足以移除这层保护。')}}</p><button class="secondary" :disabled="totpBusy||!totpPassword" @click="disableTOTP">{{t('关闭两步验证')}}</button></template></div>
      <div v-if="role==='admin'" class="settings-card"><h4>{{t('面板账号')}}</h4><p class="drawer-field-help">{{t('只读账号可以查看所有页面，但不能保存任何修改。至少保留一个管理员账号。')}}</p><p v-if="userError" class="settings-alert" role="alert">{{ userError }}</p><p v-if="userNote" class="settings-notice success" role="status">{{ userNote }}</p><ul v-if="users.length" class="panel-user-list"><li v-for="item in users" :key="item.id"><span class="panel-user-name">{{ item.username }}<small>{{ item.role==='viewer'?t('只读'):t('管理员') }}</small></span><template v-if="item.username!==username"><select :value="item.role" :disabled="userBusy" @change="setUserRole(item.id,($event.target as HTMLSelectElement).value)"><option value="admin">{{t('管理员')}}</option><option value="viewer">{{t('只读')}}</option></select><button class="icon-btn" :disabled="userBusy" :aria-label="t('删除账号')" @click="removeUser(item.id,item.username)"><Trash2 :size="16"/></button></template><small v-else class="panel-user-self">{{t('当前登录')}}</small></li></ul><form class="panel-user-form" @submit.prevent="addUser"><label class="drawer-input-label">{{t('新账号')}}<input v-model="userForm.username" minlength="3" maxlength="64" pattern="[A-Za-z0-9_.-]+" autocomplete="username" required :disabled="userBusy"/></label><label class="drawer-input-label">{{t('密码')}}<input v-model="userForm.password" type="password" autocomplete="new-password" minlength="8" maxlength="72" required :disabled="userBusy"/></label><label class="drawer-input-label">{{t('权限')}}<select v-model="userForm.role" :disabled="userBusy"><option value="viewer">{{t('只读')}}</option><option value="admin">{{t('管理员')}}</option></select></label><button class="primary" :disabled="userBusy">{{t('添加账号')}}</button></form></div>
      <div class="settings-card"><h4>{{t('登录会话')}}</h4><p class="drawer-field-help">{{ sessions===null?t('读取当前会话数量后可管理其他登录。'):tr`当前有 ${sessions} 个有效会话（含当前会话）。` }}</p><button class="secondary" :disabled="busy||loading||sessions===null||sessions<=1" @click="emit('revokeSessions')">{{t('退出其他登录会话')}}</button></div>
     </section>

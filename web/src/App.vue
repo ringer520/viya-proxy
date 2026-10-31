@@ -940,6 +940,7 @@ type SiteTraffic = {
   daily?: ({ day: number } & Counters)[];
 };
 const traffic = ref<Record<string, SiteTraffic>>({}),
+  l4Traffic = ref<Record<string, SiteTraffic>>({}),
   trafficError = ref("");
 const siteLogs = ref<
   Record<
@@ -1107,17 +1108,23 @@ const emptyCounters = (): Counters => ({
   upload: 0,
   download: 0,
 });
-const trafficTotals = computed(() =>
-  Object.values(traffic.value).reduce(
-    (sum, item) => ({
-      requests: sum.requests + item.recent.requests,
-      errors: sum.errors + item.recent.errors,
-      upload: sum.upload + item.recent.upload,
-      download: sum.download + item.recent.download,
-    }),
-    emptyCounters(),
-  ),
-);
+// The overview metrics combine web sites and port forwards. For layer4 rules
+// "requests" carries the connection count, so the sum reads naturally as
+// "requests / connections" once both sources are merged.
+const trafficTotals = computed(() => {
+  const sum = emptyCounters();
+  for (const item of Object.values(traffic.value))
+    addCounter(sum, item.recent);
+  for (const item of Object.values(l4Traffic.value))
+    addCounter(sum, item.recent);
+  return sum;
+});
+function addCounter(sum: Counters, from: Counters) {
+  sum.requests += from.requests;
+  sum.errors += from.errors;
+  sum.upload += from.upload;
+  sum.download += from.download;
+}
 // Stable zero-value buckets: the template reads stats many times per render,
 // so allocating a fresh object for sites without traffic wasted both memory and
 // reference equality (each call looked like a new value to Vue).
@@ -1136,15 +1143,24 @@ const siteTrafficIndex = computed(() => {
 function siteStats(host: Host): SiteTraffic {
   return siteTrafficIndex.value[host.id] || EMPTY_SITE_TRAFFIC;
 }
+const l4TrafficIndex = computed(() => {
+  const index: Record<number, SiteTraffic> = {};
+  for (const rule of l4Rules.value)
+    index[rule.id] = l4Traffic.value[rule.id] || EMPTY_SITE_TRAFFIC;
+  return index;
+});
+function l4Stats(rule: Layer4Rule): SiteTraffic {
+  return l4TrafficIndex.value[rule.id] || EMPTY_SITE_TRAFFIC;
+}
 // Precomputed once per traffic refresh: 24 aligned buckets plus the peak
 // volume per site. The template previously recomputed both for every bar.
-const trafficHourIndex = computed(() => {
+function hourIndexFor(summaries: Record<string, SiteTraffic>) {
   const current = Math.floor(Date.now() / 3600000) * 3600;
   const index: Record<
     number,
     { points: ({ hour: number } & Counters)[]; max: number }
   > = {};
-  for (const [id, summary] of Object.entries(traffic.value)) {
+  for (const [id, summary] of Object.entries(summaries)) {
     const byHour = new Map<number, { hour: number } & Counters>();
     for (const point of summary.hourly) byHour.set(point.hour, point);
     const points: ({ hour: number } & Counters)[] = [];
@@ -1159,7 +1175,9 @@ const trafficHourIndex = computed(() => {
     index[Number(id)] = { points, max };
   }
   return index;
-});
+}
+const trafficHourIndex = computed(() => hourIndexFor(traffic.value));
+const l4HourIndex = computed(() => hourIndexFor(l4Traffic.value));
 // One shared fallback per clock hour instead of 24 fresh objects per call.
 let emptyHourCache: { hour: number; points: ({ hour: number } & Counters)[] } = {
   hour: 0,
@@ -1180,6 +1198,9 @@ function emptyHourPoints() {
 function hourlyTraffic(host: Host) {
   return trafficHourIndex.value[host.id]?.points || emptyHourPoints();
 }
+function hourlyL4Traffic(rule: Layer4Rule) {
+  return l4HourIndex.value[rule.id]?.points || emptyHourPoints();
+}
 // Longer windows reuse the same card but aggregate by day: traffic_hours keeps
 // 90 days, so 30d is the widest honest window.
 const trafficRange = ref<"24h" | "7d" | "30d">("24h");
@@ -1193,12 +1214,15 @@ const trafficDays = computed(() =>
 const trafficDayStart = computed(() =>
   Math.floor(Date.now() / 86400000) * 86400,
 );
-// Whole-site series for the overview trend card.
+// Whole-network series for the overview trend card: web sites plus forwards.
 const trafficTrend = computed(() => {
   const days = trafficDays.value;
   if (!days) {
     const totals = Array.from({ length: 24 }, () => 0);
-    for (const current of Object.values(trafficHourIndex.value))
+    for (const current of [
+      ...Object.values(trafficHourIndex.value),
+      ...Object.values(l4HourIndex.value),
+    ])
       current.points.forEach((point, i) => {
         totals[i] = (totals[i] || 0) + point.upload + point.download;
       });
@@ -1209,7 +1233,10 @@ const trafficTrend = computed(() => {
     }));
   }
   const totals = Array.from({ length: days }, () => 0);
-  for (const summary of Object.values(traffic.value))
+  for (const summary of [
+    ...Object.values(traffic.value),
+    ...Object.values(l4Traffic.value),
+  ])
     for (const point of summary.daily || []) {
       const index = days - 1 - Math.round((trafficDayStart.value - point.day) / 86400);
       if (index >= 0 && index < days)
@@ -1263,20 +1290,42 @@ async function loadRevisionDiff(id: number, against = "current") {
 function diffValue(value: string) {
   return value.length > 160 ? value.slice(0, 160) + "…" : value;
 }
-// Sites ranked by the volume inside the selected window.
-const trafficRanking = computed(() => {
-  const rows = hosts.value
-    .map((host) => {
-      const summary = traffic.value[host.id];
-      const recent = summary?.recent;
-      return {
-        id: host.id,
-        domain: host.domain,
-        bytes: recent ? recent.upload + recent.download : 0,
+// Sites and forwards ranked by the volume inside the selected window. The
+// kind field lets the range bar tag forwards so they read apart from domains.
+type TrafficRankRow = {
+  key: string;
+  kind: "site" | "forward";
+  label: string;
+  bytes: number;
+  requests: number;
+};
+const trafficRanking = computed<TrafficRankRow[]>(() => {
+  const rows: TrafficRankRow[] = [];
+  for (const host of hosts.value) {
+    const recent = traffic.value[host.id]?.recent;
+    const bytes = recent ? recent.upload + recent.download : 0;
+    if (bytes > 0)
+      rows.push({
+        key: `site-${host.id}`,
+        kind: "site",
+        label: host.domain,
+        bytes,
         requests: recent ? recent.requests : 0,
-      };
-    })
-    .filter((row) => row.bytes > 0);
+      });
+  }
+  for (const rule of l4Rules.value) {
+    const recent = l4Traffic.value[rule.id]?.recent;
+    const bytes = recent ? recent.upload + recent.download : 0;
+    if (bytes > 0)
+      rows.push({
+        key: `fwd-${rule.id}`,
+        kind: "forward",
+        label:
+          rule.name || `${rule.protocol.toUpperCase()} ${rule.listen_port}`,
+        bytes,
+        requests: recent ? recent.requests : 0,
+      });
+  }
   rows.sort((a, b) => b.bytes - a.bytes);
   return rows.slice(0, 6);
 });
@@ -1289,16 +1338,39 @@ function barHeight(host: Host, bytes: number) {
     (bytes / Math.max(1, trafficHourIndex.value[host.id]?.max || 0)) * 30,
   );
 }
+function l4BarHeight(rule: Layer4Rule, bytes: number) {
+  if (bytes <= 0) return 0;
+  return Math.max(
+    3,
+    (bytes / Math.max(1, l4HourIndex.value[rule.id]?.max || 0)) * 30,
+  );
+}
+let trafficSequence = 0;
 async function refreshTraffic() {
   if (!authenticated.value) return;
+  const seq = ++trafficSequence;
+  const range = trafficRange.value;
   try {
-    const r = await fetch(
-      `/api/v1/proxy-hosts/traffic?range=${trafficRange.value}`,
-    );
-    if (!r.ok) throw Error(t("流量统计暂不可用"));
-    traffic.value = await r.json();
+    const [siteRes, l4Res] = await Promise.all([
+      fetch(`/api/v1/proxy-hosts/traffic?range=${range}`),
+      fetch(`/api/v1/layer4-rules/traffic?range=${range}`),
+    ]);
+    if (siteRes.status === 401 || l4Res.status === 401) {
+      authenticated.value = false;
+      csrfToken.value = "";
+      return;
+    }
+    if (!siteRes.ok || !l4Res.ok) throw Error(t("流量统计暂不可用"));
+    const [siteData, l4Data] = await Promise.all([
+      siteRes.json(),
+      l4Res.json(),
+    ]);
+    if (seq !== trafficSequence) return;
+    traffic.value = siteData;
+    l4Traffic.value = l4Data;
     trafficError.value = "";
   } catch (e) {
+    if (seq !== trafficSequence) return;
     trafficError.value = e instanceof Error ? t(e.message) : t("统计读取失败");
   }
 }
@@ -1351,10 +1423,6 @@ const authChecked = ref(false),
 const authNotice = ref(sessionStorage.getItem("viya-restored-message") || "");
 sessionStorage.removeItem("viya-restored-message");
 const authForm = ref({ username: "", password: "", confirm: "" });
-// Set after the password step when the account has two-factor enabled; while it
-// holds a token the login card shows the verification code field instead.
-const totpChallenge = ref("");
-const totpCode = ref("");
 const activeSection = ref("overview");
 const navigationGroups = [
   t("概览"),
@@ -1927,46 +1995,12 @@ async function authenticate() {
     });
     const data = await r.json();
     if (!r.ok) throw Error(t(data.error) || t("认证失败"));
-    if (data.totp_required) {
-      totpChallenge.value = String(data.challenge || "");
-      totpCode.value = "";
-      return;
-    }
     await refreshSession();
   } catch (e) {
     authError.value = e instanceof Error ? t(e.message) : t("认证失败");
   } finally {
     authBusy.value = false;
   }
-}
-async function submitTOTP() {
-  authBusy.value = true;
-  authError.value = "";
-  try {
-    const r = await fetch("/api/v1/auth/login/totp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        challenge: totpChallenge.value,
-        code: totpCode.value.trim(),
-      }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw Error(t(data.error) || t("验证失败"));
-    totpChallenge.value = "";
-    totpCode.value = "";
-    await refreshSession();
-  } catch (e) {
-    authError.value = e instanceof Error ? t(e.message) : t("验证失败");
-  } finally {
-    authBusy.value = false;
-  }
-}
-function cancelTOTP() {
-  totpChallenge.value = "";
-  totpCode.value = "";
-  authError.value = "";
-  authForm.value.password = "";
 }
 async function logout() {
   await fetch("/api/v1/auth/logout", {
@@ -2816,78 +2850,45 @@ onBeforeUnmount(() => {
 <template>
   <div v-if="authChecked && !authenticated" class="auth-screen">
     <LanguagePicker class="login-language" />
-    <form
-      class="modal auth-modal"
-      @submit.prevent="totpChallenge ? submitTOTP() : authenticate()"
-    >
+    <form class="modal auth-modal" @submit.prevent="authenticate()">
       <img
         class="brand-logo auth-logo"
         src="/viya-fox-icon.png"
         alt="Viya"
       /><span class="eyebrow">{{ t("Viya 管理面板") }}</span>
-      <h1>
-        {{
-          totpChallenge
-            ? t("两步验证")
-            : setupRequired
-              ? t("创建管理员")
-              : t("管理员登录")
-        }}
-      </h1>
+      <h1>{{ setupRequired ? t("创建管理员") : t("管理员登录") }}</h1>
       <p class="auth-hint">
         {{
-          totpChallenge
-            ? t("请输入验证器应用中当前显示的 6 位验证码。")
-            : setupRequired
-              ? t("首次使用请创建唯一管理员账户，密码至少 8 位。")
-              : t("登录以管理代理站点和 Caddy 配置。")
+          setupRequired
+            ? t("首次使用请创建唯一管理员账户，密码至少 8 位。")
+            : t("登录以管理代理站点和 Caddy 配置。")
         }}
       </p>
-      <template v-if="!totpChallenge">
-        <label
-          >{{ t("用户名")
-          }}<input
-            v-model="authForm.username"
-            autocomplete="username"
-            minlength="3"
-            maxlength="64"
-            required /></label
-        ><label
-          >{{ t("密码")
-          }}<input
-            v-model="authForm.password"
-            :autocomplete="setupRequired ? 'new-password' : 'current-password'"
-            type="password"
-            minlength="8"
-            required /></label
-        ><label v-if="setupRequired"
-          >{{ t("确认密码")
-          }}<input
-            v-model="authForm.confirm"
-            type="password"
-            autocomplete="new-password"
-            minlength="8"
-            required
-        /></label>
-      </template>
-      <template v-else>
-        <label
-          >{{ t("验证码")
-          }}<input
-            v-model="totpCode"
-            class="totp-code"
-            inputmode="numeric"
-            autocomplete="one-time-code"
-            pattern="[0-9]{6}"
-            maxlength="6"
-            minlength="6"
-            required
-            autofocus
-        /></label>
-        <button type="button" class="auth-back" @click="cancelTOTP">
-          {{ t("返回上一步") }}
-        </button>
-      </template>
+      <label
+        >{{ t("用户名")
+        }}<input
+          v-model="authForm.username"
+          autocomplete="username"
+          minlength="3"
+          maxlength="64"
+          required /></label
+      ><label
+        >{{ t("密码")
+        }}<input
+          v-model="authForm.password"
+          :autocomplete="setupRequired ? 'new-password' : 'current-password'"
+          type="password"
+          minlength="8"
+          required /></label
+      ><label v-if="setupRequired"
+        >{{ t("确认密码")
+        }}<input
+          v-model="authForm.confirm"
+          type="password"
+          autocomplete="new-password"
+          minlength="8"
+          required
+      /></label>
       <p v-if="authNotice" class="auth-notice" role="status">
         {{ authNotice }}
       </p>
@@ -2896,11 +2897,9 @@ onBeforeUnmount(() => {
         {{
           authBusy
             ? t("请稍候…")
-            : totpChallenge
-              ? t("验证并登录")
-              : setupRequired
-                ? t("创建并登录")
-                : t("登录")
+            : setupRequired
+              ? t("创建并登录")
+              : t("登录")
         }}
       </button>
     </form>
@@ -3179,7 +3178,7 @@ onBeforeUnmount(() => {
       <section v-if="activeSection === 'overview'" class="traffic-summary">
         <div class="traffic-summary-heading">
           <div>
-            <h2>{{ t("站点流量") }}</h2>
+            <h2>{{ t("站点与转发流量") }}</h2>
             <p>
               {{ t("近 24 小时按整点汇总，")
               }}{{
@@ -3188,7 +3187,7 @@ onBeforeUnmount(() => {
                   : t("自动刷新已暂停")
               }}{{
                 t(
-                  "。上行/下行分别为客户端请求体/响应体字节数，不含协议开销；累计统计从本地保留日志接入开始，重启后保留。",
+                  "。合并 Web 站点与端口转发：上行/下行为客户端请求体/响应体字节数，转发按连接字节计数；累计统计从本地保留日志接入开始，重启后保留。",
                 )
               }}
             </p>
@@ -3199,7 +3198,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="traffic-metrics">
           <article>
-            <span>{{ t("请求数") }}</span
+            <span>{{ t("请求 / 连接") }}</span
             ><strong
               >{{ trafficTotals.requests.toLocaleString()
               }}<small>{{ t("次") }}</small></strong
@@ -3938,6 +3937,50 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </div>
+            </div>
+            <div class="site-traffic">
+              <div>
+                <span>{{ t("近24小时") }}</span
+                ><strong
+                  >{{ l4Stats(rule).recent.requests.toLocaleString() }}
+                  {{ t("连接") }}</strong
+                ><span
+                  >↑ {{ formatBytes(l4Stats(rule).recent.upload) }} · ↓
+                  {{ formatBytes(l4Stats(rule).recent.download) }}</span
+                >
+              </div>
+              <div
+                v-if="trafficCharts"
+                class="traffic-spark"
+                :aria-label="t('最近24小时流量趋势')"
+              >
+                <i
+                  v-for="point in hourlyL4Traffic(rule)"
+                  :key="point.hour"
+                  :style="{
+                    height:
+                      l4BarHeight(rule, point.upload + point.download) + 'px',
+                  }"
+                  :title="
+                    new Date(point.hour * 1000).toLocaleString() +
+                    ' · ' +
+                    point.requests +
+                    t(' 连接 · ') +
+                    formatBytes(point.upload + point.download)
+                  "
+                ></i>
+              </div>
+              <small
+                >{{ t("累计") }}
+                {{ l4Stats(rule).total.requests.toLocaleString() }}
+                {{ t("连接 ·") }}
+                {{
+                  formatBytes(
+                    l4Stats(rule).total.upload +
+                      l4Stats(rule).total.download,
+                  )
+                }}</small
+              >
             </div>
             <button
               class="site-switch"

@@ -142,8 +142,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var userID int64
 	var storedHash []byte
-	var totpSecret string
-	err := a.db.QueryRowContext(r.Context(), `SELECT id,password_hash,totp_secret FROM users WHERE username=?`, strings.TrimSpace(input.Username)).Scan(&userID, &storedHash, &totpSecret)
+	err := a.db.QueryRowContext(r.Context(), `SELECT id,password_hash FROM users WHERE username=?`, strings.TrimSpace(input.Username)).Scan(&userID, &storedHash)
 	if err != nil {
 		// Run a throwaway comparison so a missing user costs the same bcrypt
 		// time as a wrong password; otherwise response timing enumerates them.
@@ -157,18 +156,6 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusUnauthorized, errors.New("username or password is incorrect"))
 		return
 	}
-	if totpSecret != "" {
-		// Password is correct, so the throttling window is cleared; the second
-		// step then gets a fresh budget for the verification code.
-		a.clearLoginAttempts(r)
-		challenge, tokenErr := a.issueTOTPChallenge(userID, input.Username)
-		if tokenErr != nil {
-			fail(w, http.StatusInternalServerError, errors.New("could not start two-factor verification"))
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "totp_required": true, "challenge": challenge})
-		return
-	}
 	if err := a.createSessionForUser(w, r, userID); err != nil {
 		fail(w, http.StatusInternalServerError, errors.New("could not start session"))
 		return
@@ -176,6 +163,20 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	a.clearLoginAttempts(r)
 	a.recordLoginAudit(r, input.Username, auditSuccess, auditReasonPassword)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// decodeJSONBody reads exactly one JSON document. Trailing data is rejected so
+// a client cannot smuggle a second payload past the destination struct.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	defer r.Body.Close()
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(dst); err != nil {
+		return errors.New("invalid request body")
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return errors.New("invalid request body")
+	}
+	return nil
 }
 
 func decodeCredentials(w http.ResponseWriter, r *http.Request, dst *credentials) error {

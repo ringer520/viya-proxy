@@ -14,3 +14,8 @@
 master.key
 bootstrap-caddy.json
 *.log
+
+# internal review notes (not for public distribution)
+docs/code-review*.md
+docs/source-review*.md
+docs/ui-usability-review*.md
