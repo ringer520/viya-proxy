@@ -119,6 +119,8 @@ The dashboard combines live traffic visualization with everyday management tasks
 
 Viya runs on any Linux distribution — the same release binary works with **systemd** (Debian/Ubuntu/Fedora/Arch etc.) and **procd** (OpenWrt routers). Supported architectures: `amd64` (x86_64), `arm64` (aarch64) and `armv7` (32-bit ARM, e.g. Raspberry Pi).
 
+**Requirements:** the binaries are fully static (no runtime libraries needed), but downloading the release and every HTTPS call afterwards (ACME certificate issuance, one-click self-update) needs `tar`, `curl`/`wget` and the system CA bundle. The one-line installer detects and installs any missing ones through your package manager; for manual installs make sure they are present (`ca-certificates` on most distributions, `ca-bundle` on OpenWrt).
+
 ### Linux
 
 **One-line install (systemd):**
@@ -157,6 +159,7 @@ journalctl -u viya -f
 **procd** (OpenWrt):
 
 ```sh
+opkg update && opkg install ca-bundle    # HTTPS needs the CA bundle
 mkdir -p /opt/viya/bin /etc/viya/secrets /var/lib/viya
 cp bin/viya-linux-* /opt/viya/bin/viya
 cp bin/caddy-linux-* /opt/viya/bin/caddy
