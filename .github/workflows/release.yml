@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache-dependency-path: |
+            go.sum
+            build/caddy/go.sum
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build frontend
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web build
+
+      - name: Build Viya (linux/amd64)
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -buildvcs=false -ldflags "-s -w" \
+            -o bin/viya-linux-amd64 ./cmd/viya
+
+      - name: Build Caddy (linux/amd64)
+        run: |
+          cd build/caddy
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -buildvcs=false -ldflags "-s -w" \
+            -o ../../bin/caddy-linux-amd64 .
+
+      - name: Package release
+        run: |
+          set -eu
+          PKG="viya-linux-amd64"
+          mkdir -p "dist/$PKG/bin" "dist/$PKG/deploy/systemd" "dist/$PKG/scripts"
+          cp bin/viya-linux-amd64 "dist/$PKG/bin/"
+          cp bin/caddy-linux-amd64 "dist/$PKG/bin/"
+          cp deploy/install-debian.sh "dist/$PKG/deploy/"
+          cp deploy/systemd/viya.service "dist/$PKG/deploy/systemd/"
+          cp scripts/backup-linux.sh "dist/$PKG/scripts/"
+          cp scripts/restore-linux.sh "dist/$PKG/scripts/"
+          cp README.md LICENSE "dist/$PKG/"
+          tar -czf release/viya-linux-amd64.tar.gz -C dist "$PKG"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/viya-linux-amd64.tar.gz
+          generate_release_notes: true

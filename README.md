@@ -1,5 +1,9 @@
 # Viya
 
+<p align="center">
+  <img src="assets/logo.png" alt="Viya logo" width="140">
+</p>
+
 **A modern, single-binary reverse proxy manager built on Caddy.**
 
 Viya is a self-hosted control panel for managing [Caddy](https://caddyserver.com/) reverse-proxy sites and Layer 4 (TCP/UDP) port forwards. It pairs a Go + SQLite control plane with a polished Vue 3 interface and runs Caddy as a supervised subprocess — deploy one binary, open the browser, and manage everything from a clean dashboard.
@@ -121,14 +125,28 @@ The `scripts/build-linux.ps1` script produces `bin/viya-linux-amd64` and the mat
 
 ## Installation
 
-### Prebuilt release
-
-1. Download the latest `viya-linux-amd64-*.tar.gz` from [Releases](https://github.com/ringer520/viya-proxy/releases).
-2. Extract it and run the Debian installer:
+### One-line install (Debian/Ubuntu)
 
 ```sh
-tar -xzf viya-linux-amd64-*.tar.gz
-cd viya-linux-amd64-*/
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sudo sh
+```
+
+This downloads the latest prebuilt release and provisions the systemd service end to end. To pin a specific version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v1.0.0 sudo -E sh
+```
+
+### Prebuilt release
+
+Releases are built automatically by GitHub Actions whenever a `v*` tag is pushed (see [`.github/workflows/release.yml`](.github/workflows/release.yml)). Each release ships a `viya-linux-amd64.tar.gz` containing the Viya and Caddy binaries plus the Debian installer.
+
+1. Download the latest `viya-linux-amd64.tar.gz` from [Releases](https://github.com/ringer520/viya-proxy/releases).
+2. Extract it and run the installer:
+
+```sh
+tar -xzf viya-linux-amd64.tar.gz
+cd viya-linux-amd64/
 sudo sh ./deploy/install-debian.sh
 ```
 
