@@ -2,6 +2,13 @@
 Description=Viya Caddy Reverse Proxy Manager
 After=network-online.target
 Wants=network-online.target
+# Without a start limit, a hard failure (e.g. the panel port is already
+# bound) restarts forever at RestartSec intervals and floods the journal.
+# Give up after 5 failures within a minute so the unit goes to a visible
+# stopped state instead of looping silently. NOTE: since systemd v230 these
+# keys must live in [Unit]; in [Service] they are silently ignored.
+StartLimitBurst=5
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple

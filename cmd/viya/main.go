@@ -368,13 +368,23 @@ func main() {
 			addr = net.JoinHostPort(host, configuredPort)
 		}
 	}
+	// Bind before announcing readiness: a port clash must fail loudly with an
+	// actionable message instead of logging "listening" and then dying.
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		slog.Error("panel port unavailable",
+			"address", addr,
+			"error", err,
+			"hint", "another process is already bound to this address; stop it or change VIYA_LISTEN / the panel port setting")
+		os.Exit(1)
+	}
 	slog.Info("Viya API listening", "address", addr)
 	// WriteTimeout must stay above the slowest business operation (DDNS run 35s,
 	// configuration import 90s); otherwise Go truncates a response after the
 	// work already succeeded and operators retry the same import twice.
-	server := &http.Server{Addr: addr, Handler: securityHeaders(logRequests(mux)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	server := &http.Server{Handler: securityHeaders(logRequests(mux)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- server.ListenAndServe() }()
+	go func() { serveErr <- server.Serve(listener) }()
 	select {
 	case err := <-serveErr:
 		if !errors.Is(err, http.ErrServerClosed) {
