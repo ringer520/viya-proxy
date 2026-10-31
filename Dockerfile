@@ -25,9 +25,9 @@ COPY build/caddy/go.mod build/caddy/go.sum ./
 RUN go mod download
 COPY build/caddy/ ./
 RUN set -e; \
-    GOARM=""; \
-    if [ "$TARGETARCH" = "arm" ]; then GOARM="GOARM=${TARGETVARIANT#v}"; fi; \
-    CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH $GOARM \
+    ARMV=""; \
+    if [ "$TARGETARCH" = "arm" ]; then ARMV="${TARGETVARIANT#v}"; fi; \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH GOARM=$ARMV \
       go build -trimpath -buildvcs=false -ldflags "-s -w" -o /out/caddy .
 
 # ---- Stage 3: Viya (control plane + embedded frontend) ----
@@ -42,9 +42,9 @@ COPY cmd/ cmd/
 COPY internal/ internal/
 COPY --from=frontend /src/internal/web/dist internal/web/dist
 RUN set -e; \
-    GOARM=""; \
-    if [ "$TARGETARCH" = "arm" ]; then GOARM="GOARM=${TARGETVARIANT#v}"; fi; \
-    CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH $GOARM \
+    ARMV=""; \
+    if [ "$TARGETARCH" = "arm" ]; then ARMV="${TARGETVARIANT#v}"; fi; \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH GOARM=$ARMV \
       go build -trimpath -buildvcs=false \
         -ldflags "-s -w -X main.version=${VERSION}" \
         -o /out/viya ./cmd/viya
