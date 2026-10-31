@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#0b1220" />
+    <link rel="icon" type="image/png" href="/viya-fox-icon.png" />
+    <title>Viya · 反向代理管理</title>
+    <script>
+      // Apply the saved palette before first paint; otherwise a dark theme
+      // flashes light while the bundle boots.
+      (function () {
+        try {
+          var choice = localStorage.getItem("viya-theme") || "system";
+          var palettes = ["light", "dark", "aurora", "ember", "cyber"];
+          var systemDark = window.matchMedia("(prefers-color-scheme: dark)")
+            .matches;
+          var palette =
+            choice === "system"
+              ? systemDark
+                ? "dark"
+                : "light"
+              : palettes.indexOf(choice) >= 0
+                ? choice
+                : "light";
+          var root = document.documentElement;
+          root.dataset.palette = palette;
+          root.dataset.theme = palette === "light" ? "light" : "dark";
+          root.dataset.density =
+            localStorage.getItem("viya-compact-mode") === "true"
+              ? "compact"
+              : "comfortable";
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

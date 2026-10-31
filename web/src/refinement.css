@@ -1,0 +1,388 @@
+/* Refinement layer: layout polish added on top of the compact base sheets.
+   Kept separate so the minified originals stay untouched and reversible. */
+
+/* ---- 顶部工作区栏：面包屑 / 引擎状态 / 唯一刷新入口 ---- */
+.workspace-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.workspace-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.refresh-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+.refresh-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.refresh-btn:disabled {
+  cursor: progress;
+  opacity: 0.8;
+}
+.refresh-btn .spinning {
+  animation: viya-spin 0.9s linear infinite;
+}
+
+/* ---- 工具栏：添加按钮靠左，帮助问号靠右 ---- */
+.workspace-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.workspace-toolbar .page-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.toolbar-add {
+  order: -1;
+}
+
+/* ---- 名称强调色：站点用主强调色、端口转发用次强调色，跟随主题 ---- */
+.entity-name {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--accent);
+}
+.site-title > strong.entity-name {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--accent);
+}
+.l4-row .site-title > strong.entity-name {
+  color: var(--accent-2);
+}
+[data-theme="dark"] .site-title > strong.entity-name {
+  color: color-mix(in srgb, var(--accent) 88%, #ffffff);
+}
+[data-theme="dark"] .l4-row .site-title > strong.entity-name {
+  color: color-mix(in srgb, var(--accent-2) 86%, #ffffff);
+}
+.site-title .site-alias {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---- 站点卡片：域名 / 上游 / 证书与日志三行 ---- */
+.site-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.site-upstream {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.site-badges {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cert-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f9f6e;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.cert-line svg {
+  color: #10b981;
+  flex: none;
+}
+.cert-line small {
+  font-weight: 500;
+  color: var(--muted);
+}
+[data-theme="dark"] .cert-line {
+  color: #4ade80;
+}
+[data-theme="dark"] .cert-line svg {
+  color: #34d399;
+}
+
+/* ---- 端口转发行 ---- */
+.l4-row .l4-icon {
+  background: color-mix(in srgb, #6366f1 14%, var(--surface));
+  color: #6366f1;
+}
+.l4-proto,
+.proto-tag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 6px;
+  line-height: 1.5;
+}
+.proto-tag.plain {
+  border-style: dashed;
+}
+.l4-detail {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.l4-detail .l4-port,
+.l4-detail .l4-target {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.l4-detail .l4-port b {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.l4-detail .l4-target code {
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+.l4-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow: auto;
+}
+.l4-log-list li {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.l4-log-list li span {
+  color: var(--text);
+  word-break: break-word;
+}
+.l4-log-list li small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 11px;
+}
+.l4-log-list time {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ---- 列表搜索：单图标按钮，与站点列表一致 ---- */
+.list-search-toggle {
+  flex: none;
+}
+.list-search-input {
+  flex: 1 1 240px;
+  min-width: 160px;
+  max-width: 420px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 10px;
+  font-size: 13px;
+}
+.list-search-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- 监控预设 ---- */
+.preset-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.preset-row > span {
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+.preset-chip {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+.preset-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+/* ---- 复选框行 ---- */
+.check-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.check-line input {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---- 站点流量块更紧凑，避免与操作按钮抢位 ---- */
+.host-row .site-traffic {
+  gap: 2px;
+}
+.host-row .traffic-spark {
+  gap: 2px;
+  height: 31px;
+  margin-top: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+}
+.host-row .traffic-spark i {
+  width: 4px;
+  border-radius: 2px 2px 1px 1px;
+  background: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+.host-row .traffic-spark i:hover {
+  background: var(--accent);
+}
+
+/* ---- 状态胶囊：深色主题下不再出现白底 ---- */
+.badge {
+  letter-spacing: 0.01em;
+}
+[data-theme="dark"] .badge {
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+  border-color: color-mix(in srgb, #22c55e 32%, transparent);
+  color: #6ee7a8;
+}
+[data-theme="dark"] .badge.disabled {
+  background: color-mix(in srgb, #94a3b8 14%, transparent);
+  border-color: color-mix(in srgb, #94a3b8 26%, transparent);
+  color: #9aa8bd;
+}
+.l4-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #0f9f6e;
+  white-space: nowrap;
+}
+.l4-state i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #10b981 18%, transparent);
+}
+.l4-state.off {
+  color: var(--muted);
+}
+.l4-state.off i {
+  background: var(--muted);
+  box-shadow: none;
+}
+[data-theme="dark"] .l4-state {
+  color: #4ade80;
+}
+
+/* ---- 窄屏：站点卡片改为两行，避免域名与上游被挤成竖排 ---- */
+@media (max-width: 760px) {
+  /* 行首图标在窄屏会独占一行，隐藏后让名称与详情占满宽度 */
+  .host-row > .host-icon {
+    display: none;
+  }
+  .host-row .host-main {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .host-row .site-title > strong.entity-name {
+    font-size: 14px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    max-width: 100%;
+  }
+  .host-row .site-main .site-upstream {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .host-row .site-traffic {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    order: 5;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 10px 0 0;
+  }
+  .host-row .traffic-spark {
+    max-width: 100%;
+  }
+  .host-row .traffic-spark i {
+    width: 3px;
+  }
+  /* 转发日志入口在窄屏脱离详情行，固定在卡片右上角，避免独占一行 */
+  .l4-row {
+    position: relative;
+  }
+  .l4-row .site-title {
+    padding-right: 38px;
+  }
+  .l4-row .site-log-preview-wrap {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    margin: 0;
+  }
+}
+

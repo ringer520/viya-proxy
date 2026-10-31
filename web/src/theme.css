@@ -1,0 +1,776 @@
+/* ==========================================================================
+   Viya theme layer
+   --------------------------------------------------------------------------
+   Loaded last so it can refine the minified base sheets without editing them.
+   Every surface is described once with semantic tokens; each palette only
+   redefines the tokens. Palettes are selected with data-palette on <html>,
+   while data-theme keeps the legacy light/dark rules working.
+
+   Palettes: light · dark · aurora (极光) · ember (琥珀) · cyber (赛博)
+   ========================================================================== */
+
+:root {
+  --font-sans:
+    "Inter var", Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont,
+    "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui,
+    sans-serif;
+  --font-mono:
+    "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Consolas,
+    "Liberation Mono", monospace;
+  --fs-xs: 11.5px;
+  --fs-sm: 12.5px;
+  --fs-base: 13.5px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 23px;
+  --fs-display: 32px;
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ---- 浅色：干净的中性蓝灰 ---- */
+html[data-palette="light"] {
+  --bg: #f4f6fb;
+  --bg-tint-1: #e8efff;
+  --bg-tint-2: #eef7f2;
+  --surface: #ffffff;
+  --surface-2: #f6f8fc;
+  --surface-3: #eef2f9;
+  --line: #e2e8f2;
+  --line-strong: #cfd9e8;
+  --text: #16203a;
+  --muted: #69778f;
+  --accent: #2563eb;
+  --accent-2: #0891b2;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(37, 99, 235, 0.1);
+  --nav-bg: #101827;
+  --nav-bg-2: #16213a;
+  --nav-text: #cdd6e6;
+  --nav-active: #1e2a40;
+  --glow: rgba(37, 99, 235, 0.16);
+  --shadow-card: 0 1px 2px rgba(18, 32, 58, 0.04), 0 10px 30px -18px rgba(18, 32, 58, 0.22);
+  --shadow-float: 0 18px 50px -12px rgba(18, 32, 58, 0.28);
+  --ring: rgba(37, 99, 235, 0.45);
+}
+
+/* ---- 深色：原版午夜蓝，收敛亮度层次 ---- */
+html[data-palette="dark"] {
+  --bg: #0b1220;
+  --bg-tint-1: #12203a;
+  --bg-tint-2: #0e1a2b;
+  --surface: #131d2d;
+  --surface-2: #182338;
+  --surface-3: #1e2a42;
+  --line: #29364b;
+  --line-strong: #3a4a63;
+  --text: #e6ecf6;
+  --muted: #9aa8bd;
+  --accent: #6fa3ff;
+  --accent-2: #38bdf8;
+  --accent-contrast: #08111f;
+  --accent-soft: rgba(111, 163, 255, 0.14);
+  --nav-bg: #0d1626;
+  --nav-bg-2: #121e33;
+  --nav-text: #c3cee0;
+  --nav-active: #1b2a44;
+  --glow: rgba(91, 140, 255, 0.22);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03), 0 18px 40px -28px rgba(0, 0, 0, 0.9);
+  --shadow-float: 0 24px 60px -18px rgba(0, 0, 0, 0.75);
+  --ring: rgba(111, 163, 255, 0.5);
+}
+
+/* ---- 极光：深青底 + 薄荷绿 ---- */
+html[data-palette="aurora"] {
+  --bg: #071a1c;
+  --bg-tint-1: #0a2f2c;
+  --bg-tint-2: #0b2530;
+  --surface: #0d2426;
+  --surface-2: #11302f;
+  --surface-3: #163a38;
+  --line: #1d4441;
+  --line-strong: #2a5c56;
+  --text: #e2f5ef;
+  --muted: #8fb3ac;
+  --accent: #34d399;
+  --accent-2: #22d3ee;
+  --accent-contrast: #04231c;
+  --accent-soft: rgba(52, 211, 153, 0.14);
+  --nav-bg: #06181b;
+  --nav-bg-2: #0a2226;
+  --nav-text: #bfe3da;
+  --nav-active: #10322f;
+  --glow: rgba(45, 212, 191, 0.24);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 40px -28px rgba(0, 0, 0, 0.9);
+  --shadow-float: 0 24px 60px -18px rgba(0, 0, 0, 0.8);
+  --ring: rgba(52, 211, 153, 0.5);
+}
+
+/* ---- 琥珀：暖炭底 + 金色 ---- */
+html[data-palette="ember"] {
+  --bg: #1a1310;
+  --bg-tint-1: #2e1d12;
+  --bg-tint-2: #25160f;
+  --surface: #231914;
+  --surface-2: #2c1f18;
+  --surface-3: #38271d;
+  --line: #433026;
+  --line-strong: #5a4031;
+  --text: #f7ebe0;
+  --muted: #bda58f;
+  --accent: #f5a524;
+  --accent-2: #fb7185;
+  --accent-contrast: #241403;
+  --accent-soft: rgba(245, 165, 36, 0.14);
+  --nav-bg: #150f0c;
+  --nav-bg-2: #211611;
+  --nav-text: #e6d3bf;
+  --nav-active: #33231a;
+  --glow: rgba(245, 165, 36, 0.22);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 40px -28px rgba(0, 0, 0, 0.9);
+  --shadow-float: 0 24px 60px -18px rgba(0, 0, 0, 0.8);
+  --ring: rgba(245, 165, 36, 0.5);
+}
+
+/* ---- 赛博：紫黑底 + 霓虹紫/青 ---- */
+html[data-palette="cyber"] {
+  --bg: #0d0a1a;
+  --bg-tint-1: #1c1140;
+  --bg-tint-2: #0e1c33;
+  --surface: #15112a;
+  --surface-2: #1c1735;
+  --surface-3: #241d44;
+  --line: #322a55;
+  --line-strong: #473b73;
+  --text: #efe9ff;
+  --muted: #a99ec9;
+  --accent: #c084fc;
+  --accent-2: #22d3ee;
+  --accent-contrast: #1a0b2e;
+  --accent-soft: rgba(192, 132, 252, 0.16);
+  --nav-bg: #0a0716;
+  --nav-bg-2: #130e26;
+  --nav-text: #d4c9ee;
+  --nav-active: #221a40;
+  --glow: rgba(192, 132, 252, 0.26);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.05), 0 18px 40px -28px rgba(0, 0, 0, 0.9);
+  --shadow-float: 0 24px 60px -18px rgba(0, 0, 0, 0.85);
+  --ring: rgba(192, 132, 252, 0.55);
+}
+
+/* ---- 基础排版 ---- */
+html[data-palette] {
+  color-scheme: light;
+  /* Legacy aliases used by older component sheets with light fallbacks. */
+  --panel: var(--surface);
+  --border: var(--line);
+  --radius: 14px;
+  --control-height: 38px;
+}
+html[data-palette="dark"],
+html[data-palette="aurora"],
+html[data-palette="ember"],
+html[data-palette="cyber"] {
+  color-scheme: dark;
+}
+html[data-palette] body,
+html[data-palette] .auth-screen {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+html[data-palette] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 520px at 12% -8%, var(--bg-tint-1) 0%, transparent 62%),
+    radial-gradient(760px 460px at 96% 4%, var(--bg-tint-2) 0%, transparent 58%);
+  opacity: 0.55;
+}
+html[data-palette] .app-shell,
+html[data-palette] main {
+  position: relative;
+  z-index: 1;
+}
+/* Keep the fixed sidebar's own positioning; only lift it above the backdrop. */
+html[data-palette] .sidebar {
+  z-index: 3;
+}
+html[data-palette] h1,
+html[data-palette] h2,
+html[data-palette] h3,
+html[data-palette] h4 {
+  letter-spacing: -0.015em;
+}
+html[data-palette] .page-header h1 {
+  font-size: clamp(24px, 2.4vw, 31px);
+  line-height: 1.22;
+  font-weight: 720;
+}
+html[data-palette] .page-header p,
+html[data-palette] .panel-head p {
+  font-size: var(--fs-base);
+  line-height: 1.68;
+  color: var(--muted);
+}
+html[data-palette] .eyebrow,
+html[data-palette] .nav-label {
+  letter-spacing: 0.12em;
+  font-weight: 650;
+}
+html[data-palette] code,
+html[data-palette] kbd,
+html[data-palette] .gauge-number,
+html[data-palette] .traffic-metrics strong,
+html[data-palette] .site-traffic strong,
+html[data-palette] .web-total-stats b,
+html[data-palette] time {
+  font-variant-numeric: tabular-nums;
+}
+html[data-palette] code,
+html[data-palette] pre,
+html[data-palette] kbd {
+  font-family: var(--font-mono);
+}
+
+/* ---- 侧栏 ---- */
+html[data-palette] .sidebar {
+  background: linear-gradient(180deg, var(--nav-bg) 0%, var(--nav-bg-2) 100%);
+  color: var(--nav-text);
+  border-right: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+}
+html[data-palette] .nav {
+  color: var(--nav-text);
+  border-radius: 10px;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+html[data-palette] .nav:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: #fff;
+}
+html[data-palette] .nav.active {
+  background: var(--nav-active);
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+html[data-palette] .nav.active svg {
+  color: var(--accent);
+}
+html[data-palette] .brand strong {
+  letter-spacing: -0.02em;
+}
+
+/* ---- 表面 ---- */
+html[data-palette] .panel,
+html[data-palette] .engine-pill,
+html[data-palette] .stats article,
+html[data-palette] .overview-card,
+html[data-palette] .traffic-summary,
+html[data-palette] .panel-settings-popover,
+html[data-palette] .modal,
+html[data-palette] .site-log-tooltip,
+html[data-palette] .settings-card,
+html[data-palette] .site-group,
+html[data-palette] .revision-row {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+}
+html[data-palette] .panel,
+html[data-palette] .traffic-summary,
+html[data-palette] .site-group {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+html[data-palette] .site-group-heading,
+html[data-palette] .certificate-note,
+html[data-palette] .inline-help,
+html[data-palette] .advanced-toggle,
+html[data-palette] .domain-entry-mode {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+html[data-palette] .host-row,
+html[data-palette] .panel-head,
+html[data-palette] .site-traffic,
+html[data-palette] .revision-row,
+html[data-palette] .settings-toggle,
+html[data-palette] .modal-actions,
+html[data-palette] .log-tabs {
+  border-color: var(--line);
+}
+html[data-palette] .host-main strong:not(.entity-name),
+html[data-palette] .traffic-metrics strong,
+html[data-palette] .overview-card strong,
+html[data-palette] .panel-settings-heading strong,
+html[data-palette] .site-traffic strong {
+  color: var(--text);
+}
+html[data-palette] .host-main > span,
+html[data-palette] .overview-card p,
+html[data-palette] .traffic-summary p,
+html[data-palette] .revision-empty,
+html[data-palette] .traffic-metrics article > span {
+  color: var(--muted);
+}
+
+/* ---- 控件 ---- */
+html[data-palette] .primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: transparent;
+  box-shadow: 0 6px 18px -10px var(--accent);
+}
+html[data-palette] .primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, #fff);
+}
+html[data-palette] .secondary,
+html[data-palette] .theme-options button,
+html[data-palette] .icon-btn {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+html[data-palette] .secondary:hover:not(:disabled),
+html[data-palette] .icon-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--accent);
+}
+html[data-palette] .modal input:not([type="checkbox"]),
+html[data-palette] .modal select,
+html[data-palette] .modal textarea,
+html[data-palette] .settings-select select,
+html[data-palette] .settings-ports input,
+html[data-palette] .site-list-tools select,
+html[data-palette] .drawer-input-label input,
+html[data-palette] .list-search-input,
+html[data-palette] .transfer-fields input,
+html[data-palette] .transfer-fields select {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+html[data-palette] :focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+html[data-palette] .badge {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+html[data-palette] .badge.disabled {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  border-color: color-mix(in srgb, var(--muted) 30%, transparent);
+  color: var(--muted);
+}
+html[data-palette] ::selection {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+/* ---- 旧组件中写死的强调色，统一跟随主题 ---- */
+html[data-palette] .language-picker {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+html[data-palette] .language-picker button {
+  color: var(--muted);
+}
+html[data-palette] .language-picker button.selected {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+html[data-palette] .log-tabs button.selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+html[data-palette] .log-level {
+  color: var(--accent);
+}
+html[data-palette] .site-log-trigger:hover,
+html[data-palette] .site-log-trigger:focus-visible {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+html[data-palette] .domain-entry-mode button.selected {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--accent);
+}
+html[data-palette] .workspace-help > summary {
+  color: var(--muted);
+  border-color: var(--line);
+}
+/* 页面说明入口：并入页头，桌面贴标题右侧，窄屏收进右上角，不再单独占行 */
+html[data-palette] .page-header {
+  position: relative;
+}
+html[data-palette] .page-header .workspace-help {
+  align-self: flex-start;
+  margin-top: 1px;
+}
+html[data-palette] .page-header .workspace-help > summary {
+  width: 26px;
+  height: 26px;
+  font-size: 12px;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+html[data-palette] .page-header .workspace-help > summary:hover,
+html[data-palette] .page-header .workspace-help > summary:focus-visible,
+html[data-palette] .page-header .workspace-help[open] > summary {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: var(--accent-soft);
+  outline: none;
+}
+/* 弹层右对齐，避免贴右侧时溢出视口 */
+html[data-palette] .page-header .workspace-help > div {
+  left: auto;
+  right: 0;
+}
+/* 工具条没有任何按钮/统计（概览、日志、配置历史等）时不再占一行空白 */
+html[data-palette] .workspace-toolbar:not(:has(.toolbar-add)):not(
+    :has(.page-actions > *)
+  ) {
+  display: none;
+}
+html[data-palette] .workspace-help > div {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+  box-shadow: var(--shadow-float);
+}
+html[data-palette] * {
+  scrollbar-color: color-mix(in srgb, var(--accent) 35%, var(--line)) transparent;
+  scrollbar-width: thin;
+}
+html[data-palette] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+html[data-palette] ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+html[data-palette] ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent) 50%, var(--line));
+  background-clip: padding-box;
+}
+
+/* ---- 布局节奏 ---- */
+html[data-palette] main {
+  padding: 34px clamp(22px, 4vw, 60px) 48px;
+}
+html[data-palette] .page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 8px 0 16px;
+}
+/* 间距由页头下边距统一提供，工具条不再叠加自己的上边距 */
+html[data-palette] .workspace-toolbar {
+  margin-top: 0;
+}
+html[data-palette] .page-header .eyebrow {
+  display: block;
+  color: var(--accent);
+  font-size: 10.5px;
+  margin-bottom: 7px;
+  text-transform: uppercase;
+}
+html[data-palette] .page-header p {
+  margin: 7px 0 0;
+  max-width: 780px;
+}
+html[data-palette] .workspace-bar {
+  margin-bottom: 10px;
+  letter-spacing: 0.01em;
+}
+html[data-palette] .workspace-toolbar {
+  margin: 10px 0 22px;
+}
+html[data-palette] .panel-head {
+  padding: 20px 22px;
+}
+html[data-palette] .overview-card {
+  transition:
+    transform 0.2s var(--ease),
+    border-color 0.2s var(--ease),
+    box-shadow 0.2s var(--ease);
+}
+html[data-palette] .overview-telemetry {
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-bottom: 20px;
+  align-items: stretch;
+}
+@media (max-width: 1180px) {
+  html[data-palette] .overview-telemetry {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- KPI 行：概览页的快速读数 ---- */
+html[data-palette] .kpi-row article {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  transition:
+    border-color 0.2s var(--ease),
+    transform 0.2s var(--ease);
+}
+html[data-palette] .kpi-row article::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--accent), transparent 85%);
+  opacity: 0.7;
+}
+html[data-palette] .kpi-row article:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+html[data-palette] .kpi-row article > span {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+html[data-palette] .kpi-row strong {
+  font-family: var(--font-sans);
+  font-size: 27px;
+  font-weight: 720;
+  letter-spacing: -0.03em;
+  margin: 7px 0 4px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+html[data-palette] .kpi-row strong.status-text {
+  font-size: 19px;
+}
+html[data-palette] .kpi-row small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---- 字体阶梯：标题更紧凑，正文更清晰 ---- */
+html[data-palette] .panel-head h2 {
+  font-size: 18px;
+  font-weight: 680;
+  letter-spacing: -0.018em;
+}
+html[data-palette] .host-main strong {
+  font-size: 14.5px;
+}
+html[data-palette] .host-main > span,
+html[data-palette] .site-main > span {
+  font-size: 12.5px;
+}
+html[data-palette] .nav {
+  font-size: 13.5px;
+  font-weight: 520;
+}
+html[data-palette] .primary,
+html[data-palette] .secondary {
+  font-size: 13px;
+  font-weight: 600;
+}
+html[data-palette] .badge {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+html[data-palette] table {
+  font-size: 12.5px;
+}
+@media (max-width: 760px) {
+  html[data-palette] .kpi-row {
+    grid-template-columns: 1fr;
+  }
+  html[data-palette] .kpi-row strong {
+    font-size: 22px;
+  }
+}
+html[data-palette] .overview-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  box-shadow: 0 18px 40px -24px var(--glow);
+}
+html[data-palette] .engine-pill .dot,
+html[data-palette] .dot {
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+@media (max-width: 760px) {
+  html[data-palette] main {
+    padding: 22px 16px 40px;
+  }
+  /* 页头在窄屏改为纵向排列，flex-end 会变成“整体靠右”，必须回到左对齐 */
+  html[data-palette] .page-header {
+    align-items: flex-start;
+    gap: 12px;
+    margin-top: 2px;
+  }
+  /* 页面说明收进右上角，标题区留出等宽避让，不再多占一整行 */
+  html[data-palette] .page-header .workspace-help {
+    position: absolute;
+    top: 0;
+    right: 0;
+    margin: 0;
+  }
+  html[data-palette] .page-header .page-header-title {
+    padding-right: 34px;
+  }
+  html[data-palette] .page-header .workspace-help > div {
+    top: 32px;
+    width: min(340px, calc(100vw - 32px));
+    padding: 15px;
+  }
+  /* 工具条：窄屏下按钮与统计卡改为纵向堆叠，避免并排挤压 */
+  html[data-palette] .workspace-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  html[data-palette] .workspace-toolbar .toolbar-add {
+    width: 100%;
+    justify-content: center;
+  }
+  html[data-palette] .workspace-toolbar .page-actions {
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+  html[data-palette] .workspace-toolbar .web-total-stats {
+    width: 100%;
+    justify-content: space-between;
+  }
+  /* 日志表格：窄屏保留可读列宽并允许横向滚动，而不是把列压到看不见 */
+  html[data-palette] .log-content .site-log-table {
+    min-width: 560px;
+  }
+  html[data-palette] .log-content .site-log-table-scroll {
+    max-height: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* 底部工具条脱离固定悬浮，收进顶部条的右上角，避免遮挡列表内容 */
+  html[data-palette] .side-bottom {
+    position: absolute;
+    top: 15px;
+    right: 14px;
+    left: auto;
+    bottom: auto;
+    z-index: 4;
+    margin: 0;
+    padding: 0;
+    gap: 2px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  html[data-palette] .side-bottom .settings-launcher {
+    width: 34px;
+    height: 34px;
+    min-height: 34px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 9px;
+  }
+  html[data-palette] .side-bottom .settings-launcher span,
+  html[data-palette] .side-bottom .settings-launcher kbd {
+    display: none;
+  }
+  html[data-palette] .side-bottom .icon-btn {
+    width: 34px;
+    height: 34px;
+  }
+  /* 顶部导航可横向滑动：右缘渐隐提示还有后续菜单 */
+  html[data-palette] .nav-menu {
+    -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%);
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%);
+  }
+}
+
+/* ---- 登录 / 初始化页：旧样式表写死了浅色文字色，这里统一到 token ---- */
+html[data-palette] .auth-screen {
+  background:
+    radial-gradient(760px 340px at 50% 118%, var(--accent-soft) 0%, transparent 70%),
+    var(--bg);
+  color: var(--text);
+}
+html[data-palette] .auth-modal {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow-float);
+  color: var(--text);
+}
+/* style.css 的 `h1{color:#172033}` 在这里被继承覆盖，避免深色主题下标题发暗 */
+html[data-palette] .auth-modal h1 {
+  color: var(--text);
+  font-size: 23px;
+  line-height: 1.3;
+  font-weight: 700;
+}
+html[data-palette] .auth-modal .eyebrow {
+  color: var(--accent);
+}
+html[data-palette] .auth-modal .auth-hint {
+  color: var(--muted);
+}
+html[data-palette] .auth-modal label {
+  color: var(--muted);
+  font-weight: 600;
+}
+html[data-palette] .auth-modal label input {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+html[data-palette] .auth-modal label input::placeholder {
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
+}
+html[data-palette] .auth-modal label input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+html[data-palette] .auth-modal .auth-submit {
+  min-height: 42px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 650;
+  box-shadow: 0 10px 26px -14px var(--glow);
+}
+html[data-palette] .auth-modal .auth-submit:hover {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+}
+html[data-palette] .auth-logo {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 8px;
+  filter: drop-shadow(0 8px 18px var(--glow));
+}

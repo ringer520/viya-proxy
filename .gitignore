@@ -1,0 +1,16 @@
+/data/
+/web/node_modules/
+/web/dist/
+/bin/
+/release/
+*.exe
+*.db
+*.db-shm
+*.db-wal
+.env
+
+# local runtime state
+/.preview/
+master.key
+bootstrap-caddy.json
+*.log
