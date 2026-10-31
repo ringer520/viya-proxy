@@ -49,6 +49,13 @@ type Host struct {
 	IPDenylist          []string           `json:"ip_denylist"`
 	RateLimitRequests   int                `json:"rate_limit_requests"`
 	RateLimitWindow     string             `json:"rate_limit_window,omitempty"`
+	Type                string             `json:"type"`
+	RootPath            string             `json:"root_path,omitempty"`
+	SpaFallback         bool               `json:"spa_fallback,omitempty"`
+	Browse              bool               `json:"browse,omitempty"`
+	RedirectTarget      string             `json:"redirect_target,omitempty"`
+	RedirectStatus      int                `json:"redirect_status,omitempty"`
+	RedirectKeepPath    bool               `json:"redirect_keep_path"`
 	Version             int64              `json:"version"`
 }
 
@@ -194,6 +201,15 @@ func main() {
 		{"https_port", "INTEGER NOT NULL DEFAULT 443"}, // retained for upgrades from older Viya versions
 		{"path", "TEXT NOT NULL DEFAULT ''"},
 		{"icon_color", "TEXT NOT NULL DEFAULT 'blue'"},
+		// Site kinds share one handler chain; the type only selects the final
+		// handler (reverse_proxy / file_server / static_response redirect).
+		{"type", "TEXT NOT NULL DEFAULT 'proxy'"},
+		{"root_path", "TEXT NOT NULL DEFAULT ''"},
+		{"spa_fallback", "INTEGER NOT NULL DEFAULT 0"},
+		{"browse", "INTEGER NOT NULL DEFAULT 0"},
+		{"redirect_target", "TEXT NOT NULL DEFAULT ''"},
+		{"redirect_status", "INTEGER NOT NULL DEFAULT 301"},
+		{"redirect_keep_path", "INTEGER NOT NULL DEFAULT 1"},
 	} {
 		if err := ensureColumn(db, "proxy_hosts", column.name, column.definition); err != nil {
 			slog.Error("database schema update", "column", column.name, "error", err)
@@ -299,6 +315,13 @@ func main() {
 	mux.Handle("POST /api/v1/alert-settings/test", app.requireAuth(http.HandlerFunc(app.testAlertSettings)))
 	mux.Handle("GET /api/v1/certificates/expiring", app.requireAuth(http.HandlerFunc(app.expiringCertificates)))
 	mux.Handle("GET /api/v1/proxy-hosts/{id}/logs", app.requireAuth(http.HandlerFunc(app.siteAccessLogs)))
+	// Static-site file management (list/upload/download/delete/mkdir). Writes
+	// are limited to the managed sites tree and stay admin-only via requireAuth.
+	mux.Handle("GET /api/v1/proxy-hosts/{id}/files", app.requireAuth(http.HandlerFunc(app.listSiteFiles)))
+	mux.Handle("GET /api/v1/proxy-hosts/{id}/files/download", app.requireAuth(http.HandlerFunc(app.downloadSiteFile)))
+	mux.Handle("POST /api/v1/proxy-hosts/{id}/files/upload", app.requireAuth(http.HandlerFunc(app.uploadSiteFiles)))
+	mux.Handle("POST /api/v1/proxy-hosts/{id}/files/mkdir", app.requireAuth(http.HandlerFunc(app.mkdirSiteFile)))
+	mux.Handle("DELETE /api/v1/proxy-hosts/{id}/files", app.requireAuth(http.HandlerFunc(app.deleteSiteFile)))
 	mux.Handle("GET /api/v1/logs/stream", app.requireAuth(http.HandlerFunc(app.streamLogs)))
 	mux.Handle("GET /api/v1/ip-bans", app.requireAuth(http.HandlerFunc(app.listIPBans)))
 	mux.Handle("POST /api/v1/ip-bans", app.requireAuth(http.HandlerFunc(app.saveIPBan)))
@@ -546,7 +569,7 @@ func (a *App) isCaddyReady() bool {
 }
 
 func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,domain,listener_id,upstream,enabled,version,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window FROM proxy_hosts ORDER BY domain`)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,domain,listener_id,upstream,enabled,version,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,spa_fallback,browse,redirect_target,redirect_status,redirect_keep_path FROM proxy_hosts ORDER BY domain`)
 	if err != nil {
 		fail(w, 500, err)
 		return
@@ -555,15 +578,18 @@ func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
 	result := []Host{}
 	for rows.Next() {
 		var h Host
-		var enabled int
+		var enabled, spaFallback, browse, redirectKeepPath int
 		var providerID sql.NullInt64
 		var certID sql.NullInt64
 		var headerJSON, allowJSON, denyJSON string
-		if err := rows.Scan(&h.ID, &h.Name, &h.Domain, &h.ListenerID, &h.Upstream, &enabled, &h.Version, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headerJSON, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &h.Domain, &h.ListenerID, &h.Upstream, &enabled, &h.Version, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headerJSON, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &spaFallback, &browse, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath); err != nil {
 			fail(w, 500, err)
 			return
 		}
 		h.Enabled = enabled == 1
+		h.SpaFallback = spaFallback == 1
+		h.Browse = browse == 1
+		h.RedirectKeepPath = redirectKeepPath == 1
 		if providerID.Valid {
 			h.DNSProviderID = &providerID.Int64
 		}
@@ -705,7 +731,11 @@ func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
 	headerJSON, _ := json.Marshal(h.CustomHeaders)
 	allowJSON, _ := json.Marshal(h.IPAllowlist)
 	denyJSON, _ := json.Marshal(h.IPDenylist)
-	res, err := a.db.ExecContext(r.Context(), `INSERT INTO proxy_hosts(name,domain,listener_id,upstream,enabled,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, h.PasswordHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow)
+	if err := a.prepareSiteStorage(&h); err != nil {
+		fail(w, 400, err)
+		return
+	}
+	res, err := a.db.ExecContext(r.Context(), `INSERT INTO proxy_hosts(name,domain,listener_id,upstream,enabled,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,spa_fallback,browse,redirect_target,redirect_status,redirect_keep_path) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, h.PasswordHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, boolInt(h.SpaFallback), boolInt(h.Browse), h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath))
 	if err != nil {
 		status, mapped := classifyHostWriteError(err)
 		fail(w, status, mapped)
@@ -756,6 +786,10 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 	headerJSON, _ := json.Marshal(h.CustomHeaders)
 	allowJSON, _ := json.Marshal(h.IPAllowlist)
 	denyJSON, _ := json.Marshal(h.IPDenylist)
+	if err := a.prepareSiteStorage(&h); err != nil {
+		fail(w, 400, err)
+		return
+	}
 	var storedHash string
 	if h.BasicAuthEnabled {
 		if h.BasicAuthPassword != "" {
@@ -775,7 +809,7 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	res, err := a.db.ExecContext(r.Context(), `UPDATE proxy_hosts SET name=?,domain=?,listener_id=?,upstream=?,enabled=?,tls_mode=?,https_port=443,path=?,icon_color=?,dns_provider_id=?,custom_certificate_id=?,custom_headers=?,basic_auth_user=?,basic_auth_hash=?,ip_allowlist=?,ip_denylist=?,rate_limit_requests=?,rate_limit_window=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, storedHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, id, h.Version)
+	res, err := a.db.ExecContext(r.Context(), `UPDATE proxy_hosts SET name=?,domain=?,listener_id=?,upstream=?,enabled=?,tls_mode=?,https_port=443,path=?,icon_color=?,dns_provider_id=?,custom_certificate_id=?,custom_headers=?,basic_auth_user=?,basic_auth_hash=?,ip_allowlist=?,ip_denylist=?,rate_limit_requests=?,rate_limit_window=?,type=?,root_path=?,spa_fallback=?,browse=?,redirect_target=?,redirect_status=?,redirect_keep_path=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, storedHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, boolInt(h.SpaFallback), boolInt(h.Browse), h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), id, h.Version)
 	if err != nil {
 		status, mapped := classifyHostWriteError(err)
 		fail(w, status, mapped)
@@ -833,6 +867,74 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// validateStaticRoot checks a static site root: it must be an absolute path
+// with no parent-directory segments. The directory itself may not exist yet;
+// prepareSiteStorage creates it when the panel manages it.
+func validateStaticRoot(root string) error {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return errors.New("static site root directory is required")
+	}
+	if !filepath.IsAbs(root) {
+		return errors.New("static site root must be an absolute path")
+	}
+	if strings.ContainsRune(root, 0) {
+		return errors.New("static site root contains invalid characters")
+	}
+	for _, segment := range strings.FieldsFunc(root, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if segment == ".." {
+			return errors.New("static site root cannot contain .. segments")
+		}
+	}
+	return nil
+}
+
+// managedSitesDir is the only tree the panel may write into (the systemd unit
+// gives the service write access to its data directory alone). File uploads
+// are accepted only for static sites rooted here.
+func (a *App) managedSitesDir() string {
+	return filepath.Join(a.dataDir, "sites")
+}
+
+// prepareSiteStorage resolves a static site's root and makes sure it exists.
+// Roots inside the managed tree are created on demand; external roots must
+// already exist because the service cannot write outside its data directory.
+func (a *App) prepareSiteStorage(h *Host) error {
+	if h.Type != "static" {
+		return nil
+	}
+	root := strings.TrimSpace(h.RootPath)
+	if root == "" {
+		slug := strings.ToLower(h.Domain)
+		var b strings.Builder
+		for _, r := range slug {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '.' {
+				b.WriteRune(r)
+			} else {
+				b.WriteByte('-')
+			}
+		}
+		name := strings.Trim(b.String(), "-.")
+		if name == "" {
+			name = "site"
+		}
+		root = filepath.Join(a.managedSitesDir(), name)
+		h.RootPath = root
+	}
+	if err := validateStaticRoot(root); err != nil {
+		return err
+	}
+	h.RootPath = filepath.Clean(root)
+	if err := os.MkdirAll(h.RootPath, 0750); err != nil {
+		return errors.New("static site root is not accessible; create the directory on the server first")
+	}
+	info, err := os.Stat(h.RootPath)
+	if err != nil || !info.IsDir() {
+		return errors.New("static site root must be an existing directory")
+	}
+	return nil
+}
+
 func validateHost(h *Host) error {
 	h.Name = strings.TrimSpace(h.Name)
 	if len([]rune(h.Name)) > 100 {
@@ -842,11 +944,52 @@ func validateHost(h *Host) error {
 	if h.Domain == "" || !domainRE.MatchString(h.Domain) {
 		return errors.New("domain must be a valid hostname")
 	}
-	u, err := parseUpstream(h.Upstream)
-	if err != nil {
-		return err
+	switch h.Type {
+	case "", "proxy":
+		h.Type = "proxy"
+		u, err := parseUpstream(h.Upstream)
+		if err != nil {
+			return err
+		}
+		h.Upstream = u.String()
+	case "static":
+		h.Upstream = ""
+		h.RedirectTarget = ""
+		h.RedirectStatus = 0
+		// An empty root is fine here: prepareSiteStorage assigns a managed
+		// directory below. Anything non-empty must be a clean absolute path.
+		if strings.TrimSpace(h.RootPath) != "" {
+			if err := validateStaticRoot(h.RootPath); err != nil {
+				return err
+			}
+		}
+	case "redirect":
+		h.Upstream = ""
+		h.RootPath = ""
+		h.SpaFallback = false
+		h.Browse = false
+		target := strings.TrimSpace(h.RedirectTarget)
+		if target == "" {
+			return errors.New("redirect target is required")
+		}
+		u, err := url.Parse(target)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return errors.New("redirect target must be an http(s):// URL")
+		}
+		if u.RawQuery != "" || u.Fragment != "" {
+			return errors.New("redirect target cannot contain a query string or fragment; the request's own is preserved")
+		}
+		h.RedirectTarget = strings.TrimRight(target, "/")
+		switch h.RedirectStatus {
+		case 0:
+			h.RedirectStatus = 301
+		case 301, 302, 307, 308:
+		default:
+			return errors.New("redirect status must be 301, 302, 307 or 308")
+		}
+	default:
+		return errors.New("site type must be proxy, static or redirect")
 	}
-	h.Upstream = u.String()
 	h.Path = strings.TrimSpace(h.Path)
 	if h.Path != "" {
 		if !strings.HasPrefix(h.Path, "/") || len(h.Path) > 256 || strings.ContainsAny(h.Path, "?#*\\\r\n\x00\t ") {
@@ -1093,7 +1236,7 @@ func (a *App) applyWorker() {
 
 // applyLocked requires a.mu; listener changes hold it across save, reload and recovery.
 func (a *App) applyLocked(ctx context.Context) error {
-	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,listener_id,upstream,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window FROM proxy_hosts WHERE enabled=1 ORDER BY domain`)
+	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,listener_id,upstream,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,spa_fallback,browse,redirect_target,redirect_status,redirect_keep_path FROM proxy_hosts WHERE enabled=1 ORDER BY domain`)
 	if err != nil {
 		return err
 	}
@@ -1102,11 +1245,15 @@ func (a *App) applyLocked(ctx context.Context) error {
 		var h Host
 		var providerID sql.NullInt64
 		var certID sql.NullInt64
+		var spaFallback, browse, redirectKeepPath int
 		var headers, allowJSON, denyJSON string
-		if err := rows.Scan(&h.ID, &h.Domain, &h.ListenerID, &h.Upstream, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headers, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow); err != nil {
+		if err := rows.Scan(&h.ID, &h.Domain, &h.ListenerID, &h.Upstream, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headers, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &spaFallback, &browse, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath); err != nil {
 			rows.Close()
 			return err
 		}
+		h.SpaFallback = spaFallback == 1
+		h.Browse = browse == 1
+		h.RedirectKeepPath = redirectKeepPath == 1
 		if providerID.Valid {
 			h.DNSProviderID = &providerID.Int64
 		}
@@ -1207,11 +1354,43 @@ func (a *App) applyLocked(ctx context.Context) error {
 			}
 			handlers = append(handlers, map[string]any{"handler": "headers", "request": map[string]any{"set": setHeaders}})
 		}
-		proxy := map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": upstreamDial(host.Upstream)}}}
-		if upstream, parseErr := url.Parse(host.Upstream); parseErr == nil && upstream.Scheme == "https" {
-			proxy["transport"] = map[string]any{"protocol": "http", "tls": map[string]any{"server_name": upstream.Hostname()}}
+		switch host.Type {
+		case "static":
+			// Caddyfile's `root * <dir>` compiles into a vars handler; both the
+			// file matcher (SPA fallback) and file_server resolve paths from it.
+			rootMatcher := map[string]any{"host": []string{host.Domain}}
+			if host.Path != "" {
+				rootMatcher["path"] = []string{host.Path, host.Path + "/*"}
+			}
+			hostRoutes = append(hostRoutes, map[string]any{"match": []any{rootMatcher}, "handle": []any{map[string]any{"handler": "vars", "root": host.RootPath}}})
+			if host.SpaFallback {
+				// Client-side routers need unknown paths to fall back to
+				// index.html. This is a separate route ahead of the file server:
+				// Caddy's try_files lives in the file matcher, not a handler.
+				spaMatcher := map[string]any{"host": []string{host.Domain}, "file": map[string]any{"try_files": []string{"{http.request.uri.path}", "/index.html"}}}
+				if host.Path != "" {
+					spaMatcher["path"] = []string{host.Path, host.Path + "/*"}
+				}
+				hostRoutes = append(hostRoutes, map[string]any{"match": []any{spaMatcher}, "handle": []any{map[string]any{"handler": "rewrite", "uri": "{http.matchers.file.relative}"}}})
+			}
+			fileServer := map[string]any{"handler": "file_server", "root": host.RootPath}
+			if host.Browse {
+				fileServer["browse"] = map[string]any{}
+			}
+			handlers = append(handlers, fileServer)
+		case "redirect":
+			location := host.RedirectTarget
+			if host.RedirectKeepPath {
+				location += "{http.request.uri}"
+			}
+			handlers = append(handlers, map[string]any{"handler": "static_response", "status_code": host.RedirectStatus, "headers": map[string]any{"Location": []string{location}}})
+		default:
+			proxy := map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": upstreamDial(host.Upstream)}}}
+			if upstream, parseErr := url.Parse(host.Upstream); parseErr == nil && upstream.Scheme == "https" {
+				proxy["transport"] = map[string]any{"protocol": "http", "tls": map[string]any{"server_name": upstream.Hostname()}}
+			}
+			handlers = append(handlers, proxy)
 		}
-		handlers = append(handlers, proxy)
 		hostRoutes = append(hostRoutes, map[string]any{"match": []any{hostMatcher}, "handle": handlers})
 		routesByListener[host.ListenerID] = append(routesByListener[host.ListenerID], hostRoutes...)
 		if host.TLSMode == "http-01" {

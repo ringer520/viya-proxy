@@ -13,6 +13,7 @@ import AccessLogTable from "./components/AccessLogTable.vue";
 import AttentionPanel from "./components/AttentionPanel.vue";
 import TrafficRangeBar from "./components/TrafficRangeBar.vue";
 import PanelSettingsDrawer from "./components/PanelSettingsDrawer.vue";
+import SiteFilesDrawer from "./components/SiteFilesDrawer.vue";
 import ConfigTransfer from "./components/ConfigTransfer.vue";
 import LogWorkspace from "./components/LogWorkspace.vue";
 import SystemGauges from "./components/SystemGauges.vue";
@@ -40,6 +41,7 @@ import {
   X,
   Search,
   Network,
+  FolderUp,
 } from "@lucide/vue";
 
 type CertificateSource = {
@@ -75,6 +77,13 @@ type Host = {
   ip_denylist: string[];
   rate_limit_requests: number;
   rate_limit_window?: string;
+  type: string;
+  root_path?: string;
+  spa_fallback?: boolean;
+  browse?: boolean;
+  redirect_target?: string;
+  redirect_status?: number;
+  redirect_keep_path?: boolean;
 };
 type SiteGroup = { domain: string; hosts: Host[] };
 type Revision = {
@@ -783,6 +792,13 @@ const form = ref({
   basic_auth_password: "",
   rate_limit_requests: 0,
   rate_limit_window: "1s",
+  type: "proxy",
+  root_path: "",
+  spa_fallback: false,
+  browse: false,
+  redirect_target: "",
+  redirect_status: 301,
+  redirect_keep_path: true,
 });
 const deletePrompt = ref("");
 let deleteResolver: ((result: boolean) => void) | null = null;
@@ -944,6 +960,8 @@ type SiteTraffic = {
 const traffic = ref<Record<string, SiteTraffic>>({}),
   l4Traffic = ref<Record<string, SiteTraffic>>({}),
   trafficError = ref("");
+// Holds the static site whose files are being managed in the drawer.
+const siteFilesHost = ref<Host | null>(null);
 const siteLogs = ref<
   Record<
     number,
@@ -1410,6 +1428,17 @@ async function loadSiteLogs(host: Host, force = false) {
 function openSiteLogs(host: Host) {
   viewingLogSite.value = host;
   loadSiteLogs(host, true);
+}
+function openSiteFiles(host: Host | { id: number; domain: string; root_path?: string }) {
+  siteFilesHost.value = host as Host;
+}
+function openSiteFilesForForm() {
+  if (editingID.value === null) return;
+  openSiteFiles({
+    id: editingID.value,
+    domain: composedDomain.value || form.value.domain,
+    root_path: form.value.root_path,
+  });
 }
 const providerFields: Record<string, string[]> = {
   cloudflare: ["api_token"],
@@ -2467,6 +2496,13 @@ function openCreate(parentDomain?: string) {
     basic_auth_password: "",
     rate_limit_requests: 0,
     rate_limit_window: "1s",
+    type: "proxy",
+    root_path: "",
+    spa_fallback: false,
+    browse: false,
+    redirect_target: "",
+    redirect_status: 301,
+    redirect_keep_path: true,
   };
   headerText.value = "";
   allowlistText.value = "";
@@ -2507,6 +2543,13 @@ function openEdit(host: Host) {
     basic_auth_password: "",
     rate_limit_requests: host.rate_limit_requests || 0,
     rate_limit_window: host.rate_limit_window || "1s",
+    type: host.type || "proxy",
+    root_path: host.root_path || "",
+    spa_fallback: !!host.spa_fallback,
+    browse: !!host.browse,
+    redirect_target: host.redirect_target || "",
+    redirect_status: host.redirect_status || 301,
+    redirect_keep_path: host.redirect_keep_path !== false,
   };
   headerText.value = Object.entries(host.custom_headers || {})
     .map(([key, value]) => `${key}: ${value}`)
@@ -2783,6 +2826,13 @@ function cloneHost(host: Host) {
     basic_auth_password: "",
     rate_limit_requests: host.rate_limit_requests || 0,
     rate_limit_window: host.rate_limit_window || "1s",
+    type: host.type || "proxy",
+    root_path: host.root_path || "",
+    spa_fallback: !!host.spa_fallback,
+    browse: !!host.browse,
+    redirect_target: host.redirect_target || "",
+    redirect_status: host.redirect_status || 301,
+    redirect_keep_path: host.redirect_keep_path !== false,
   };
   headerText.value = Object.entries(host.custom_headers || {})
     .map(([key, value]) => `${key}: ${value}`)
@@ -3007,6 +3057,12 @@ onBeforeUnmount(() => {
       @revoke-sessions="revokeOtherSessions"
       @copy-address="copyPanelAddress"
       @reset-preferences="resetPanelPreferences"
+    />
+    <SiteFilesDrawer
+      v-if="siteFilesHost"
+      :host="{ id: siteFilesHost.id, domain: siteFilesHost.domain, root_path: siteFilesHost.root_path }"
+      :csrf="csrfToken"
+      @close="siteFilesHost = null"
     />
     <main id="main-content" tabindex="-1" :aria-busy="refreshing">
       <div class="workspace-bar">
@@ -3358,11 +3414,23 @@ onBeforeUnmount(() => {
                       class="proto-tag"
                       :class="{ plain: host.tls_mode === 'none' }"
                       >{{ host.tls_mode === "none" ? "HTTP" : "HTTPS" }}</small
+                    ><small v-if="host.type === 'static'" class="proto-tag kind">
+                      {{ t("静态") }}</small
+                    ><small
+                      v-else-if="host.type === 'redirect'"
+                      class="proto-tag kind"
+                      >{{ t("重定向") }}</small
                     ><small v-if="host.name" class="site-alias">{{
                       host.name
                     }}</small>
                   </div>
-                  <span class="site-upstream">{{ host.upstream }}</span>
+                  <span class="site-upstream">{{
+                    host.type === "static"
+                      ? host.root_path
+                      : host.type === "redirect"
+                        ? t("跳转至 ") + (host.redirect_target || "")
+                        : host.upstream
+                  }}</span>
                   <div class="site-badges">
                     <span
                       v-if="upstreamHealth[String(host.id)]"
@@ -3398,6 +3466,15 @@ onBeforeUnmount(() => {
                         >{{ host.certificate_source.domain }}</small
                       ></span
                     >
+                    <button
+                      v-if="host.type === 'static'"
+                      class="site-log-trigger"
+                      :aria-label="t('管理站点文件')"
+                      :title="t('上传、删除静态站点文件')"
+                      @click="openSiteFiles(host)"
+                    >
+                      <FolderUp :size="15" />
+                    </button>
                     <div class="site-log-preview-wrap">
                       <button
                         class="site-log-trigger"
@@ -4876,20 +4953,126 @@ onBeforeUnmount(() => {
             t("填写完整域名，不包含 http:// 或路径。")
           }}</small></label
         >
+        <div class="site-type-picker" role="group" :aria-label="t('站点类型')">
+          <button
+            type="button"
+            :class="{ selected: form.type === 'proxy' }"
+            :aria-pressed="form.type === 'proxy'"
+            @click="form.type = 'proxy'"
+          >
+            {{ t("反向代理") }}</button
+          ><button
+            type="button"
+            :class="{ selected: form.type === 'static' }"
+            :aria-pressed="form.type === 'static'"
+            @click="form.type = 'static'"
+          >
+            {{ t("静态站点") }}</button
+          ><button
+            type="button"
+            :class="{ selected: form.type === 'redirect' }"
+            :aria-pressed="form.type === 'redirect'"
+            @click="form.type = 'redirect'"
+          >
+            {{ t("URL 重定向") }}
+          </button>
+        </div>
+        <template v-if="form.type === 'proxy'">
+          <label
+            >{{ t("上游地址")
+            }}<input
+              v-model="form.upstream"
+              type="url"
+              placeholder="http://192.168.1.20:8080"
+              autocomplete="url"
+              required
+            /><small>{{
+              t(
+                "填写 http(s):// 地址。端口可省略，HTTP 默认 80，HTTPS 默认 443。",
+              )
+            }}</small></label
+          >
+          <div class="probe-row">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="upstreamTesting || !form.upstream"
+              @click="testUpstream"
+            >
+              {{ upstreamTesting ? t("正在测试…") : t("测试上游连通性") }}</button
+            ><span
+              v-if="upstreamCheck"
+              :class="upstreamCheck.ok ? 'probe-ok' : 'probe-error'"
+              >{{ upstreamCheck.message }}</span
+            >
+          </div>
+        </template>
+        <template v-else-if="form.type === 'static'">
+          <label
+            >{{ t("网站根目录")
+            }}<input
+              v-model="form.root_path"
+              :placeholder="t('留空则自动使用面板托管目录')"
+              autocapitalize="none"
+              spellcheck="false"
+            /><small>{{
+              t(
+                "静态文件所在的绝对路径。留空时面板会在托管目录下自动创建；外部目录只能只读服务。",
+              )
+            }}</small></label
+          >
+          <label class="drawer-check-line"
+            ><input v-model="form.spa_fallback" type="checkbox" />{{
+              t("单页应用回退（前端路由刷新不 404）")
+            }}</label
+          >
+          <label class="drawer-check-line"
+            ><input v-model="form.browse" type="checkbox" />{{
+              t("允许目录浏览")
+            }}</label
+          >
+          <div v-if="editingID !== null" class="dependency-help">
+            <span>{{ t("上传、删除站点文件。") }}</span
+            ><button
+              type="button"
+              class="inline-action"
+              @click="openSiteFilesForForm()"
+            >
+              {{ t("管理站点文件") }}
+            </button>
+          </div>
+          <p v-else class="inline-help">
+            {{ t("保存后可在站点卡片里上传网站文件。") }}
+          </p>
+        </template>
+        <template v-else>
+          <label
+            >{{ t("跳转目标")
+            }}<input
+              v-model="form.redirect_target"
+              type="url"
+              placeholder="https://new.example.com"
+              required
+            /><small>{{
+              t("填写 http(s):// 地址，不带查询参数和片段。")
+            }}</small></label
+          >
+          <label
+            >{{ t("跳转状态码")
+            }}<select v-model.number="form.redirect_status">
+              <option :value="301">301 {{ t("永久重定向") }}</option>
+              <option :value="302">302 {{ t("临时重定向") }}</option>
+              <option :value="307">307 {{ t("临时（保留方法）") }}</option>
+              <option :value="308">308 {{ t("永久（保留方法）") }}</option>
+            </select></label
+          >
+          <label class="drawer-check-line"
+            ><input v-model="form.redirect_keep_path" type="checkbox" />{{
+              t("保留访问路径与查询参数")
+            }}</label
+          >
+        </template>
         <label
-          >{{ t("上游地址")
-          }}<input
-            v-model="form.upstream"
-            type="url"
-            placeholder="http://192.168.1.20:8080"
-            autocomplete="url"
-            required
-          /><small>{{
-            t(
-              "填写 http(s):// 地址。端口可省略，HTTP 默认 80，HTTPS 默认 443。",
-            )
-          }}</small></label
-        >
         <label
           >{{ t("访问路径（选填）")
           }}<input
@@ -4923,20 +5106,6 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <small>{{ t("默认使用海蓝色图标。") }}</small>
-        </div>
-        <div class="probe-row">
-          <button
-            type="button"
-            class="secondary"
-            :disabled="upstreamTesting || !form.upstream"
-            @click="testUpstream"
-          >
-            {{ upstreamTesting ? t("正在测试…") : t("测试上游连通性") }}</button
-          ><span
-            v-if="upstreamCheck"
-            :class="upstreamCheck.ok ? 'probe-ok' : 'probe-error'"
-            >{{ upstreamCheck.message }}</span
-          >
         </div>
         <label
           >TLS / HTTPS<select v-model="form.tls_mode">

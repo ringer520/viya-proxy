@@ -701,14 +701,14 @@ func (a *App) importConfiguration(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) validateRestoredBindings(ctx context.Context) error {
-	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,listener_id,upstream,tls_mode,dns_provider_id,custom_certificate_id FROM proxy_hosts`)
+	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,listener_id,upstream,tls_mode,dns_provider_id,custom_certificate_id,type,root_path,redirect_target,redirect_status FROM proxy_hosts`)
 	if err != nil {
 		return err
 	}
 	hosts := []Host{}
 	for rows.Next() {
 		var h Host
-		if err = rows.Scan(&h.ID, &h.Domain, &h.ListenerID, &h.Upstream, &h.TLSMode, &h.DNSProviderID, &h.CustomCertificateID); err != nil {
+		if err = rows.Scan(&h.ID, &h.Domain, &h.ListenerID, &h.Upstream, &h.TLSMode, &h.DNSProviderID, &h.CustomCertificateID, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus); err != nil {
 			rows.Close()
 			return err
 		}

@@ -666,3 +666,32 @@
   flex: none;
   margin-left: 6px;
 }
+
+/* 站点类型选择：三段式切换，与表单其他分组控件同一视觉语言 */
+.site-type-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+.site-type-picker button {
+  border: 1px solid var(--line);
+  background: var(--fill-soft, rgba(127, 127, 127, 0.06));
+  color: var(--muted);
+  border-radius: 10px;
+  padding: 9px 6px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.site-type-picker button.selected {
+  border-color: var(--accent, #378add);
+  color: var(--text);
+  background: rgba(55, 138, 221, 0.12);
+  font-weight: 500;
+}
+.proto-tag.kind {
+  background: rgba(55, 138, 221, 0.14);
+  color: var(--accent, #185fa5);
+  border-color: transparent;
+}

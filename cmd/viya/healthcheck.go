@@ -65,7 +65,9 @@ func (a *App) probeUpstreams(ctx context.Context) {
 	if a == nil || a.db == nil || ctx.Err() != nil {
 		return
 	}
-	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,upstream FROM proxy_hosts WHERE enabled=1`)
+	// Only reverse-proxy sites have an upstream to probe; static and redirect
+	// sites are healthy by definition.
+	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,upstream FROM proxy_hosts WHERE enabled=1 AND (type='proxy' OR type='')`)
 	if err != nil {
 		return
 	}
