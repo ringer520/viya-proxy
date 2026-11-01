@@ -1,7 +1,7 @@
 #!/bin/sh
 # Viya one-line installer for Linux systems booted with systemd.
 #
-#   curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sudo sh
+#   curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
 #
 # The script detects the CPU architecture, downloads the matching prebuilt
 # release, extracts it, and hands off to the bundled install-debian.sh (which
@@ -11,8 +11,15 @@
 set -eu
 
 if [ "$(id -u)" -ne 0 ]; then
-  echo "Please run as root: curl -fsSL ... | sudo sh" >&2
-  exit 1
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "Error: this installer needs root privileges. Install sudo or run the command as root." >&2
+    exit 1
+  fi
+
+  # Re-fetch under sudo: this script may itself be arriving through a pipe,
+  # whose stdin cannot safely be handed to a second shell after self-copying.
+  exec sudo env VERSION="${VERSION:-}" VIYA_INSTALL_LISTEN="${VIYA_INSTALL_LISTEN:-}" \
+    sh -c 'curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh'
 fi
 
 if [ "$(uname -s)" != "Linux" ]; then
