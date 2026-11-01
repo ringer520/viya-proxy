@@ -61,10 +61,10 @@
 支持运行 systemd 的 Linux，提供 amd64、arm64、armv7 安装包。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
 ```
 
-安装器会校验 SHA-256、检查端口、创建系统服务并设置开机自启。默认通过 `http://服务器局域网IP:8181` 打开面板，首次访问时创建管理员账户。面板端口应仅向可信网络开放；有防火墙时允许局域网访问对应 TCP 端口。
+以上命令适用于 root。普通用户请使用 `curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sudo sh`，前提是系统已安装 sudo。安装器会校验 SHA-256、检查端口、创建系统服务并设置开机自启。默认通过 `http://服务器局域网IP:8181` 打开面板，首次访问时创建管理员账户。面板端口应仅向可信网络开放；有防火墙时允许局域网访问对应 TCP 端口。
 
 新安装时如端口冲突，可指定其他端口：
 
