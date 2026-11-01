@@ -163,7 +163,7 @@ HEALTH_URL="http://$HEALTH_HOST:$PANEL_PORT/api/v1/health"
 
 # A running Viya instance may own this port. Otherwise probe the exact saved
 # panel address before changing files or stopping any service.
-if ! systemctl is-active --quiet viya.service && ! systemctl is-active --quiet "$legacy_service"; then
+check_panel_port() {
   python3 - "$HEALTH_URL" "$PANEL_BIND_HOST" "$PANEL_PORT" <<'PY'
 import socket, sys, urllib.request
 url, host, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
@@ -192,8 +192,55 @@ try:
     if not addresses:
         raise OSError("no bind address available")
 except OSError as error:
-    raise SystemExit("Panel port " + str(port) + " is already occupied at " + host + ": " + str(error) + ". Rerun with VIYA_INSTALL_LISTEN=127.0.0.1:PORT for a fresh install, or free the port.")
+    raise SystemExit("Panel port " + str(port) + " is already occupied at " + host + ": " + str(error))
 PY
+}
+
+if ! systemctl is-active --quiet viya.service && ! systemctl is-active --quiet "$legacy_service"; then
+  if ! check_panel_port; then
+    if [ "$viya_upgrade" -ne 0 ]; then
+      echo "The configured panel port is occupied. No files were changed; change the port after resolving access to the existing installation, then retry." >&2
+      exit 1
+    fi
+    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+      echo "Rerun this installer in an interactive terminal to choose another panel port, or set VIYA_INSTALL_LISTEN=0.0.0.0:PORT." >&2
+      exit 1
+    fi
+
+    while :; do
+      printf 'The panel port %s is occupied. Enter a new port (1024-65535) [8182]: ' "$PANEL_PORT" >&2
+      if ! IFS= read -r NEW_PANEL_PORT < /dev/tty; then
+        echo "Could not read a new panel port from the terminal." >&2
+        exit 1
+      fi
+      [ -n "$NEW_PANEL_PORT" ] || NEW_PANEL_PORT=8182
+      case "$NEW_PANEL_PORT" in
+        *[!0-9]*)
+          echo "Enter a numeric port between 1024 and 65535." >&2
+          continue
+          ;;
+      esac
+      if [ "${#NEW_PANEL_PORT}" -gt 5 ]; then
+        echo "Enter a port between 1024 and 65535." >&2
+        continue
+      fi
+      if [ "$NEW_PANEL_PORT" -lt 1024 ] || [ "$NEW_PANEL_PORT" -gt 65535 ]; then
+        echo "Enter a port between 1024 and 65535." >&2
+        continue
+      fi
+
+      PANEL_PORT=$NEW_PANEL_PORT
+      case "$PANEL_BIND_HOST" in
+        *:*) VIYA_INSTALL_LISTEN="[$PANEL_BIND_HOST]:$PANEL_PORT" ;;
+        *) VIYA_INSTALL_LISTEN="$PANEL_BIND_HOST:$PANEL_PORT" ;;
+      esac
+      HEALTH_URL="http://$HEALTH_HOST:$PANEL_PORT/api/v1/health"
+      if check_panel_port; then
+        echo "Using panel address $VIYA_INSTALL_LISTEN."
+        break
+      fi
+    done
+  fi
 fi
 
 if [ "$viya_upgrade" -eq 0 ] && ! systemctl is-active --quiet "$legacy_service"; then
