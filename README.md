@@ -12,6 +12,9 @@
 
 ![运行概览](docs/screenshots/02-overview.png)
 
+<details>
+<summary>查看其他界面截图</summary>
+
 | Web 服务 | 端口转发 |
 | --- | --- |
 | ![Web 服务](docs/screenshots/03-proxy-sites.png) | ![端口转发](docs/screenshots/04-layer4.png) |
@@ -27,6 +30,8 @@
 | 日志 | 配置历史 |
 | --- | --- |
 | ![日志](docs/screenshots/09-logs.png) | ![配置历史](docs/screenshots/10-config-history.png) |
+
+</details>
 
 ## 主要功能
 
