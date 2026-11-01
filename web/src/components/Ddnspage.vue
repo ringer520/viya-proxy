@@ -1,21 +1,38 @@
 <script setup lang="ts">
-import { Network, Pencil, RefreshCw, Trash2 } from "@lucide/vue";
+import { Network, Pencil, RefreshCw, Trash2, Search } from "@lucide/vue";
 import { t } from "../i18n";
-import { hasListFilter } from "../composables/useState";
+import { clearListFilters, hasListFilter, listSearch, statusFilter } from "../composables/useState";
+import { nextTick, ref } from "vue";
 
 import { ddnsFeedback, ddnsRunning, ddnsToggling, formatDDNSTime, openDDNS, removeDDNS, runDDNS, toggleDDNS, visibleDDNS } from "../composables/useNetwork";
+const searchOpen = ref(false);
+const searchInput = ref<HTMLInputElement | null>(null);
+async function toggleSearch() {
+  searchOpen.value = !searchOpen.value;
+  if (searchOpen.value) { await nextTick(); searchInput.value?.focus(); }
+  else listSearch.value = "";
+}
 </script>
 
 <template>
       <section class="panel provider-panel">
         <div class="panel-head">
-          <div>
+          <div class="list-page-heading">
+            <div class="list-page-title">
             <h2>{{ t("动态 DNS") }}</h2>
             <p>
               {{
                 t("每个任务独立按设定间隔探测公网 IPv4 或 IPv6 并更新记录。")
               }}
             </p>
+            </div>
+            <div class="inline-list-controls">
+              <button class="icon-btn" type="button" :aria-expanded="searchOpen" :aria-label="t('搜索当前列表')" :title="t('搜索当前列表')" @click="toggleSearch"><Search :size="17" /></button>
+              <input v-if="searchOpen" ref="searchInput" v-model="listSearch" type="search" :placeholder="t('输入域名、名称或地址，支持多个关键词')" @keydown.esc="toggleSearch" />
+              <label class="inline-list-status"><span>{{ t("状态") }}</span><select v-model="statusFilter"><option value="all">{{ t("全部状态") }}</option><option value="enabled">{{ t("自动更新开启") }}</option><option value="disabled">{{ t("自动更新关闭") }}</option></select></label>
+              <span class="inline-list-count" role="status">{{ visibleDDNS.length }} {{ t("项") }}</span>
+              <button v-if="hasListFilter" class="secondary" @click="clearListFilters">{{ t("清除筛选") }}</button>
+            </div>
           </div>
         </div>
         <div v-if="visibleDDNS.length" class="host-list">

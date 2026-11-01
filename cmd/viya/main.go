@@ -269,6 +269,7 @@ func main() {
 	mux.Handle("DELETE /api/v1/ip-bans/{id}", app.requireAuth(http.HandlerFunc(app.removeIPBan)))
 	mux.Handle("GET /api/v1/version", app.requireAuth(http.HandlerFunc(app.versionInfoHandler)))
 	mux.Handle("POST /api/v1/version/update", app.requireAuth(http.HandlerFunc(app.versionUpdateHandler)))
+	mux.Handle("GET /api/v1/version/update/status", app.requireAuth(http.HandlerFunc(app.versionUpdateProgressHandler)))
 	go app.ddnsWorker()
 	go app.healthWorker()
 	go app.watchAccessLogs()

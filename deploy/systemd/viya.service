@@ -32,7 +32,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/viya
+ReadWritePaths=/var/lib/viya /opt/viya/bin
 UMask=0077
 
 [Install]

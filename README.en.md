@@ -1,110 +1,101 @@
 # Viya
 
-<p align="center"><img src="assets/logo.png" alt="Viya" width="128"></p>
+<p align="center"><img src="assets/logo.png" alt="Viya" width="112"></p>
 
-<p align="center"><strong>自托管的 Caddy 可视化管理面板</strong><br>一个界面管理反向代理、静态网站、重定向、SSL 证书、动态 DNS 和 TCP/UDP 转发。</p>
+<p align="center"><strong>A self-hosted visual control panel for Caddy</strong><br>Manage reverse proxy sites, static websites, TLS certificates, dynamic DNS and TCP/UDP forwarding from one console.</p>
 
-<p align="center">简体中文 | <a href="README.en.md">English</a></p>
+<p align="center"><a href="README.md">简体中文</a> · English</p>
 
-## 快速导航
+## Quick navigation
 
-- [界面预览](#界面预览)
-- [主要功能](#主要功能)
-- [Linux 一键安装](#linux-一键安装)
-  - [卸载](#卸载)
-- [Docker 安装](#docker-安装)
-- [备份与恢复](#备份与恢复)
-- [从源码构建](#从源码构建)
-- [协议](#协议)
+- [Screenshots](#screenshots) · [Features](#features)
+- [Linux installation](#linux-installation) · [Docker installation and updates](#docker-installation-and-updates)
+- [Backups and restore](#backups-and-restore) · [Manual OpenWrt installation](#manual-openwrt-installation)
+- [Build from source](#build-from-source) · [Uninstall](#uninstall)
 
-## 界面预览
+## Screenshots
 
-以下截图来自当前源码的本地预览环境，包含演示配置。
+The overview brings together host resource gauges, a 24-hour traffic trend and service health. Expand the section below to view the management pages.
 
-![运行概览](docs/screenshots/02-overview.png)
+![Viya runtime overview](docs/screenshots/02-overview.png)
 
 <details>
-<summary>查看其他界面截图</summary>
+<summary>Show other pages</summary>
 
-| Web 服务 | 端口转发 |
+| Web services | TCP / UDP forwarding |
 | --- | --- |
-| ![Web 服务](docs/screenshots/03-proxy-sites.png) | ![端口转发](docs/screenshots/04-layer4.png) |
+| ![Web services](docs/screenshots/03-proxy-sites.png) | ![Port forwarding](docs/screenshots/04-layer4.png) |
 
-| 动态 DNS | SSL 证书 |
+| Dynamic DNS | TLS certificates |
 | --- | --- |
-| ![动态 DNS](docs/screenshots/05-ddns.png) | ![SSL 证书](docs/screenshots/06-certificates.png) |
+| ![Dynamic DNS](docs/screenshots/05-ddns.png) | ![Certificates](docs/screenshots/06-certificates.png) |
 
-| DNS 凭据 | IP 封禁 |
+| DNS credentials | IP bans |
 | --- | --- |
-| ![DNS 凭据](docs/screenshots/07-dns-providers.png) | ![IP 封禁](docs/screenshots/08-ip-bans.png) |
+| ![DNS credentials](docs/screenshots/07-dns-providers.png) | ![IP bans](docs/screenshots/08-ip-bans.png) |
 
-| 日志 | 配置历史 |
+| Logs | Configuration history |
 | --- | --- |
-| ![日志](docs/screenshots/09-logs.png) | ![配置历史](docs/screenshots/10-config-history.png) |
+| ![Logs](docs/screenshots/09-logs.png) | ![Configuration history](docs/screenshots/10-config-history.png) |
 
 </details>
 
-## 主要功能
+## Features
 
-- **Web 服务**：反向代理、静态网站、URL 重定向；按 HTTP/HTTPS 监听分类，支持克隆、启停、路径和安全策略。
-- **静态文件**：上传和管理网站文件；删除站点时默认同时删除托管文件，也可选择保留。
-- **SSL 证书**：自动申请与续期、上传自定义证书、复用匹配的泛域名证书，显示申请状态。
-- **动态 DNS**：支持 A、AAAA、CNAME，选择网卡地址或公网 IP 获取方式，自动或手动更新。
-- **DNS 凭据**：支持 Cloudflare、DNSPod、阿里云等服务商，凭据加密存储。
-- **端口转发**：TCP、UDP 或双协议转发，端口冲突检查和流量统计。
-- **访问安全**：IP/CIDR 封禁、访问控制、登录限流、默认安全配置和响应安全头。
-- **运行维护**：CPU、内存、磁盘监控，流量趋势、访问日志、程序日志、配置历史及恢复。
-- **面板设置**：账户、角色、语言、主题和面板端口；支持中文和英文。
+- **Web services:** reverse proxy, static hosting and URL redirects, grouped by HTTP/HTTPS listener; custom ports and paths, clone, enable/disable and security policies.
+- **Static files:** upload, browse, download, rename and delete website files in the panel. Choose whether to remove hosted files when deleting a site.
+- **TLS certificates:** issue and renew certificates, see issuance progress, upload custom certificates and reuse matching wildcard certificates.
+- **Dynamic DNS:** A, AAAA and CNAME records; choose an interface address or public-IP lookup; scheduled and manual updates.
+- **DNS credentials:** Cloudflare, DNSPod, Alibaba Cloud and other supported providers. Credentials are encrypted with a separately stored master key.
+- **TCP / UDP forwarding:** manage TCP, UDP or dual-protocol rules and inspect connection and traffic statistics.
+- **Access security:** IP/CIDR bans, access controls, login throttling, automatic bans, default security settings and response headers.
+- **Operations:** CPU, memory and disk monitoring; access and application logs; traffic trends; configuration history, backup and restore.
+- **Accounts and UI:** administrator and read-only roles, Chinese and English, multiple themes and a compact display mode.
 
-## Linux 一键安装
+## Linux installation
 
-支持运行 systemd 的 Linux，提供 amd64、arm64、armv7 安装包。
+The one-line installer supports Linux systems running **systemd** on `amd64`, `arm64` and `armv7`. It verifies the release archive with SHA-256, installs a system service and enables it at boot. The installer needs `curl` or `wget`, `tar`, `python3` and system CA certificates; it attempts to install missing prerequisites with the system package manager.
+
+Run as root:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
 ```
 
-安装脚本会自动检测权限：root 直接安装，普通用户自动调用 sudo 提权（普通用户需已安装 sudo）。安装器会校验 SHA-256、检查端口、创建系统服务并设置开机自启。默认通过 `http://服务器局域网IP:8181` 打开面板，首次访问时创建管理员账户。面板端口应仅向可信网络开放；有防火墙时允许局域网访问对应 TCP 端口。
+The same command works for a regular user: the installer detects that it is not root and re-fetches itself through `sudo`. A regular account must have `sudo` installed and be allowed to use it. By default the panel listens on `0.0.0.0:8181`, so open `http://SERVER_IP:8181` from your LAN. Create the administrator account on first access.
 
-新安装时如端口冲突，可指定其他端口：
+> Initial administrator setup is allowed from any IP that can reach the panel. Before setup, restrict the panel port to a trusted network; do not expose an uninitialized admin panel to the public Internet.
+
+### Panel port conflicts
+
+Interactive installation prompts for a different port when the default is occupied. You can also set the listen address and port explicitly:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VIYA_INSTALL_LISTEN=0.0.0.0:8182 sh
 ```
 
-```sh
-sudo systemctl status viya
-sudo journalctl -u viya -f
-sudo systemctl restart viya
-```
+If a host firewall is enabled, allow LAN access to the panel TCP port and the web listener ports you use, commonly 80 and 443.
 
-### Uninstall
-
-Stop and disable the service, then remove the program files. This keeps your settings, certificates and website files:
+### Service management and updates
 
 ```sh
-sudo systemctl disable --now viya.service
-sudo rm -f /etc/systemd/system/viya.service
-sudo rm -rf /etc/systemd/system/viya.service.d /opt/viya
-sudo systemctl daemon-reload
+sudo systemctl status viya.service
+sudo journalctl -u viya.service -f
+sudo systemctl restart viya.service
 ```
 
-Data remains in `/var/lib/viya`, `/etc/viya` and `/var/log/viya`. Remove these directories separately only when you no longer need them; they contain the database, certificates, website files and the master key required to decrypt DNS credentials:
+The panel can check for and install updates on systemd Linux. Update Docker installations by pulling the new image.
 
-```sh
-sudo rm -rf /var/lib/viya /etc/viya /var/log/viya
-```
+## Docker installation and updates
 
-## Docker 安装
-
-只需将一个宿主机目录映射到 `/var/lib/viya`，数据库、证书、网站文件、日志及加密密钥均保存在其中。
+The database, certificates, static website files, Caddy data, logs and master key live under `/var/lib/viya` in the container. Bind **one host directory** there:
 
 ```sh
 sudo mkdir -p /opt/viya/data
 cd /opt/viya
 ```
 
-保存以下内容为 `compose.yaml`：
+Create `compose.yaml`:
 
 ```yaml
 services:
@@ -113,54 +104,111 @@ services:
     container_name: viya
     restart: unless-stopped
     ports:
-      - "8181:8181"
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "8181:8181"       # Panel
+      - "80:80"           # HTTP sites and HTTP-01 challenges
+      - "443:443"         # HTTPS sites
+      - "443:443/udp"     # HTTP/3 (optional)
     volumes:
       - /opt/viya/data:/var/lib/viya
 ```
 
 ```sh
-sudo docker compose up -d
-sudo docker compose logs -f viya
+docker compose up -d
+docker compose logs -f viya
 ```
 
-打开 `http://服务器局域网IP:8181`。如宿主机端口被占用，可将映射左侧改为其他端口，例如 `18181:8181`。HTTP-01 证书验证需要公网 80 端口可达；无法提供时可使用 DNS-01。HTTPS 默认使用 TCP 443，HTTP/3 使用 UDP 443。
+Open `http://SERVER_IP:8181`. If the panel port is occupied, change the host side of the mapping, for example `18181:8181`. Resolve conflicts on host ports 80/443 or adjust the mappings. HTTP-01 validation requires public access to port 80; use DNS-01 when that is unavailable. Host mappings must match the listener ports used by your sites.
 
-更新镜像：
+Pull and recreate the container to update:
 
 ```sh
-sudo docker compose pull
-sudo docker compose up -d
+docker compose pull
+docker compose up -d
 ```
 
-升级前停止容器并备份完整 `/opt/viya/data` 目录。务必保存原有 `master.key`，否则已有 DNS 凭据无法解密。旧版双卷安装需要先迁移密钥，具体步骤见 [英文安装与升级说明](README.en.md#migrating-from-the-previous-two-volume-docker-setup)。
+Back up `/opt/viya/data` before upgrading and keep its `master.key`; saved DNS credentials cannot be decrypted without the original key. Do not use `docker compose down -v` for an update, because it removes Docker volumes.
 
-## 备份与恢复
+### Migrating from the previous two-volume Docker setup
 
-systemd 安装包包含备份和恢复脚本：
+Older deployments may have stored application data in `/var/lib/viya` and mounted the master key separately at `/etc/viya/secrets`. Stop the old container but keep the container and volumes, then copy the data:
 
 ```sh
-sudo sh ./scripts/backup-linux.sh
-sudo sh ./scripts/restore-linux.sh /var/backups/viya/viya-YYYYMMDDTHHMMSSZ.tar.gz
+docker compose stop
+sudo mkdir -p /opt/viya/data
+# Replace this with the actual volume name from docker volume ls
+docker run --rm -v <OLD_DATA_VOLUME>:/from:ro -v /opt/viya/data:/to alpine sh -c 'cp -a /from/. /to/'
+# Replace this with the old container name from docker ps -a
+docker cp <OLD_CONTAINER>:/etc/viya/secrets/master.key /opt/viya/data/master.key
 ```
 
-Linux 脚本备份不包含主密钥，请另外保存 `/etc/viya/secrets/master.key`。面板配置导出使用密码加密，包含业务配置，不包含账户和会话。
+Verify that the new directory contains the database and `master.key`. Change Compose to the single-directory mount above, run `docker compose down` (without `-v`), then run `docker compose up -d`. Sign in and check DNS credentials, certificates and site files before removing the old volumes.
 
-## 从源码构建
+## Backups and restore
 
-需要 Go 1.27+、Node.js 22 和 pnpm。前端内嵌于 Viya，运行时无需 Node.js 或外部数据库；Viya 与自定义 Caddy 是两个二进制程序。
+Full Linux backups use scripts included in a release archive. Download and extract the package matching your server architecture, then run:
+
+```sh
+sudo sh ./viya-linux-amd64/scripts/backup-linux.sh
+```
+
+Archives are written to `/var/backups/viya/`. They contain a consistent SQLite copy and runtime files, but **exclude the master key**. Keep `/etc/viya/secrets/master.key` in a separate secure location. Restore only with the key from the same installation:
+
+```sh
+sudo sh ./viya-linux-amd64/scripts/restore-linux.sh /var/backups/viya/viya-TIMESTAMP.tar.gz
+```
+
+The panel's configuration export is for moving service configuration; it excludes accounts, passwords and sessions and does not replace a full backup. Docker users should stop the container and copy the complete `/opt/viya/data` directory to another device or secure location.
+
+## Manual OpenWrt installation
+
+OpenWrt uses procd, so the systemd one-line installer does not apply. Download and extract the Release archive for your CPU architecture, then copy its binaries and init script to the device:
+
+```sh
+mkdir -p /opt/viya/bin
+cp viya-linux-armv7/bin/viya-linux-armv7 /opt/viya/bin/viya
+cp viya-linux-armv7/bin/caddy-linux-armv7 /opt/viya/bin/caddy
+cp viya-linux-armv7/deploy/openwrt/viya /etc/init.d/viya
+chmod +x /etc/init.d/viya
+/etc/init.d/viya enable
+/etc/init.d/viya start
+```
+
+Choose the archive matching your router architecture. The sample procd service binds the panel to `127.0.0.1:8181`; use LuCI reverse proxying or an SSH tunnel for remote access. Consider the router's CPU and memory before enabling certificate management or heavy forwarding workloads.
+
+## Build from source
+
+Development requires Go 1.27+, Node.js 22 and pnpm 9. Vite output is embedded in the Viya binary, so Node.js and an external database are not required at runtime. The control plane and customized Caddy engine are built as separate binaries.
+
+```sh
+pnpm --dir web install --frozen-lockfile
+pnpm --dir web build
+go build ./cmd/viya
+```
+
+Build Linux packages from Windows PowerShell:
 
 ```powershell
-pnpm --dir web install --frozen-lockfile
 ./scripts/build-linux.ps1
+./scripts/package-linux.ps1
 ```
 
-输出位于 `bin/`。本地预览可使用 `scripts/start-local-preview.ps1 -Build`，预览数据保存在 `.preview/`。
+Pushing a `v*` tag starts GitHub Actions. It builds Linux release archives and SHA-256 files for `amd64`, `arm64` and `armv7`, then publishes a multi-architecture Docker image. Release notes live in `docs/releases/` and are used as the GitHub Release description.
 
-推送 `v*` 标签会自动生成 Linux Release 安装包、校验文件及多架构 Docker 镜像。每个版本的更新说明位于 `docs/releases/<版本号>.md`，发布时会写入 GitHub Release。
+## Uninstall
 
-## 协议
+These systemd commands remove the program and service but preserve the database, certificates, website files and master key:
 
-[MIT License](LICENSE)
+```sh
+sudo systemctl disable --now viya.service
+sudo rm -f /etc/systemd/system/viya.service
+sudo rm -rf /etc/systemd/system/viya.service.d /opt/viya
+sudo systemctl daemon-reload
+```
+
+Only when you no longer need the data, separately remove `/var/lib/viya`, `/etc/viya`, `/var/log/viya` and `/var/backups/viya`. These locations may contain the database, certificates, website files, the key used to decrypt DNS credentials, and backups.
+
+For Docker, run `docker compose down`; persistent data remains in `/opt/viya/data`. Remove that directory separately only when you intend to permanently delete it.
+
+## License
+
+Viya is released under the [MIT License](LICENSE).

@@ -41,6 +41,14 @@ import { previewLimit, trafficCharts } from "../composables/usePreferences";
                 listSearch = '';
               "
             />
+            <label class="inline-list-status">
+              <span>{{ t("状态") }}</span>
+              <select v-model="statusFilter">
+                <option value="all">{{ t("全部状态") }}</option>
+                <option value="enabled">{{ t("已启用") }}</option>
+                <option value="disabled">{{ t("已停用") }}</option>
+              </select>
+            </label>
           </div>
         </div>
 
@@ -88,13 +96,6 @@ import { previewLimit, trafficCharts } from "../composables/usePreferences";
         </div>
         <div class="site-list-tools">
           <span>{{ visibleHosts.length }} {{ t("个匹配站点") }}</span
-          ><label
-            >{{ t("状态")
-            }}<select v-model="statusFilter">
-              <option value="all">{{ t("全部状态") }}</option>
-              <option value="enabled">{{ t("已启用") }}</option>
-              <option value="disabled">{{ t("已停用") }}</option>
-            </select></label
           ><button
             v-if="hasListFilter"
             class="inline-action"

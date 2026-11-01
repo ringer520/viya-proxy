@@ -504,9 +504,7 @@ async function toggleListSearch() {
     listSearchInput.value?.focus();
   } else listSearch.value = "";
 }
-const searchablePage = computed(() =>
-  ["ddns", "layer4", "ip-bans"].includes(activeSection.value),
-);
+const searchablePage = computed(() => activeSection.value === "ip-bans");
 const statusFilterAvailable = computed(() =>
   ["proxy-sites", "ddns", "layer4"].includes(activeSection.value),
 );

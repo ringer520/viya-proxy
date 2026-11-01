@@ -388,7 +388,8 @@ if [ -s /var/lib/viya/crpm.db ] && [ -s /var/lib/viya/viya.db ]; then
   exit 1
 fi
 
-install -d -o root -g root -m 0755 /opt/viya/bin
+install -d -o viya -g viya -m 0755 /opt/viya/bin
+chown viya:viya /opt/viya/bin
 install -d -o viya -g viya -m 0700 /var/lib/viya
 install -d -o root -g viya -m 0750 /etc/viya/secrets
 
@@ -417,8 +418,8 @@ chmod 0600 "$master_key"
 
 chown -R viya:viya /var/lib/viya
 chmod 0700 /var/lib/viya
-install -o root -g root -m 0755 "$viya_bin" /opt/viya/bin/viya
-install -o root -g root -m 0755 "$caddy_bin" /opt/viya/bin/caddy
+install -o viya -g viya -m 0755 "$viya_bin" /opt/viya/bin/viya
+install -o viya -g viya -m 0755 "$caddy_bin" /opt/viya/bin/caddy
 install -o root -g root -m 0644 "$ROOT/deploy/systemd/viya.service" /etc/systemd/system/viya.service
 if [ -n "${VIYA_INSTALL_LISTEN:-}" ]; then
   install -d -o root -g root -m 0755 /etc/systemd/system/viya.service.d

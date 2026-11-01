@@ -1,22 +1,39 @@
 <script setup lang="ts">
-import { Cable, Pencil, ScrollText, Server, Trash2 } from "@lucide/vue";
+import { Cable, Pencil, ScrollText, Server, Trash2, Search } from "@lucide/vue";
 import { t } from "../i18n";
 import { formatBytes } from "../format";
-import { hasListFilter } from "../composables/useState";
+import { clearListFilters, hasListFilter, listSearch, statusFilter } from "../composables/useState";
+import { nextTick, ref } from "vue";
 
 import { l4BarHeight, hourlyL4Traffic, l4Stats } from "../composables/useTraffic";
 import { l4Logs, l4PreviewLayout, l4Toggling, openL4, previewL4, removeL4, toggleL4, visibleL4 } from "../composables/useNetwork";
 import { trafficCharts } from "../composables/usePreferences";
+const searchOpen = ref(false);
+const searchInput = ref<HTMLInputElement | null>(null);
+async function toggleSearch() {
+  searchOpen.value = !searchOpen.value;
+  if (searchOpen.value) { await nextTick(); searchInput.value?.focus(); }
+  else listSearch.value = "";
+}
 </script>
 
 <template>
       <section class="panel provider-panel">
         <div class="panel-head">
-          <div>
+          <div class="list-page-heading">
+            <div class="list-page-title">
             <h2>{{ t("TCP / UDP 端口转发") }}</h2>
             <p>
               {{ t("由 Caddy Layer4 直接监听主机端口，请确认防火墙已放行。") }}
             </p>
+            </div>
+            <div class="inline-list-controls">
+              <button class="icon-btn" type="button" :aria-expanded="searchOpen" :aria-label="t('搜索当前列表')" :title="t('搜索当前列表')" @click="toggleSearch"><Search :size="17" /></button>
+              <input v-if="searchOpen" ref="searchInput" v-model="listSearch" type="search" :placeholder="t('输入域名、名称或地址，支持多个关键词')" @keydown.esc="toggleSearch" />
+              <label class="inline-list-status"><span>{{ t("状态") }}</span><select v-model="statusFilter"><option value="all">{{ t("全部状态") }}</option><option value="enabled">{{ t("已启用") }}</option><option value="disabled">{{ t("已停用") }}</option></select></label>
+              <span class="inline-list-count" role="status">{{ visibleL4.length }} {{ t("项") }}</span>
+              <button v-if="hasListFilter" class="secondary" @click="clearListFilters">{{ t("清除筛选") }}</button>
+            </div>
           </div>
         </div>
         <div v-if="visibleL4.length" class="host-list">

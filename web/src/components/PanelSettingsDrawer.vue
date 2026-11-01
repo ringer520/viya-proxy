@@ -62,7 +62,7 @@ async function testAlerts(){
 // the update endpoint swaps the running binary and the service manager brings
 // the panel back up on the new build.
 const verCurrent=ref(''),verLatest=ref(''),verUpdate=ref(false),verDocker=ref(false),verManaged=ref(false),verNotes=ref(''),verURL=ref('')
-const verBusy=ref(false),verNote=ref(''),verError=ref(''),verChecking=ref(false)
+const verBusy=ref(false),verNote=ref(''),verError=ref(''),verChecking=ref(false),verProgress=ref(0),verStage=ref(''),verRestarting=ref(false)
 async function loadVersion(){
  try{const r=await fetch('/api/v1/version');const d=await r.json();verCurrent.value=d.current||'';verLatest.value=d.latest||'';verUpdate.value=!!d.update_available;verDocker.value=!!d.in_docker;verManaged.value=!!d.managed;verNotes.value=d.notes||'';verURL.value=d.release_url||'';if(d.error)verError.value=d.error}catch{verError.value=t('读取版本信息失败')}
 }
@@ -70,9 +70,23 @@ async function checkUpdate(){
  verChecking.value=true;verError.value='';verNote.value=''
  try{const r=await fetch('/api/v1/version');const d=await r.json();verCurrent.value=d.current||'';verLatest.value=d.latest||'';verUpdate.value=!!d.update_available;verDocker.value=!!d.in_docker;verManaged.value=!!d.managed;verNotes.value=d.notes||'';verURL.value=d.release_url||'';if(d.error){verError.value=d.error}else{verNote.value=d.update_available?t('发现新版本'):t('当前已是最新版本')}}catch{verError.value=t('检查更新失败，请检查服务器网络')}finally{verChecking.value=false}
 }
+async function waitForUpdatedService(timeout=120000){
+ const deadline=Date.now()+timeout
+ while(Date.now()<deadline){
+  await new Promise(resolve=>window.setTimeout(resolve,1500))
+  try{const health=await fetch('/api/v1/health');if(health.ok)return true}catch{}
+ }
+ return false
+}
 async function applyUpdate(){
- verBusy.value=true;verError.value='';verNote.value=''
- try{const r=await fetch('/api/v1/version/update',{method:'POST',headers:{'X-CSRF-Token':props.csrf}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'update failed');verNote.value=t('更新完成，服务正在重启…');verUpdate.value=false}catch(e){verError.value=e instanceof Error?t(e.message):t('更新失败')}finally{verBusy.value=false}
+ verBusy.value=true;verError.value='';verNote.value='';verProgress.value=0;verStage.value=t('准备更新');verRestarting.value=false
+ const poll=window.setInterval(async()=>{try{const r=await fetch('/api/v1/version/update/status');if(!r.ok)return;const d=await r.json();verProgress.value=Math.max(0,Math.min(100,Number(d.percent)||0));verStage.value=d.stage?t(d.stage):verStage.value;if(d.error)verError.value=d.error;if(d.stage==='正在重启')verRestarting.value=true}catch{}},500)
+ try{const r=await fetch('/api/v1/version/update',{method:'POST',headers:{'X-CSRF-Token':props.csrf}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'update failed');verRestarting.value=true;verStage.value=t('正在等待服务重启');verNote.value=t('更新完成，服务正在重启…');verProgress.value=Math.max(verProgress.value,95);verUpdate.value=false
+  const online=await waitForUpdatedService();if(!online)throw Error(t('服务尚未恢复，请稍后手动刷新页面'));verProgress.value=100;verStage.value=t('更新完成');verNote.value=t('更新完成，正在刷新页面…');window.setTimeout(()=>window.location.reload(),700)
+ }catch(e){
+  if(verRestarting.value){verNote.value=t('更新完成，服务正在重启…');if(await waitForUpdatedService()){verProgress.value=100;verStage.value=t('更新完成');verNote.value=t('更新完成，正在刷新页面…');window.setTimeout(()=>window.location.reload(),700)}else verError.value=t('服务尚未恢复，请稍后手动刷新页面')}
+  else verError.value=e instanceof Error?t(e.message):t('更新失败')
+ }finally{window.clearInterval(poll);verBusy.value=false}
 }
 onMounted(()=>{loadAlerts();loadUsers();loadVersion()})
 watch(()=>props.username,value=>{usernameForm.value={username:value,password:''}})
@@ -111,6 +125,22 @@ onBeforeUnmount(()=>{document.body.style.overflow=previousOverflow;if(previousFo
    <div ref="body" class="settings-drawer-body">
     <p v-if="loading" class="settings-notice" role="status">{{t('正在读取面板设置…')}}</p>
     <p v-if="error" class="settings-alert" role="alert">{{ error }}</p><p v-if="message" class="settings-notice success" role="status">{{ message }}</p>
+    <div class="settings-card version-card">
+      <h4>{{t('版本与更新')}}</h4>
+      <div class="version-row"><span class="version-label">{{t('当前版本')}}</span><code class="version-tag">{{ verCurrent||'—' }}</code></div>
+      <div v-if="verLatest" class="version-row"><span class="version-label">{{t('最新版本')}}</span><code class="version-tag" :class="{'version-newer':verUpdate}">{{ verLatest }}</code></div>
+      <div v-if="verBusy" class="version-progress" role="status" :aria-label="verStage"><div><span>{{ verStage||t('正在更新…') }}</span><b>{{ verProgress }}%</b></div><progress max="100" :value="verProgress">{{ verProgress }}%</progress></div>
+      <p v-if="verError" class="settings-alert" role="alert">{{ verError }}</p>
+      <p v-if="verNote" class="settings-notice success" role="status">{{ verNote }}</p>
+      <p v-if="verDocker" class="drawer-field-help">{{t('检测到 Docker 环境：自动更新不可用，请拉取新镜像并重建容器。')}}</p>
+      <p v-else-if="!verManaged" class="drawer-field-help">{{t('当前环境不支持自动更新，请手动替换二进制。')}}</p>
+      <template v-else>
+       <button v-if="verUpdate&&role==='admin'" class="primary version-update-btn" :disabled="verBusy||verChecking" @click="applyUpdate"><Loader2 v-if="verBusy" :size="16" class="spin"/><Download v-else :size="16"/>{{ verBusy?t('正在更新…'):t('更新并重启') }}</button>
+       <p v-if="verUpdate&&role==='viewer'" class="drawer-field-help">{{t('只读账号不能执行更新，请联系管理员。')}}</p>
+      </template>
+      <button class="secondary" :disabled="verChecking||verBusy" @click="checkUpdate"><Loader2 v-if="verChecking" :size="16" class="spin"/><CheckCircle2 v-else :size="16"/>{{ verChecking?t('正在检查…'):t('检查更新') }}</button>
+      <p v-if="verURL" class="drawer-field-help"><a :href="verURL" target="_blank" rel="noopener">{{t('查看更新日志')}}</a></p>
+    </div>
     <section v-show="tab==='appearance'" id="settings-section-appearance" role="tabpanel" aria-labelledby="settings-tab-appearance">
      <div class="settings-section-intro"><h3>{{t('让面板符合你的习惯')}}</h3><p>{{t('以下偏好即时生效，保存在当前浏览器。')}}</p></div>
      <div class="settings-card"><h4>{{t('语言 / Language')}}</h4><LanguagePicker/></div>     <div class="settings-card"><h4>{{t('界面主题')}}</h4><div class="drawer-theme-options"><button v-for="item in themeOptions" :key="item.id" :class="{selected:theme===item.id}" :aria-pressed="theme===item.id" :title="item.hint" @click="theme=item.id"><span class="theme-swatch" :style="{background:item.base,'--swatch-accent':item.accent}"><i></i><b></b></span><span class="theme-name">{{ item.label }}</span><small>{{ item.hint }}</small></button></div></div>
@@ -126,25 +156,6 @@ onBeforeUnmount(()=>{document.body.style.overflow=previousOverflow;if(previousFo
      <div class="settings-section-intro"><h3>{{t('面板访问')}}</h3><p>{{t('管理入口与 Web 反代监听分别配置。')}}</p></div>
      <div class="settings-card"><h4>{{t('当前访问地址')}}</h4><div class="drawer-address"><code>{{ accessAddress }}</code><button class="icon-btn" :aria-label="t('复制面板地址')" @click="emit('copyAddress')"><Copy :size="17"/></button></div><p class="drawer-field-help">{{t('浏览器访问端口：')}}{{ accessPort }}</p></div>
      <form class="settings-card" @submit.prevent="restartConfirmed&&emit('savePort')"><h4>{{t('面板监听端口')}}</h4><label class="drawer-input-label">{{t('服务器端口')}}<input v-model.number="port" type="number" min="1024" max="65535" required :disabled="busy||loading"/></label><p class="drawer-field-help">{{t('修改后面板服务重启。通过域名反代访问时，需要同步修改对应站点的上游端口。')}}</p><label class="drawer-check-line"><input v-model="restartConfirmed" type="checkbox" :disabled="busy"/>{{t('我已了解访问地址及反代上游需要同步调整')}}</label><button class="primary" :disabled="busy||loading||!restartConfirmed">{{ busy?t('正在处理…'):t('保存端口并重启') }}</button></form>
-     <div class="settings-card version-card">
-      <h4>{{t('版本与更新')}}</h4>
-      <div class="version-row"><span class="version-label">{{t('当前版本')}}</span><code class="version-tag">{{ verCurrent||'—' }}</code></div>
-      <div v-if="verLatest" class="version-row"><span class="version-label">{{t('最新版本')}}</span><code class="version-tag" :class="{'version-newer':verUpdate}">{{ verLatest }}</code></div>
-      <p v-if="verError" class="settings-alert" role="alert">{{ verError }}</p>
-      <p v-if="verNote" class="settings-notice success" role="status">{{ verNote }}</p>
-      <p v-if="verDocker" class="drawer-field-help">{{t('检测到 Docker 环境：自动更新不可用，请拉取新镜像并重建容器。')}}</p>
-      <p v-else-if="!verManaged" class="drawer-field-help">{{t('当前环境不支持自动更新，请手动替换二进制。')}}</p>
-      <template v-else>
-       <button v-if="verUpdate&&role==='admin'" class="primary version-update-btn" :disabled="verBusy||verChecking" @click="applyUpdate">
-        <Loader2 v-if="verBusy" :size="16" class="spin"/><Download v-else :size="16"/>{{ verBusy?t('正在更新…'):t('更新并重启') }}
-       </button>
-       <p v-if="verUpdate&&role==='viewer'" class="drawer-field-help">{{t('只读账号不能执行更新，请联系管理员。')}}</p>
-      </template>
-      <button class="secondary" :disabled="verChecking||verBusy" @click="checkUpdate">
-       <Loader2 v-if="verChecking" :size="16" class="spin"/><CheckCircle2 v-else :size="16"/>{{ verChecking?t('正在检查…'):t('检查更新') }}
-      </button>
-      <p v-if="verURL" class="drawer-field-help"><a :href="verURL" target="_blank" rel="noopener">{{t('查看更新日志')}}</a></p>
-     </div>
     </section>
     <section v-show="tab==='account'" id="settings-section-account" role="tabpanel" aria-labelledby="settings-tab-account">
      <div class="settings-section-intro"><h3>{{t('账户与会话')}}</h3><p>{{t('当前管理员：')}}{{ username||t('管理员') }}</p></div>
