@@ -67,6 +67,23 @@ sudo journalctl -u viya -f
 sudo systemctl restart viya
 ```
 
+### 卸载
+
+先停止并禁用服务，再移除程序文件。此操作会保留配置、证书和网站文件：
+
+```sh
+sudo systemctl disable --now viya.service
+sudo rm -f /etc/systemd/system/viya.service
+sudo rm -rf /etc/systemd/system/viya.service.d /opt/viya
+sudo systemctl daemon-reload
+```
+
+数据默认保留在 `/var/lib/viya`、`/etc/viya` 和 `/var/log/viya`。确认不再需要后再单独删除；这些目录包含数据库、证书、网站文件和解密 DNS 凭据所需的主密钥：
+
+```sh
+sudo rm -rf /var/lib/viya /etc/viya /var/log/viya
+```
+
 ## Docker 安装
 
 只需将一个宿主机目录映射到 `/var/lib/viya`，数据库、证书、网站文件、日志及加密密钥均保存在其中。
