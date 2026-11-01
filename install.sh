@@ -160,13 +160,25 @@ PANEL_PORT=${VIYA_INSTALL_LISTEN:-}
 PANEL_PORT=${PANEL_PORT##*:}
 if [ -z "$PANEL_PORT" ]; then
   PANEL_PORT=$(python3 - <<'PY' 2>/dev/null || true
-import sqlite3
+import shlex, sqlite3, subprocess
+port = "8181"
+try:
+    env = subprocess.check_output(["systemctl", "show", "viya.service", "--property=Environment", "--value"], text=True)
+    settings = dict(item.split("=", 1) for item in shlex.split(env) if "=" in item)
+    listen = settings.get("VIYA_LISTEN", "")
+    if listen.startswith("["):
+        port = listen[listen.rfind("]:") + 2:]
+    elif ":" in listen:
+        port = listen.rsplit(":", 1)[1]
+except Exception:
+    pass
 try:
     db = sqlite3.connect("file:/var/lib/viya/viya.db?mode=ro", uri=True, timeout=2)
     row = db.execute("SELECT value FROM panel_settings WHERE key='listen_port'").fetchone()
-    print(row[0] if row and str(row[0]).isdigit() else "8181")
+    if row and str(row[0]).isdigit(): port = str(row[0])
 except Exception:
-    print("8181")
+    pass
+print(port if port.isdigit() else "8181")
 PY
   )
 fi
