@@ -57,7 +57,7 @@ CHECKSUM_URL="${RELEASE_URL}/sha256sums.txt"
 
 download() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$1" -o "$2"
+    curl -fL --progress-bar "$1" -o "$2"
   elif command -v wget >/dev/null 2>&1; then
     wget -q "$1" -O "$2"
   else
