@@ -13,8 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -58,47 +56,10 @@ func (a *App) authStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"setup_required": count == 0})
 }
 
-// newSetupToken generates a one-time token used to authorize remote initial
-// setup, and writes it into the data dir (0700) so the on-host operator can
-// read it. Loopback setup never needs the token; it exists only so that a
-// panel exposed to the network can't be claimed by an attacker before the
-// administrator runs first-time setup.
-func newSetupToken(dataDir string) string {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		slog.Warn("generate setup token", "error", err)
-		return ""
-	}
-	token := base64.RawURLEncoding.EncodeToString(raw)
-	if err := os.WriteFile(filepath.Join(dataDir, "setup-token"), []byte(token+"\n"), 0o600); err != nil {
-		slog.Warn("write setup token", "error", err)
-	}
-	return token
-}
-
-// authorizeSetup returns true when the request may perform first-time setup.
-// Loopback callers are always trusted; remote callers additionally require
-// VIYA_SETUP_REMOTE=true and the one-time token, which is burned on use.
-func (a *App) authorizeSetup(r *http.Request) bool {
-	if ip := net.ParseIP(remoteIP(r)); ip != nil && ip.IsLoopback() {
-		return true
-	}
-	if env("VIYA_SETUP_REMOTE", "false") != "true" {
-		return false
-	}
-	token := strings.TrimSpace(r.Header.Get("X-Viya-Setup-Token"))
-	a.setupMu.Lock()
-	defer a.setupMu.Unlock()
-	if token == "" || a.setupToken == "" {
-		return false
-	}
-	if subtle.ConstantTimeCompare([]byte(token), []byte(a.setupToken)) != 1 {
-		return false
-	}
-	a.setupToken = ""
-	_ = os.Remove(filepath.Join(a.dataDir, "setup-token"))
-	return true
-}
+// authorizeSetup permits first-time setup from any address. The setup handler
+// remains protected by same-origin validation, login throttling, and the
+// atomic single-administrator creation transaction.
+func (a *App) authorizeSetup(_ *http.Request) bool { return true }
 
 func (a *App) setupAdmin(w http.ResponseWriter, r *http.Request) {
 	a.configMu.RLock()
@@ -108,7 +69,7 @@ func (a *App) setupAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.authorizeSetup(r) {
-		fail(w, http.StatusForbidden, errors.New("initial setup must be performed from the host itself"))
+		fail(w, http.StatusForbidden, errors.New("initial setup is unavailable"))
 		return
 	}
 	if !a.allowLogin(r) {

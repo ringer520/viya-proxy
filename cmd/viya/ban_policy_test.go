@@ -64,58 +64,13 @@ func TestReadBanPolicyClampsNonPositiveValues(t *testing.T) {
 	}
 }
 
-func TestAuthorizeSetupLoopbackAllowedWithoutToken(t *testing.T) {
-	t.Setenv("VIYA_SETUP_REMOTE", "false")
-	app := &App{setupToken: "secret"}
-	r := httptest.NewRequest("POST", "/api/v1/auth/setup", nil)
-	r.RemoteAddr = "127.0.0.1:12345"
-	if !app.authorizeSetup(r) {
-		t.Fatal("loopback should be allowed without a token")
-	}
-}
-
-func TestAuthorizeSetupRemoteRequiresToken(t *testing.T) {
-	t.Setenv("VIYA_SETUP_REMOTE", "true")
-	app := &App{setupToken: "secret", dataDir: t.TempDir()}
-
-	r := httptest.NewRequest("POST", "/api/v1/auth/setup", nil)
-	r.RemoteAddr = "203.0.113.5:12345"
-	if app.authorizeSetup(r) {
-		t.Fatal("remote without token must be rejected")
-	}
-
-	r2 := httptest.NewRequest("POST", "/api/v1/auth/setup", nil)
-	r2.RemoteAddr = "203.0.113.5:12345"
-	r2.Header.Set("X-Viya-Setup-Token", "wrong")
-	if app.authorizeSetup(r2) {
-		t.Fatal("wrong token must be rejected")
-	}
-
-	r3 := httptest.NewRequest("POST", "/api/v1/auth/setup", nil)
-	r3.RemoteAddr = "203.0.113.5:12345"
-	r3.Header.Set("X-Viya-Setup-Token", "secret")
-	if !app.authorizeSetup(r3) {
-		t.Fatal("correct token must be accepted")
-	}
-	if app.setupToken != "" {
-		t.Fatal("token must be burned after use")
-	}
-
-	r4 := httptest.NewRequest("POST", "/api/v1/auth/setup", nil)
-	r4.RemoteAddr = "203.0.113.5:12345"
-	r4.Header.Set("X-Viya-Setup-Token", "secret")
-	if app.authorizeSetup(r4) {
-		t.Fatal("burned token must not be reusable")
-	}
-}
-
-func TestAuthorizeSetupRemoteDisabledRejectsEvenWithToken(t *testing.T) {
-	t.Setenv("VIYA_SETUP_REMOTE", "false")
-	app := &App{setupToken: "secret"}
-	r := httptest.NewRequest("POST", "/api/v1/auth/setup", nil)
-	r.RemoteAddr = "203.0.113.5:12345"
-	r.Header.Set("X-Viya-Setup-Token", "secret")
-	if app.authorizeSetup(r) {
-		t.Fatal("remote setup must be rejected when VIYA_SETUP_REMOTE is not true")
+func TestAuthorizeSetupAllowsAnyAddress(t *testing.T) {
+	app := &App{}
+	for _, address := range []string{"127.0.0.1:12345", "192.168.1.10:12345", "203.0.113.5:12345", "[2001:db8::5]:12345"} {
+		r := httptest.NewRequest("POST", "/api/v1/auth/setup", nil)
+		r.RemoteAddr = address
+		if !app.authorizeSetup(r) {
+			t.Fatalf("setup should be allowed from %s", address)
+		}
 	}
 }

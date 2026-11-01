@@ -122,8 +122,6 @@ type App struct {
 	alertLast      map[string]time.Time
 	healthMu       sync.RWMutex
 	health         map[int64]upstreamHealth
-	setupMu        sync.Mutex
-	setupToken     string
 	banPolicyCache atomic.Value
 	autoBanApplyAt atomic.Int64
 }
@@ -194,7 +192,7 @@ func main() {
 		slog.Error("invalid Caddy HTTP listener", "error", err)
 		os.Exit(1)
 	}
-	app := &App{db: db, adminURL: adminURL, adminListen: adminListen, httpListen: httpListen, caddyBin: env("VIYA_CADDY_BIN", filepath.Join("bin", "caddy")), secureCookies: secureCookies, trustedProxies: trustedProxies, ctx: runCtx, masterKey: masterKey, dataDir: dataDir, failCounts: make(map[string][]time.Time), certProgress: make(map[string]certificateProgress), applyKick: make(chan struct{}, 1), ddnsRunning: make(map[int64]bool), setupToken: newSetupToken(dataDir)}
+	app := &App{db: db, adminURL: adminURL, adminListen: adminListen, httpListen: httpListen, caddyBin: env("VIYA_CADDY_BIN", filepath.Join("bin", "caddy")), secureCookies: secureCookies, trustedProxies: trustedProxies, ctx: runCtx, masterKey: masterKey, dataDir: dataDir, failCounts: make(map[string][]time.Time), certProgress: make(map[string]certificateProgress), applyKick: make(chan struct{}, 1), ddnsRunning: make(map[int64]bool)}
 	app.configureProgramLogging()
 	if err := app.initListenerSites(); err != nil {
 		slog.Error("migrate listener sites", "error", err)
