@@ -5,7 +5,11 @@ go 1.27.0
 require (
 	github.com/caddy-dns/alidns v1.0.29
 	github.com/caddy-dns/cloudflare v0.2.4
+	github.com/caddy-dns/digitalocean v0.0.0-20250606074528-04bde2867106
+	github.com/caddy-dns/godaddy v1.2.0
+	github.com/caddy-dns/namecheap v1.0.0
 	github.com/caddy-dns/tencentcloud v0.4.3
+	github.com/caddy-dns/vultr v0.0.0-20250723121531-55bf3e9768be
 	github.com/caddyserver/caddy/v2 v2.11.7
 	github.com/mholt/caddy-l4 v0.1.2
 	github.com/mholt/caddy-ratelimit v0.1.0
@@ -46,6 +50,7 @@ require (
 	github.com/dgraph-io/badger/v2 v2.2007.4 // indirect
 	github.com/dgraph-io/ristretto v0.2.0 // indirect
 	github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da // indirect
+	github.com/digitalocean/godo v1.148.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.8.0 // indirect
 	github.com/dunglas/go-urlpattern v1.0.0 // indirect
 	github.com/dunglas/httpsfv v1.1.1 // indirect
@@ -62,6 +67,7 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/certificate-transparency-go v1.3.3 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/go-tspi v0.3.0 // indirect
 	github.com/google/s2a-go v0.1.10 // indirect
@@ -69,6 +75,8 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.22 // indirect
 	github.com/googleapis/gax-go/v2 v2.25.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
+	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
+	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/huandu/xstrings v1.6.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -79,8 +87,12 @@ require (
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/libdns/alidns v1.0.7 // indirect
 	github.com/libdns/cloudflare v0.2.2 // indirect
+	github.com/libdns/digitalocean v0.0.0-20250606071607-dfa7af5c2e31 // indirect
+	github.com/libdns/godaddy v1.1.0 // indirect
 	github.com/libdns/libdns v1.1.1 // indirect
+	github.com/libdns/namecheap v1.0.0 // indirect
 	github.com/libdns/tencentcloud v1.4.3 // indirect
+	github.com/libdns/vultr/v2 v2.0.4 // indirect
 	github.com/manifoldco/promptui v0.9.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
@@ -123,6 +135,7 @@ require (
 	github.com/tailscale/tscert v0.0.0-20251216020129-aea342f6d747 // indirect
 	github.com/things-go/go-socks5 v0.1.1 // indirect
 	github.com/urfave/cli v1.22.17 // indirect
+	github.com/vultr/govultr/v3 v3.21.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yuin/goldmark v1.8.6 // indirect
 	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20230729083705-37449abec8cc // indirect
@@ -181,4 +194,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	howett.net/plist v1.0.1 // indirect
 )
-

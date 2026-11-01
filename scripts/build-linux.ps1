@@ -8,10 +8,10 @@ if (-not $go -and (Test-Path 'C:\Program Files\Go\bin\go.exe')) {
 if (-not $go) { throw 'Go 1.27 or newer is required.' }
 if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) { throw 'pnpm is required to build the web UI.' }
 
-# Inject version via ldflags; fall back to git describe or 'dev'.
+# Use a release tag only when HEAD is exactly on that tag; local builds use 'dev'.
 $version = 'dev'
 try {
-    $tag = (git -C $repoRoot describe --tags --abbrev=0 2>$null)
+    $tag = (git -C $repoRoot describe --tags --exact-match 2>$null)
     if ($tag) { $version = $tag.Trim() }
 } catch {}
 Write-Host "Building version: $version"

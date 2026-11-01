@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { apiFetch as fetch } from "../api";
+
 import {computed,ref,watch} from 'vue'
 import {Download,Upload,Archive,RefreshCw,KeyRound} from '@lucide/vue'
 import {t} from '../i18n'
@@ -26,8 +28,8 @@ async function restore(){if(!report.value||!confirmed.value||busy.value)return;b
 <div class="transfer-content">
 <template v-if="mode==='export'">
 <p class="auth-hint">{{t('备份使用你设置的密码加密，文件中包含 DNS 凭据与证书私钥。密码不会保存在服务器，遗失后无法解密该文件。')}}</p>
-<label>{{t('备份密码（至少 8 位）')}}<input v-model="password" type="password" autocomplete="new-password" maxlength="1024" :disabled="busy"/></label>
-<label>{{t('确认备份密码')}}<input v-model="passwordConfirm" type="password" autocomplete="new-password" maxlength="1024" :disabled="busy"/></label>
+<label>{{t('备份密码（至少 8 位）')}}<input v-model="password" type="text" class="credential-input" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true" maxlength="1024" :disabled="busy"/></label>
+<label>{{t('确认备份密码')}}<input v-model="passwordConfirm" type="text" class="credential-input" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true" maxlength="1024" :disabled="busy"/></label>
 <p v-if="password&&password.length<8" class="auth-hint">{{t('备份密码至少需要 8 个字符。')}}</p>
 <p v-else-if="passwordConfirm&&password!==passwordConfirm" class="error">{{t('两次输入的备份密码不一致。')}}</p>
 <button class="primary" :disabled="busy||!passwordValid" @click="download"><Download :size="16"/>{{busy?t('正在保存…'):t('下载加密配置文件')}}</button>
@@ -36,7 +38,7 @@ async function restore(){if(!report.value||!confirmed.value||busy.value)return;b
 <label>{{t('选择配置文件')}}<input type="file" accept=".json" :disabled="busy" @change="inspect"/></label>
 <p v-if="awaitingPassword" class="auth-hint"><KeyRound :size="14"/>{{t('该备份已加密，请输入导出时设置的备份密码。')}}</p>
 <template v-if="awaitingPassword">
-<label>{{t('备份密码')}}<input v-model="importPassword" type="password" autocomplete="off" :disabled="busy" @keyup.enter="readArchive()"/></label>
+<label>{{t('备份密码')}}<input v-model="importPassword" type="text" class="credential-input" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true" :disabled="busy" @keyup.enter="readArchive()"/></label>
 <button class="secondary" :disabled="busy||importPassword.length<8" @click="readArchive()"><RefreshCw :size="15"/>{{t('解密并预览')}}</button>
 </template>
 <p v-if="busy" role="status"><RefreshCw :size="15" class="spinning"/>{{t('正在检查配置…')}}</p>

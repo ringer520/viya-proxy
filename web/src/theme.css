@@ -519,17 +519,11 @@ html[data-palette] .overview-card {
 }
 html[data-palette] .overview-telemetry {
   display: grid;
-  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   margin-bottom: 20px;
   align-items: stretch;
 }
-@media (max-width: 1180px) {
-  html[data-palette] .overview-telemetry {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* ---- KPI 行：概览页的快速读数 ---- */
 html[data-palette] .kpi-row article {
   position: relative;

@@ -1,11 +1,16 @@
 <script setup lang="ts">
+import { apiFetch as fetch } from "../api";
+
 import {t,tr} from '../i18n'
+import { confirmDeletion } from "../composables/useState";
+
 
 import LanguagePicker from './LanguagePicker.vue'
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { X, Settings, Palette, RefreshCw, Server, KeyRound, Copy, Bell, Trash2, Download, CheckCircle2, Loader2, AlertTriangle } from '@lucide/vue'
+import { X, Settings, Palette, RefreshCw, Server, KeyRound, Copy, Bell, Trash2, Download, CheckCircle2, Loader2 } from '@lucide/vue'
 const theme=defineModel<'system'|'light'|'dark'|'aurora'|'ember'|'cyber'>('theme',{required:true})
 const compact=defineModel<boolean>('compact',{required:true})
+const simpleDisplay=defineModel<boolean>('simpleDisplay',{required:true})
 const interval=defineModel<number>('interval',{required:true})
 const autoRefresh=defineModel<boolean>('autoRefresh',{required:true})
 const pauseHidden=defineModel<boolean>('pauseHidden',{required:true})
@@ -33,7 +38,7 @@ async function setUserRole(id:number,role:string){
  try{const r=await fetch(`/api/v1/users/${id}`,{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify({role})});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'update failed');userNote.value=t('权限已更新');await loadUsers()}catch(e){userError.value=e instanceof Error?t(e.message):t('更新失败')}finally{userBusy.value=false}
 }
 async function removeUser(id:number,username:string){
- if(!confirm(tr`确定删除账号 ${username} 吗？`))return
+ if(!await confirmDeletion(tr`确定删除账号 ${username} 吗？`))return
  userBusy.value=true;userError.value='';userNote.value=''
  try{const r=await fetch(`/api/v1/users/${id}`,{method:'DELETE',headers:{'X-CSRF-Token':props.csrf}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'delete failed');userNote.value=t('账号已删除');await loadUsers()}catch(e){userError.value=e instanceof Error?t(e.message):t('删除失败')}finally{userBusy.value=false}
 }
@@ -43,7 +48,7 @@ const usernameForm=ref({username:props.username,password:''})
 // is closed, so it is configured here next to the account it belongs to.
 const alertForm=ref({enabled:false,webhook_url:'',notify_recovery:false}),alertBusy=ref(false),alertNote=ref(''),alertError=ref('')
 async function loadAlerts(){
- try{const r=await fetch('/api/v1/alert-settings');const d=await r.json();alertForm.value={enabled:!!d.enabled,webhook_url:typeof d.webhook_url==='string'?d.webhook_url:'',notify_recovery:!!d.notify_recovery}}catch{alertError.value=t('读取通知设置失败')}
+ try{const r=await fetch('/api/v1/alert-settings');if(!r.ok)throw Error(t('读取通知设置失败'));const d=await r.json();alertForm.value={enabled:!!d.enabled,webhook_url:typeof d.webhook_url==='string'?d.webhook_url:'',notify_recovery:!!d.notify_recovery}}catch{alertError.value=t('读取通知设置失败')}
 }
 async function saveAlerts(){
  alertBusy.value=true;alertError.value='';alertNote.value=''
@@ -109,7 +114,7 @@ onBeforeUnmount(()=>{document.body.style.overflow=previousOverflow;if(previousFo
     <section v-show="tab==='appearance'" id="settings-section-appearance" role="tabpanel" aria-labelledby="settings-tab-appearance">
      <div class="settings-section-intro"><h3>{{t('让面板符合你的习惯')}}</h3><p>{{t('以下偏好即时生效，保存在当前浏览器。')}}</p></div>
      <div class="settings-card"><h4>{{t('语言 / Language')}}</h4><LanguagePicker/></div>     <div class="settings-card"><h4>{{t('界面主题')}}</h4><div class="drawer-theme-options"><button v-for="item in themeOptions" :key="item.id" :class="{selected:theme===item.id}" :aria-pressed="theme===item.id" :title="item.hint" @click="theme=item.id"><span class="theme-swatch" :style="{background:item.base,'--swatch-accent':item.accent}"><i></i><b></b></span><span class="theme-name">{{ item.label }}</span><small>{{ item.hint }}</small></button></div></div>
-     <div class="settings-card"><label class="drawer-setting-row"><span><strong>{{t('紧凑布局')}}</strong><small>{{t('减少站点和任务列表的留白')}}</small></span><input v-model="compact" type="checkbox"/></label><label class="drawer-setting-row"><span><strong>{{t('显示流量趋势图')}}</strong><small>{{t('关闭后保留请求数与流量统计')}}</small></span><input v-model="charts" type="checkbox"/></label><label class="drawer-setting-row"><span><strong>{{t('默认进入页面')}}</strong><small>{{t('未指定页面地址时使用')}}</small></span><select v-model="landing"><option v-for="page in pages" :key="page.id" :value="page.id">{{ page.label }}</option></select></label></div>
+     <div class="settings-card"><label class="drawer-setting-row"><span><strong>{{t('简洁显示模式')}}</strong><small>{{t('自动隐藏界面中的说明文字，让页面更简洁')}}</small></span><input v-model="simpleDisplay" type="checkbox"/></label><label class="drawer-setting-row"><span><strong>{{t('紧凑布局')}}</strong><small>{{t('减少站点和任务列表的留白')}}</small></span><input v-model="compact" type="checkbox"/></label><label class="drawer-setting-row"><span><strong>{{t('显示流量趋势图')}}</strong><small>{{t('关闭后保留请求数与流量统计')}}</small></span><input v-model="charts" type="checkbox"/></label><label class="drawer-setting-row"><span><strong>{{t('默认进入页面')}}</strong><small>{{t('未指定页面地址时使用')}}</small></span><select v-model="landing"><option v-for="page in pages" :key="page.id" :value="page.id">{{ page.label }}</option></select></label></div>
      <button class="secondary" @click="emit('resetPreferences')">{{t('恢复浏览器默认偏好')}}</button><p class="drawer-field-help">{{t('仅重置外观、刷新和显示偏好。')}}</p>
     </section>
     <section v-show="tab==='refresh'" id="settings-section-refresh" role="tabpanel" aria-labelledby="settings-tab-refresh">

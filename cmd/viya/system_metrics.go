@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"runtime"
@@ -155,6 +156,11 @@ func (a *App) toggleHostEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	var previous int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT enabled FROM proxy_hosts WHERE id=?`, id).Scan(&previous); err != nil {
+		fail(w, 404, errors.New("Site not found"))
+		return
+	}
 	res, err := a.db.ExecContext(r.Context(), `UPDATE proxy_hosts SET enabled=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?`, boolInt(*input.Enabled), id, input.Version)
 	if err != nil {
 		fail(w, 500, err)
@@ -166,7 +172,20 @@ func (a *App) toggleHostEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = a.applyLocked(r.Context()); err != nil {
-		fail(w, 502, errors.New("State saved; engine apply failed. Retry applying configuration"))
+		// Roll the enabled flag back so the panel does not show a state that
+		// the engine never applied.
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		if _, rbErr := a.db.ExecContext(rollbackCtx, `UPDATE proxy_hosts SET enabled=?,version=version+1 WHERE id=?`, previous, id); rbErr != nil {
+			slog.Error("rollback site enabled state", "id", id, "error", rbErr)
+			cancel()
+			fail(w, 500, errors.New("Site apply failed and the previous state could not be restored"))
+			return
+		}
+		if rbErr := a.applyLocked(rollbackCtx); rbErr != nil {
+			slog.Error("reapply after site rollback", "error", rbErr)
+		}
+		cancel()
+		fail(w, 502, errors.New("Site state could not be applied; previous state restored"))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"enabled": *input.Enabled, "version": input.Version + 1})

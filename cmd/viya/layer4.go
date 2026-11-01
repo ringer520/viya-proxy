@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func (a *App) listLayer4Rules(w http.ResponseWriter, r *http.Request) {
@@ -277,13 +280,28 @@ func (a *App) toggleLayer4Enabled(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, e = a.db.ExecContext(r.Context(), `UPDATE layer4_rules SET enabled=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`, boolInt(*input.Enabled), id); e != nil {
+	res, e := a.db.ExecContext(r.Context(), `UPDATE layer4_rules SET enabled=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?`, boolInt(*input.Enabled), id, v.Version)
+	if e != nil {
 		fail(w, 500, e)
 		return
 	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		fail(w, 409, errors.New("Forward changed; refresh and retry"))
+		return
+	}
 	if e = a.applyLocked(r.Context()); e != nil {
-		_, _ = a.db.Exec(`UPDATE layer4_rules SET enabled=?,version=version+1 WHERE id=?`, enabled, id)
-		_ = a.applyLocked(r.Context())
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		_, rollbackErr := a.db.ExecContext(rollbackCtx, `UPDATE layer4_rules SET enabled=?,version=version+1 WHERE id=?`, enabled, id)
+		if rollbackErr != nil {
+			slog.Error("rollback layer4 enabled state", "id", id, "error", rollbackErr)
+			cancel()
+			fail(w, 500, errors.New("Forward apply failed and the previous state could not be restored"))
+			return
+		}
+		if rbErr := a.applyLocked(rollbackCtx); rbErr != nil {
+			slog.Error("reapply after layer4 rollback", "error", rbErr)
+		}
+		cancel()
 		fail(w, 502, errors.New("Forward could not be applied; previous state restored"))
 		return
 	}

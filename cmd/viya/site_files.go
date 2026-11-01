@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,6 +36,7 @@ const (
 	siteDeleteMaxFiles = 5000
 	siteMkdirMode      = 0750
 	siteFileMode       = 0644
+	siteStatMaxFiles   = 10000 // cap so a huge tree cannot stall the request
 )
 
 // siteFileEntry describes one item inside a static site's root.
@@ -72,6 +74,40 @@ func (a *App) loadStaticSite(r *http.Request) (int64, string, error) {
 func (a *App) underManagedRoot(root string) bool {
 	base := filepath.Clean(a.managedSitesDir())
 	return root == base || strings.HasPrefix(root, base+string(os.PathSeparator))
+}
+
+// validateManagedStaticSiteRoot refuses the managed-sites root itself,
+// external paths, and symlinked paths before a destructive operation starts.
+func (a *App) validateManagedStaticSiteRoot(root string) error {
+	root = filepath.Clean(strings.TrimSpace(root))
+	base := filepath.Clean(a.managedSitesDir())
+	if root == "." || root == base || !a.underManagedRoot(root) {
+		return errors.New("refusing to remove a static site outside its managed directory")
+	}
+	if err := refuseSymlink(base, root); err != nil {
+		return err
+	}
+	info, err := os.Lstat(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return errors.New("static site root must be a managed directory")
+	}
+	return nil
+}
+
+// removeManagedStaticSite removes only a previously validated static site
+// directory. It never follows symlinks or removes the managed-sites root.
+func (a *App) removeManagedStaticSite(root string) error {
+	if err := a.validateManagedStaticSiteRoot(root); err != nil {
+		return err
+	}
+	root = filepath.Clean(strings.TrimSpace(root))
+	return os.RemoveAll(root)
 }
 
 // resolveWithinRoot joins a caller-supplied relative path onto the site root
@@ -190,6 +226,52 @@ func (a *App) listSiteFiles(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// siteFileStats reports how many files live under a static site's root and
+// their total size, so the host card can show whether the site has content.
+// Counting is capped so a huge tree cannot stall the request.
+func (a *App) siteFileStats(w http.ResponseWriter, r *http.Request) {
+	_, root, err := a.loadStaticSite(r)
+	if err != nil {
+		fail(w, 400, err)
+		return
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		writeJSON(w, 200, map[string]any{"files": 0, "total_size": 0, "empty": true})
+		return
+	}
+	var files int64
+	var total int64
+	truncated := false
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // unreadable subtree: skip rather than fail the whole stat
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if files >= siteStatMaxFiles {
+			truncated = true
+			return fs.SkipAll
+		}
+		if fi, e := d.Info(); e == nil {
+			files++
+			total += fi.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		fail(w, 500, errors.New("could not inspect site directory"))
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"files":      files,
+		"total_size": total,
+		"empty":      files == 0,
+		"truncated":  truncated,
+	})
+}
+
 func relPath(root, full string) string {
 	rel, err := filepath.Rel(root, full)
 	if err != nil {
@@ -219,9 +301,14 @@ func (a *App) downloadSiteFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, full)
 }
 
-// uploadSiteFiles stores uploaded files below the site root. A .zip payload is
-// extracted in place instead of being stored, which is what dropping a built
-// static site onto the panel usually means.
+// uploadSiteFiles stores uploaded files below the site root. A file's name may
+// carry a relative directory path (a directory upload reports
+// "dist/assets/app.js"); that structure is preserved under the target folder.
+// A .zip payload is extracted in place instead of being stored.
+//
+// Query params:
+//   - path: target directory inside the site (defaults to the root);
+//   - overwrite: "0" skips files that already exist instead of replacing them.
 func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 	_, root, err := a.loadStaticSite(r)
 	if err != nil {
@@ -247,6 +334,7 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, errors.New("could not create target directory"))
 		return
 	}
+	overwrite := r.URL.Query().Get("overwrite") != "0"
 	r.Body = http.MaxBytesReader(w, r.Body, siteFileMaxRequest)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		fail(w, 400, errors.New("invalid multipart upload (too large?)"))
@@ -257,11 +345,30 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, errors.New("no files were uploaded"))
 		return
 	}
-	stored, extracted := 0, 0
-	for _, header := range form.File["files"] {
-		filename := filepath.Base(filepath.FromSlash(header.Filename))
-		if filename == "." || filename == ".." || filename == "" {
+	stored, extracted, skipped := 0, 0, 0
+	// Relative paths travel in a parallel "paths" field because the multipart
+	// layer sanitises file names to their base name (CVE-2023-24540), which
+	// would flatten a directory upload.
+	files := form.File["files"]
+	paths := form.Value["paths"]
+	for i, header := range files {
+		rel := filepath.Base(filepath.FromSlash(header.Filename))
+		if i < len(paths) {
+			if p := strings.TrimSpace(filepath.FromSlash(paths[i])); p != "" {
+				rel = p
+			}
+		}
+		if rel == "" || rel == "." {
 			fail(w, 400, errors.New("invalid file name"))
+			return
+		}
+		dstPath, err := resolveWithinRoot(target, rel)
+		if err != nil {
+			fail(w, 400, err)
+			return
+		}
+		if err := refuseSymlink(root, dstPath); err != nil {
+			fail(w, 400, err)
 			return
 		}
 		src, err := header.Open()
@@ -269,20 +376,28 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, errors.New("could not read uploaded file"))
 			return
 		}
-		if strings.EqualFold(filepath.Ext(filename), ".zip") {
+		// A zip archive unpacks into the current target (its entries carry
+		// their own structure); the archive file itself is never stored.
+		if strings.EqualFold(filepath.Ext(filepath.Base(rel)), ".zip") {
 			count, err := extractZip(src, target, siteZipMaxEntries, siteZipMaxUnpacked)
 			src.Close()
 			if err != nil {
-				fail(w, 400, fmt.Errorf("zip %s: %w", filename, err))
+				fail(w, 400, fmt.Errorf("zip %s: %w", filepath.Base(rel), err))
 				return
 			}
 			extracted += count
 			continue
 		}
-		dstPath := filepath.Join(target, filename)
-		if err := refuseSymlink(root, dstPath); err != nil {
+		if !overwrite {
+			if _, statErr := os.Lstat(dstPath); statErr == nil {
+				src.Close()
+				skipped++
+				continue
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(dstPath), siteMkdirMode); err != nil {
 			src.Close()
-			fail(w, 400, err)
+			fail(w, 500, errors.New("could not create directory"))
 			return
 		}
 		dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, siteFileMode)
@@ -301,7 +416,7 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		stored++
 	}
-	writeJSON(w, 201, map[string]any{"stored": stored, "extracted": extracted})
+	writeJSON(w, 201, map[string]any{"stored": stored, "extracted": extracted, "skipped": skipped})
 }
 
 // extractZip unpacks an archive below dest with zip-slip and bomb guards.

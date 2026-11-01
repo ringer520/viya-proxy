@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -14,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -57,11 +58,57 @@ func (a *App) authStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"setup_required": count == 0})
 }
 
+// newSetupToken generates a one-time token used to authorize remote initial
+// setup, and writes it into the data dir (0700) so the on-host operator can
+// read it. Loopback setup never needs the token; it exists only so that a
+// panel exposed to the network can't be claimed by an attacker before the
+// administrator runs first-time setup.
+func newSetupToken(dataDir string) string {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		slog.Warn("generate setup token", "error", err)
+		return ""
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	if err := os.WriteFile(filepath.Join(dataDir, "setup-token"), []byte(token+"\n"), 0o600); err != nil {
+		slog.Warn("write setup token", "error", err)
+	}
+	return token
+}
+
+// authorizeSetup returns true when the request may perform first-time setup.
+// Loopback callers are always trusted; remote callers additionally require
+// VIYA_SETUP_REMOTE=true and the one-time token, which is burned on use.
+func (a *App) authorizeSetup(r *http.Request) bool {
+	if ip := net.ParseIP(remoteIP(r)); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	if env("VIYA_SETUP_REMOTE", "false") != "true" {
+		return false
+	}
+	token := strings.TrimSpace(r.Header.Get("X-Viya-Setup-Token"))
+	a.setupMu.Lock()
+	defer a.setupMu.Unlock()
+	if token == "" || a.setupToken == "" {
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(token), []byte(a.setupToken)) != 1 {
+		return false
+	}
+	a.setupToken = ""
+	_ = os.Remove(filepath.Join(a.dataDir, "setup-token"))
+	return true
+}
+
 func (a *App) setupAdmin(w http.ResponseWriter, r *http.Request) {
 	a.configMu.RLock()
 	defer a.configMu.RUnlock()
 	if !validOrigin(r, a.trustedProxies) {
 		fail(w, http.StatusForbidden, errors.New("request origin rejected"))
+		return
+	}
+	if !a.authorizeSetup(r) {
+		fail(w, http.StatusForbidden, errors.New("initial setup must be performed from the host itself"))
 		return
 	}
 	if !a.allowLogin(r) {
@@ -219,7 +266,15 @@ func (a *App) createSessionForUser(w http.ResponseWriter, r *http.Request, userI
 	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO sessions(token_hash,user_id,csrf_token,expires_at) VALUES(?,?,?,?)`, tokenHash[:], userID, csrf, expires.Unix()); err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{Name: "viya_session", Value: secret, Path: "/", Expires: expires, MaxAge: int(sessionLifetime.Seconds()), HttpOnly: true, Secure: a.secureCookies, SameSite: http.SameSiteStrictMode})
+	// A Secure cookie is dropped by the browser on plain-HTTP origins, which
+	// would silently break login for a panel served without TLS. Send Secure
+	// only when the client reaches us over HTTPS, either directly or through a
+	// TLS-terminating proxy that forwards X-Forwarded-Proto.
+	secure := a.secureCookies
+	if r.TLS == nil && !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		secure = false
+	}
+	http.SetCookie(w, &http.Cookie{Name: "viya_session", Value: secret, Path: "/", Expires: expires, MaxAge: int(sessionLifetime.Seconds()), HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode})
 	return nil
 }
 
@@ -293,8 +348,8 @@ func (a *App) requireAuthUnlocked(next http.Handler) http.Handler {
 func (a *App) requireSession(next http.Handler, holdConfigLock bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if holdConfigLock && r.Method != http.MethodGet {
-			a.configMu.RLock()
-			defer a.configMu.RUnlock()
+			a.configMu.Lock()
+			defer a.configMu.Unlock()
 		}
 		secret, ok := sessionCookie(r)
 		if !ok {
@@ -309,7 +364,10 @@ func (a *App) requireSession(next http.Handler, holdConfigLock bool) http.Handle
 			return
 		}
 		if session.role != roleAdmin && session.role != roleViewer {
-			session.role = roleAdmin
+			// Unknown roles must fail closed to the least privilege, never
+			// silently escalate to admin.
+			slog.Warn("session has unknown role; downgrading to viewer", "role", session.role)
+			session.role = roleViewer
 		}
 		if isViewerRole(session.role) && isWriteRequest(r.Method) && !viewerWritePaths[r.URL.Path] {
 			fail(w, http.StatusForbidden, errors.New("this account is read-only"))
@@ -448,31 +506,29 @@ func parseTrustedProxies(value string) ([]*net.IPNet, error) {
 func (a *App) allowLogin(r *http.Request) bool {
 	ip := remoteIP(r)
 	now := time.Now().Unix()
-	windowStart, count := now, 0
-	err := a.db.QueryRowContext(r.Context(), `SELECT window_start,count FROM login_attempts WHERE ip=?`, ip).Scan(&windowStart, &count)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	window := int64(loginWindowLength.Seconds())
+	// A single atomic UPSERT keeps the rolling window consistent under
+	// concurrent logins; a read-then-increment would let N requests all see
+	// the same count and defeat the throttle.
+	var count int
+	err := a.db.QueryRowContext(r.Context(), `
+		INSERT INTO login_attempts(ip,window_start,count) VALUES(?,?,1)
+		ON CONFLICT(ip) DO UPDATE SET
+			window_start = CASE WHEN login_attempts.window_start <= ? THEN excluded.window_start ELSE login_attempts.window_start END,
+			count = CASE WHEN login_attempts.window_start <= ? THEN 1 ELSE login_attempts.count + 1 END
+		RETURNING count`, ip, now, now-window, now-window).Scan(&count)
+	if err != nil {
 		// Refusing every login because the counter is unreadable would lock the
 		// operator out of their own panel. Log it and let the password check run.
-		slog.Warn("read login attempts", "error", err)
-		return true
-	}
-	if now-windowStart >= int64(loginWindowLength.Seconds()) {
-		windowStart, count = now, 0
-	}
-	if count >= loginMaxAttempts {
-		return false
-	}
-	count++
-	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO login_attempts(ip,window_start,count) VALUES(?,?,?)
-		ON CONFLICT(ip) DO UPDATE SET window_start=excluded.window_start, count=excluded.count`, ip, windowStart, count); err != nil {
 		slog.Warn("record login attempt", "error", err)
+		return true
 	}
 	if count == 1 {
 		if _, err := a.db.ExecContext(r.Context(), `DELETE FROM login_attempts WHERE window_start < ?`, now-3600); err != nil {
 			slog.Warn("prune login attempts", "error", err)
 		}
 	}
-	return true
+	return count <= loginMaxAttempts
 }
 
 func (a *App) clearLoginAttempts(r *http.Request) {

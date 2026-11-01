@@ -1,0 +1,245 @@
+import {registerRefreshTask} from "./useRefresh";
+import { apiFetch as fetch } from "../api";
+// Traffic aggregation for web sites and layer4 forwards. Both sources are
+// merged on the overview; the helpers here precompute per-host/per-rule
+// indices so the template never re-derives them on every render.
+import { computed, ref, watch } from "vue";
+import { t } from "../i18n";
+import type {
+  Counters,
+  Host,
+  Layer4Rule,
+  SiteTraffic,
+  TrafficRankRow,
+} from "../types";
+import { authenticated, csrfToken, hosts, l4Rules } from "./useState";
+
+
+export const traffic = ref<Record<string, SiteTraffic>>({});
+export const l4Traffic = ref<Record<string, SiteTraffic>>({});
+export const trafficError = ref("");
+
+const emptyCounters = (): Counters => ({
+  requests: 0,
+  errors: 0,
+  upload: 0,
+  download: 0,
+});
+// The overview metrics combine web sites and port forwards. For layer4 rules
+// "requests" carries the connection count, so the sum reads naturally as
+// "requests / connections" once both sources are merged.
+export const trafficTotals = computed(() => {
+  const sum = emptyCounters();
+  for (const item of Object.values(traffic.value)) addCounter(sum, item.recent);
+  for (const item of Object.values(l4Traffic.value))
+    addCounter(sum, item.recent);
+  return sum;
+});
+function addCounter(sum: Counters, from: Counters) {
+  sum.requests += from.requests;
+  sum.errors += from.errors;
+  sum.upload += from.upload;
+  sum.download += from.download;
+}
+// Stable zero-value buckets: the template reads stats many times per render,
+// so allocating a fresh object for sites without traffic wasted both memory and
+// reference equality (each call looked like a new value to Vue).
+const ZERO_COUNTERS = Object.freeze(emptyCounters()) as Counters;
+const EMPTY_SITE_TRAFFIC: SiteTraffic = {
+  total: ZERO_COUNTERS,
+  recent: ZERO_COUNTERS,
+  hourly: [],
+};
+export const siteTrafficIndex = computed(() => {
+  const index: Record<number, SiteTraffic> = {};
+  for (const host of hosts.value)
+    index[host.id] = traffic.value[host.id] || EMPTY_SITE_TRAFFIC;
+  return index;
+});
+export function siteStats(host: Host): SiteTraffic {
+  return siteTrafficIndex.value[host.id] || EMPTY_SITE_TRAFFIC;
+}
+export const l4TrafficIndex = computed(() => {
+  const index: Record<number, SiteTraffic> = {};
+  for (const rule of l4Rules.value)
+    index[rule.id] = l4Traffic.value[rule.id] || EMPTY_SITE_TRAFFIC;
+  return index;
+});
+export function l4Stats(rule: Layer4Rule): SiteTraffic {
+  return l4TrafficIndex.value[rule.id] || EMPTY_SITE_TRAFFIC;
+}
+// Precomputed once per traffic refresh: 24 aligned buckets plus the peak
+// volume per site. The template previously recomputed both for every bar.
+function hourIndexFor(summaries: Record<string, SiteTraffic>) {
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const index: Record<
+    number,
+    { points: ({ hour: number } & Counters)[]; max: number }
+  > = {};
+  for (const [id, summary] of Object.entries(summaries)) {
+    const byHour = new Map<number, { hour: number } & Counters>();
+    for (const point of summary.hourly) byHour.set(point.hour, point);
+    const points: ({ hour: number } & Counters)[] = [];
+    let max = 0;
+    for (let offset = 23; offset >= 0; offset--) {
+      const hour = current - offset * 3600;
+      const point = byHour.get(hour) || { hour, ...ZERO_COUNTERS };
+      points.push(point);
+      const volume = point.upload + point.download;
+      if (volume > max) max = volume;
+    }
+    index[Number(id)] = { points, max };
+  }
+  return index;
+}
+export const trafficHourIndex = computed(() => hourIndexFor(traffic.value));
+export const l4HourIndex = computed(() => hourIndexFor(l4Traffic.value));
+// One shared fallback per clock hour instead of 24 fresh objects per call.
+let emptyHourCache: { hour: number; points: ({ hour: number } & Counters)[] } = {
+  hour: 0,
+  points: [],
+};
+function emptyHourPoints() {
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  if (emptyHourCache.hour !== current)
+    emptyHourCache = {
+      hour: current,
+      points: Array.from({ length: 24 }, (_, i) => ({
+        hour: current - (23 - i) * 3600,
+        ...ZERO_COUNTERS,
+      })),
+    };
+  return emptyHourCache.points;
+}
+export function hourlyTraffic(host: Host) {
+  return trafficHourIndex.value[host.id]?.points || emptyHourPoints();
+}
+export function hourlyL4Traffic(rule: Layer4Rule) {
+  return l4HourIndex.value[rule.id]?.points || emptyHourPoints();
+}
+// Longer windows reuse the same card but aggregate by day: traffic_hours keeps
+// 90 days, so 30d is the widest honest window.
+export const trafficRange = ref<"24h" | "7d" | "30d">("24h");
+// The window is chosen by the backend, so the series has to be re-fetched.
+watch(trafficRange, () => {
+  void refreshTraffic();
+});
+export const trafficDays = computed(() =>
+  trafficRange.value === "30d" ? 30 : trafficRange.value === "7d" ? 7 : 0,
+);
+export const trafficDayStart = computed(() =>
+  Math.floor(Date.now() / 86400000) * 86400,
+);
+// Whole-network series for the overview trend card: web sites plus forwards.
+export const trafficTrend = computed(() => {
+  const days = trafficDays.value;
+  if (!days) {
+    const totals = Array.from({ length: 24 }, () => 0);
+    for (const current of [
+      ...Object.values(trafficHourIndex.value),
+      ...Object.values(l4HourIndex.value),
+    ])
+      current.points.forEach((point, i) => {
+        totals[i] = (totals[i] || 0) + point.upload + point.download;
+      });
+    const hourStart = Math.floor(Date.now() / 3600000) * 3600;
+    return totals.map((bytes, i) => ({
+      hour: hourStart - (23 - i) * 3600,
+      bytes,
+    }));
+  }
+  const totals = Array.from({ length: days }, () => 0);
+  for (const summary of [
+    ...Object.values(traffic.value),
+    ...Object.values(l4Traffic.value),
+  ])
+    for (const point of summary.daily || []) {
+      const index =
+        days - 1 - Math.round((trafficDayStart.value - point.day) / 86400);
+      if (index >= 0 && index < days)
+        totals[index] += point.upload + point.download;
+    }
+  return totals.map((bytes, i) => ({
+    hour: trafficDayStart.value - (days - 1 - i) * 86400,
+    bytes,
+  }));
+});
+// Sites and forwards ranked by the volume inside the selected window. The
+// kind field lets the range bar tag forwards so they read apart from domains.
+export const trafficRanking = computed<TrafficRankRow[]>(() => {
+  const rows: TrafficRankRow[] = [];
+  for (const host of hosts.value) {
+    const recent = traffic.value[host.id]?.recent;
+    const bytes = recent ? recent.upload + recent.download : 0;
+    if (bytes > 0)
+      rows.push({
+        key: `site-${host.id}`,
+        kind: "site",
+        label: host.domain,
+        bytes,
+        requests: recent ? recent.requests : 0,
+      });
+  }
+  for (const rule of l4Rules.value) {
+    const recent = l4Traffic.value[rule.id]?.recent;
+    const bytes = recent ? recent.upload + recent.download : 0;
+    if (bytes > 0)
+      rows.push({
+        key: `fwd-${rule.id}`,
+        kind: "forward",
+        label:
+          rule.name || `${rule.protocol.toUpperCase()} ${rule.listen_port}`,
+        bytes,
+        requests: recent ? recent.requests : 0,
+      });
+  }
+  rows.sort((a, b) => b.bytes - a.bytes);
+  return rows.slice(0, 6);
+});
+export function barHeight(host: Host, bytes: number) {
+  // Empty hours stay invisible so the sparkline reads as a chart instead of a
+  // dashed divider; the track itself draws the baseline.
+  if (bytes <= 0) return 0;
+  return Math.max(
+    3,
+    (bytes / Math.max(1, trafficHourIndex.value[host.id]?.max || 0)) * 30,
+  );
+}
+export function l4BarHeight(rule: Layer4Rule, bytes: number) {
+  if (bytes <= 0) return 0;
+  return Math.max(
+    3,
+    (bytes / Math.max(1, l4HourIndex.value[rule.id]?.max || 0)) * 30,
+  );
+}
+let trafficSequence = 0;
+export async function refreshTraffic() {
+  if (!authenticated.value) return;
+  const seq = ++trafficSequence;
+  const range = trafficRange.value;
+  try {
+    const [siteRes, l4Res] = await Promise.all([
+      fetch(`/api/v1/proxy-hosts/traffic?range=${range}`),
+      fetch(`/api/v1/layer4-rules/traffic?range=${range}`),
+    ]);
+    if (siteRes.status === 401 || l4Res.status === 401) {
+      authenticated.value = false;
+      csrfToken.value = "";
+      return;
+    }
+    if (!siteRes.ok || !l4Res.ok) throw Error(t("流量统计暂不可用"));
+    const [siteData, l4Data] = await Promise.all([
+      siteRes.json(),
+      l4Res.json(),
+    ]);
+    if (seq !== trafficSequence) return;
+    traffic.value = siteData;
+    l4Traffic.value = l4Data;
+    trafficError.value = "";
+  } catch (e) {
+    if (seq !== trafficSequence) return;
+    trafficError.value = e instanceof Error ? t(e.message) : t("统计读取失败");
+  }
+}
+
+registerRefreshTask("traffic",refreshTraffic);

@@ -18,8 +18,12 @@ import (
 
 	"github.com/libdns/alidns"
 	"github.com/libdns/cloudflare"
+	"github.com/libdns/digitalocean"
+	"github.com/libdns/godaddy"
 	"github.com/libdns/libdns"
+	"github.com/libdns/namecheap"
 	"github.com/libdns/tencentcloud"
+	"github.com/libdns/vultr/v2"
 )
 
 type DDNSRecord struct {
@@ -464,7 +468,8 @@ func (a *App) runDDNSRecord(w http.ResponseWriter, r *http.Request) {
 	// other records are not blocked for up to 35 seconds.
 	ip, e := a.executeDDNSRecord(r.Context(), id, true)
 	if e != nil {
-		fail(w, 502, e)
+		slog.Warn("DDNS record update failed", "id", id, "error", e)
+		fail(w, 502, errors.New("DDNS 更新失败，请稍后重试；详细原因已写入服务日志"))
 		return
 	}
 	var completed int64
@@ -576,6 +581,14 @@ func providerFor(ctx context.Context, load func(context.Context, int64) (string,
 		return &tencentcloud.Provider{SecretId: c["secret_id"], SecretKey: c["secret_key"], Region: "ap-guangzhou"}, nil
 	case "alidns":
 		return &alidns.Provider{CredentialInfo: alidns.CredentialInfo{AccessKeyID: c["access_key_id"], AccessKeySecret: c["access_key_secret"], RegionID: c["region_id"]}}, nil
+	case "godaddy":
+		return &godaddy.Provider{APIToken: c["api_token"]}, nil
+	case "namecheap":
+		return &namecheap.Provider{APIKey: c["api_key"], User: c["user"]}, nil
+	case "digitalocean":
+		return &digitalocean.Provider{APIToken: c["auth_token"]}, nil
+	case "vultr":
+		return &vultr.Provider{APIToken: c["api_token"]}, nil
 	default:
 		return nil, errors.New("unsupported DNS provider")
 	}

@@ -78,8 +78,8 @@ if [ "$legacy_master_key" -eq 1 ]; then cp -a "$rollback_dir/master.key" "$DATA_
 chown -R viya:viya "$DATA_DIR"
 if [ "$legacy_master_key" -eq 1 ]; then chmod 0600 "$DATA_DIR/master.key"; fi
 systemctl start viya.service
-python3 - <<'PY'
-import json, shlex, subprocess, time, urllib.request
+python3 - "$DATA_DIR/viya.db" <<'PY'
+import json, os, shlex, sqlite3, subprocess, sys, time, urllib.request
 environment = subprocess.check_output(
     ["systemctl", "show", "viya.service", "--property=Environment", "--value"],
     text=True,
@@ -96,8 +96,19 @@ else:
     host, separator, port = listen.rpartition(":")
     if not separator:
         raise SystemExit("Invalid VIYA_LISTEN value: " + listen)
+database = sys.argv[1]
+if os.path.isfile(database):
+    try:
+        db = sqlite3.connect("file:" + database + "?mode=ro", uri=True, timeout=2)
+        row = db.execute("SELECT value FROM panel_settings WHERE key='listen_port'").fetchone()
+        db.close()
+        if row and str(row[0]).isdigit(): port = str(row[0])
+    except sqlite3.Error:
+        pass
+if not port.isdigit() or not 1024 <= int(port) <= 65535:
+    raise SystemExit("Invalid saved panel port: " + str(port))
 if host in ("", "0.0.0.0", "::", "[::]"):
-    host = "127.0.0.1"
+    host = "::1" if ":" in host else "127.0.0.1"
 if ":" in host:
     host = "[" + host + "]"
 url = f"http://{host}:{port}/api/v1/health"
@@ -105,7 +116,8 @@ deadline = time.time() + 30
 last_error = "service did not become ready"
 while time.time() < deadline:
     try:
-        with urllib.request.urlopen(url, timeout=2) as response:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(url, timeout=2) as response:
             data = json.load(response)
         if data.get("ok") and data.get("caddy_ready"):
             break

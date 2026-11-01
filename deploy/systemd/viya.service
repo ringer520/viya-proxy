@@ -14,7 +14,7 @@ StartLimitIntervalSec=60
 Type=simple
 User=viya
 Group=viya
-Environment=VIYA_LISTEN=127.0.0.1:8181
+Environment=VIYA_LISTEN=0.0.0.0:8181
 Environment=VIYA_DATA_DIR=/var/lib/viya
 Environment=VIYA_MASTER_KEY_FILE=/etc/viya/secrets/master.key
 Environment=VIYA_CADDY_BIN=/opt/viya/bin/caddy

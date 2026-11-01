@@ -59,13 +59,13 @@ RUN chmod +x /opt/viya/bin/viya /opt/viya/bin/caddy
 
 ENV VIYA_LISTEN=0.0.0.0:8181 \
     VIYA_DATA_DIR=/var/lib/viya \
-    VIYA_MASTER_KEY_FILE=/etc/viya/secrets/master.key \
+    VIYA_MASTER_KEY_FILE=/var/lib/viya/master.key \
     VIYA_CADDY_BIN=/opt/viya/bin/caddy \
     VIYA_CADDY_ADMIN=http://127.0.0.1:2019 \
     HOME=/var/lib/viya
 
 WORKDIR /var/lib/viya
-VOLUME ["/var/lib/viya", "/etc/viya/secrets"]
-EXPOSE 8181 80 443
+VOLUME ["/var/lib/viya"]
+EXPOSE 8181 80 443 443/udp
 
 ENTRYPOINT ["/opt/viya/bin/viya"]

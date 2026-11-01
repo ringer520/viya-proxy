@@ -135,7 +135,19 @@ func (a *App) updateUser(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusConflict, errors.New("at least one administrator must remain"))
 			return
 		}
-		if _, err := a.db.ExecContext(r.Context(), `UPDATE users SET role=? WHERE id=?`, input.Role, id); err != nil {
+	}
+	if input.Role == "" && input.Password == "" {
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, errors.New("could not update the account"))
+		return
+	}
+	defer tx.Rollback()
+	if input.Role != "" {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE users SET role=? WHERE id=?`, input.Role, id); err != nil {
 			slog.Error("update user role", "error", err)
 			fail(w, http.StatusInternalServerError, errors.New("could not update the account"))
 			return
@@ -151,11 +163,22 @@ func (a *App) updateUser(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusInternalServerError, errors.New("could not update the account"))
 			return
 		}
-		if _, err := a.db.ExecContext(r.Context(), `UPDATE users SET password_hash=? WHERE id=?`, hash, id); err != nil {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE users SET password_hash=? WHERE id=?`, hash, id); err != nil {
 			slog.Error("update user password", "error", err)
 			fail(w, http.StatusInternalServerError, errors.New("could not update the account"))
 			return
 		}
+		// A password reset by an administrator must invalidate the target
+		// account's existing sessions; do not rely on foreign-key cascades.
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM sessions WHERE user_id=?`, id); err != nil {
+			slog.Error("invalidate sessions on password reset", "error", err)
+			fail(w, http.StatusInternalServerError, errors.New("could not update the account"))
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		fail(w, http.StatusInternalServerError, errors.New("could not update the account"))
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -190,8 +213,25 @@ func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, errors.New("at least one administrator must remain"))
 		return
 	}
-	if _, err := a.db.ExecContext(r.Context(), `DELETE FROM users WHERE id=?`, id); err != nil {
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, errors.New("could not delete the account"))
+		return
+	}
+	defer tx.Rollback()
+	// Explicitly revoke the account's sessions; foreign-key cascades are a
+	// connection-level PRAGMA and must not be relied upon.
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM sessions WHERE user_id=?`, id); err != nil {
+		slog.Error("delete user sessions", "error", err)
+		fail(w, http.StatusInternalServerError, errors.New("could not delete the account"))
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM users WHERE id=?`, id); err != nil {
 		slog.Error("delete user", "error", err)
+		fail(w, http.StatusInternalServerError, errors.New("could not delete the account"))
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		fail(w, http.StatusInternalServerError, errors.New("could not delete the account"))
 		return
 	}

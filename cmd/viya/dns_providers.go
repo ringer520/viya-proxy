@@ -30,6 +30,10 @@ var providerFields = map[string][]string{
 	"cloudflare":   {"api_token"},
 	"tencentcloud": {"secret_id", "secret_key"},
 	"alidns":       {"access_key_id", "access_key_secret"},
+	"godaddy":      {"api_token"},
+	"namecheap":    {"api_key", "user"},
+	"digitalocean": {"auth_token"},
+	"vultr":        {"api_token"},
 }
 
 func (a *App) listDNSProviders(w http.ResponseWriter, r *http.Request) {

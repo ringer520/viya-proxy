@@ -99,7 +99,7 @@ jobs:
           files: |
             release/*.tar.gz
             release/sha256sums.txt
-          generate_release_notes: true
+          body_path: docs/releases/${{ github.ref_name }}.md
 
   docker:
     runs-on: ubuntu-latest

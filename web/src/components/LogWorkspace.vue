@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { apiFetch as fetch } from "../api";
+
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ScrollText, Terminal, Settings, RefreshCw, ShieldCheck } from '@lucide/vue'
 import AccessLogTable from './AccessLogTable.vue'

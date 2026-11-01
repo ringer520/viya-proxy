@@ -283,13 +283,19 @@ func (a *App) watchAccessLogs() {
 				}
 			}
 			if changed {
-				// Coalesced: a burst of denied requests triggers one reload.
-				a.scheduleApply()
+				// Coalesced + throttled: a burst of denied requests triggers one
+				// reload, and automatic bans can't fork/reload more often than
+				// once per 15s (see scheduleAutoBanApply).
+				a.scheduleAutoBanApply()
 			}
 		}
 	}
 }
 func (a *App) observeAttack(line []byte) bool {
+	policy := a.loadBanPolicy()
+	if !policy.Enabled {
+		return false
+	}
 	var event map[string]any
 	if json.Unmarshal(line, &event) != nil {
 		return false
@@ -318,12 +324,16 @@ func (a *App) observeAttack(line []byte) bool {
 	if ip == nil || ip.IsLoopback() || host == "" {
 		return false
 	}
+	if policy.allows(ip) {
+		return false
+	}
 	remote = ip.String()
+	window := time.Duration(policy.WindowMin) * time.Minute
 	now := time.Now()
 	key := host + "\x00" + remote
 	recent := a.failCounts[key][:0]
 	for _, at := range a.failCounts[key] {
-		if now.Sub(at) < 5*time.Minute {
+		if now.Sub(at) < window {
 			recent = append(recent, at)
 		}
 	}
@@ -336,7 +346,7 @@ func (a *App) observeAttack(line []byte) bool {
 			}
 		}
 	}
-	if len(recent) < 20 {
+	if len(recent) < policy.Threshold {
 		return false
 	}
 	a.failCounts[key] = nil
@@ -366,7 +376,8 @@ func (a *App) observeAttack(line []byte) bool {
 	if len(ranges) != 1 {
 		return false
 	}
-	_, err := a.db.ExecContext(a.ctx, `INSERT INTO ip_bans(domain,ip,reason,expires_at) VALUES(?,?,?,?) ON CONFLICT(domain,ip) DO UPDATE SET reason=excluded.reason,expires_at=excluded.expires_at WHERE ip_bans.source='auto'`, host, ranges[0], "20 denied client requests within 5 minutes", now.Add(15*time.Minute).Unix())
+	banFor := time.Duration(policy.BanMin) * time.Minute
+	_, err := a.db.ExecContext(a.ctx, `INSERT INTO ip_bans(domain,ip,reason,expires_at) VALUES(?,?,?,?) ON CONFLICT(domain,ip) DO UPDATE SET reason=excluded.reason,expires_at=excluded.expires_at WHERE ip_bans.source='auto'`, host, ranges[0], "20 denied client requests within 5 minutes", now.Add(banFor).Unix())
 	return err == nil
 }
 func intValue(value any) int {

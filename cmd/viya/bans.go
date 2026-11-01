@@ -4,11 +4,140 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// banPolicy controls the automatic "fail2ban-lite" feature that converts a
+// burst of 400/401/403 responses into a temporary IP ban. It is editable via
+// GET/PUT /api/v1/ban-policy and cached in memory for the hot log path.
+type banPolicy struct {
+	Enabled   bool     `json:"enabled"`
+	Allowlist []string `json:"allowlist"`
+	Threshold int      `json:"threshold"`
+	WindowMin int      `json:"window_min"`
+	BanMin    int      `json:"ban_min"`
+}
+
+func defaultBanPolicy() banPolicy {
+	return banPolicy{Enabled: true, Threshold: 20, WindowMin: 5, BanMin: 15}
+}
+
+// allows reports whether an IP is exempt from automatic bans (exact IP or CIDR).
+func (p banPolicy) allows(ip net.IP) bool {
+	for _, entry := range p.Allowlist {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if stored := net.ParseIP(entry); stored != nil && stored.Equal(ip) {
+			return true
+		}
+		if _, network, err := net.ParseCIDR(entry); err == nil && network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) readBanPolicy() banPolicy {
+	p := defaultBanPolicy()
+	var raw string
+	if err := a.db.QueryRowContext(context.Background(), `SELECT value FROM panel_settings WHERE key='ban_policy'`).Scan(&raw); err == nil && raw != "" {
+		var parsed banPolicy
+		if json.Unmarshal([]byte(raw), &parsed) == nil {
+			p = parsed
+		} else {
+			slog.Warn("stored ban policy is invalid, using defaults")
+		}
+	}
+	if p.Threshold < 1 {
+		p.Threshold = defaultBanPolicy().Threshold
+	}
+	if p.WindowMin < 1 {
+		p.WindowMin = defaultBanPolicy().WindowMin
+	}
+	if p.BanMin < 1 {
+		p.BanMin = defaultBanPolicy().BanMin
+	}
+	return p
+}
+
+func (a *App) loadBanPolicy() banPolicy {
+	if v, ok := a.banPolicyCache.Load().(banPolicy); ok {
+		return v
+	}
+	p := a.readBanPolicy()
+	a.banPolicyCache.Store(p)
+	return p
+}
+
+func (a *App) getBanPolicy(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, a.loadBanPolicy())
+}
+
+func (a *App) updateBanPolicy(w http.ResponseWriter, r *http.Request) {
+	var input banPolicy
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&input) != nil {
+		fail(w, http.StatusBadRequest, errors.New("封禁策略格式无效"))
+		return
+	}
+	if input.Threshold < 1 || input.Threshold > 10000 {
+		fail(w, http.StatusBadRequest, errors.New("触发阈值须在 1 到 10000 之间"))
+		return
+	}
+	if input.WindowMin < 1 || input.WindowMin > 1440 {
+		fail(w, http.StatusBadRequest, errors.New("统计窗口须在 1 到 1440 分钟之间"))
+		return
+	}
+	if input.BanMin < 1 || input.BanMin > 43200 {
+		fail(w, http.StatusBadRequest, errors.New("封禁时长须在 1 到 43200 分钟之间"))
+		return
+	}
+	normalized := make([]string, 0, len(input.Allowlist))
+	for _, entry := range input.Allowlist {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if ip := net.ParseIP(entry); ip != nil {
+			normalized = append(normalized, ip.String())
+			continue
+		}
+		if _, network, err := net.ParseCIDR(entry); err == nil {
+			normalized = append(normalized, network.String())
+			continue
+		}
+		fail(w, http.StatusBadRequest, errors.New("豁免名单包含无效 IP 或网段："+entry))
+		return
+	}
+	input.Allowlist = normalized
+	raw, _ := json.Marshal(input)
+	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO panel_settings(key,value) VALUES('ban_policy',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, string(raw)); err != nil {
+		fail(w, http.StatusInternalServerError, errors.New("保存封禁策略失败"))
+		return
+	}
+	a.banPolicyCache.Store(input)
+	writeJSON(w, http.StatusOK, input)
+}
+
+// scheduleAutoBanApply throttles apply requests triggered by automatic bans so
+// a sustained attack can't degenerate into a fork/reload storm. Manual applies
+// still go straight through scheduleApply.
+func (a *App) scheduleAutoBanApply() {
+	now := time.Now().Unix()
+	last := a.autoBanApplyAt.Load()
+	if now-last < 15 {
+		return
+	}
+	if a.autoBanApplyAt.CompareAndSwap(last, now) {
+		a.scheduleApply()
+	}
+}
 
 func (a *App) watchBanExpiry() {
 	ticker := time.NewTicker(2 * time.Second)

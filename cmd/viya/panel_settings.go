@@ -64,7 +64,26 @@ func (a *App) updatePanelPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = probe.Close()
-	if _, err = a.db.ExecContext(r.Context(), `INSERT INTO panel_settings(key,value) VALUES('listen_port',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, itoa(input.Port)); err != nil {
+
+	if a.pendingPanelConfirmation(r.Context()) != nil {
+		fail(w, 409, errors.New("请先确认当前端口变更或等待自动恢复"))
+		return
+	}
+	pending, _ := json.Marshal(panelConfirmation{OldPort: current, NewPort: itoa(input.Port), Deadline: time.Now().Add(90 * time.Second).Unix()})
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO panel_settings(key,value) VALUES('pending_panel_port',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, string(pending)); err != nil {
+		fail(w, 500, err)
+		return
+	}
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO panel_settings(key,value) VALUES('listen_port',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, itoa(input.Port)); err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
 		fail(w, http.StatusInternalServerError, errors.New("保存面板端口失败"))
 		return
 	}

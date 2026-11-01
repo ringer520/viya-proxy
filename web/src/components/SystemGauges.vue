@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { apiFetch as fetch } from "../api";
+
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { Cpu, MemoryStick, HardDrive, RefreshCw, Activity } from '@lucide/vue'

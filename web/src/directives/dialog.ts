@@ -25,7 +25,16 @@ export const dialog: ObjectDirective<HTMLElement> = {
       return Array.from(modal!.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')).filter(el => el.getClientRects().length > 0)
     }
     function keydown(event: KeyboardEvent) {
-      if (stack.at(-1) !== modal || event.key !== 'Tab') return
+      if (stack.at(-1) !== modal) return
+      if (event.key === 'Escape') {
+        // Close the top-most dialog via its header close button; components
+        // with no close button may also bind their own @keydown.esc.
+        const close = modal.querySelector<HTMLElement>('[data-close]')
+          || modal.querySelector<HTMLElement>('.modal-top .icon-btn')
+        if (close) { event.preventDefault(); close.click() }
+        return
+      }
+      if (event.key !== 'Tab') return
       const controls = focusable(), first = controls[0], last = controls.at(-1)
       if (!first || !last) { event.preventDefault(); modal!.focus(); return }
       if (event.shiftKey && (document.activeElement === first || document.activeElement === modal)) { event.preventDefault(); last.focus() }

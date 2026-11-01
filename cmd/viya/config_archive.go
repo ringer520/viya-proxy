@@ -217,6 +217,7 @@ func (a *App) captureConfiguration(ctx context.Context, prefs map[string]string)
 	}
 	defer tx.Rollback()
 	payload.Tables, err = captureTables(ctx, tx, configTables)
+	stripTransientSettings(payload.Tables)
 	if err != nil {
 		return payload, err
 	}
@@ -641,6 +642,7 @@ func (a *App) importConfiguration(w http.ResponseWriter, r *http.Request) {
 		}
 		return tx.Commit()
 	}
+	stripTransientSettings(payload.Tables)
 	if err = applyTables(payload.Tables); err == nil {
 		for _, file := range payload.Files {
 			dest := filepath.Join(a.dataDir, filepath.FromSlash(file.Path))
@@ -727,4 +729,30 @@ func (a *App) validateRestoredBindings(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// A port-confirmation deadline belongs to a running process, not a portable configuration.
+func stripTransientSettings(tables []tableDump) {
+	for i := range tables {
+		if tables[i].Name != "panel_settings" {
+			continue
+		}
+		column := -1
+		for j, name := range tables[i].Columns {
+			if name == "key" {
+				column = j
+				break
+			}
+		}
+		if column < 0 {
+			continue
+		}
+		kept := [][]configCell{}
+		for _, row := range tables[i].Rows {
+			if row[column].Value != "pending_panel_port" {
+				kept = append(kept, row)
+			}
+		}
+		tables[i].Rows = kept
+	}
 }
