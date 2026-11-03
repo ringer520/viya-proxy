@@ -10,8 +10,20 @@
 
 - [Screenshots](#screenshots) · [Features](#features)
 - [Linux installation](#linux-installation) · [Docker installation and updates](#docker-installation-and-updates)
-- [Backups and restore](#backups-and-restore) · [Manual OpenWrt installation](#manual-openwrt-installation)
+- [Backups and restore](#backups-and-restore) · [One-line OpenWrt installation](#one-line-openwrt-installation)
 - [Build from source](#build-from-source) · [Uninstall](#uninstall)
+
+### Operational status and access protection
+
+- Port forwards distinguish enabled configuration from verified engine listeners and offer a pre-save port check. A listener does not prove upstream application health.
+- DDNS exposes address, comparison, update and provider-readback stages, with separate check/change timestamps. Interface mode supports automatic IPv6 selection or an explicit pin; unavailable pins are never silently replaced.
+- SSL checks inspect the certificate served by the local TLS listener. Issuance records and the currently served certificate are separate states.
+- DNS credentials support read-only checks, credential replacement and dependency checks. Successful reads do not verify DNS write permission.
+- Access rules are grouped into manual, region and automatic bans. Panel-domain restrictions require confirmation through the affected domain within 120 seconds or the original rule is restored; LAN access can cancel.
+- Logs support server-side filters over at most the last 2 MiB of the current file. Configuration history keeps the latest 10 operation summaries and actors.
+
+Region rules use the source connecting to Caddy, which may be a CDN or proxy address. Upgrades do not automatically remove existing restrictions.
+
 
 ## Screenshots
 
@@ -42,6 +54,9 @@ The overview brings together host resource gauges, a 24-hour traffic trend and s
 
 ## Features
 
+Web services and port forwards have separate rolling 30-day statistics. Click the overview Web error rate to locate sites and HTTP status codes in retained recent logs. Settings → Storage provides a confirmed reset of all traffic statistics, preserving business configuration and original log files.
+
+
 - **Web services:** reverse proxy, static hosting and URL redirects, grouped by HTTP/HTTPS listener; custom ports and paths, clone, enable/disable and security policies.
 - **Static files:** upload, browse, download, rename and delete website files in the panel. Choose whether to remove hosted files when deleting a site.
 - **TLS certificates:** issue and renew certificates, see issuance progress, upload custom certificates and reuse matching wildcard certificates.
@@ -50,7 +65,7 @@ The overview brings together host resource gauges, a 24-hour traffic trend and s
 - **TCP / UDP forwarding:** manage TCP, UDP or dual-protocol rules and inspect connection and traffic statistics.
 - **Access security:** IP/CIDR bans, access controls, login throttling, automatic bans, default security settings and response headers.
 - **Operations:** CPU, memory and disk monitoring; access and application logs; traffic trends; configuration history, backup and restore.
-- **Accounts and UI:** administrator and read-only roles, Chinese and English, multiple themes and a compact display mode.
+- **Accounts and UI:** administrator and read-only roles, Chinese and English, five base palettes, three original illustrated anime themes, system-aware motion, and a compact display mode.
 
 ## Linux installation
 
@@ -128,52 +143,46 @@ docker compose up -d
 
 Back up `/opt/viya/data` before upgrading and keep its `master.key`; saved DNS credentials cannot be decrypted without the original key. Do not use `docker compose down -v` for an update, because it removes Docker volumes.
 
-### Migrating from the previous two-volume Docker setup
-
-Older deployments may have stored application data in `/var/lib/viya` and mounted the master key separately at `/etc/viya/secrets`. Stop the old container but keep the container and volumes, then copy the data:
-
-```sh
-docker compose stop
-sudo mkdir -p /opt/viya/data
-# Replace this with the actual volume name from docker volume ls
-docker run --rm -v <OLD_DATA_VOLUME>:/from:ro -v /opt/viya/data:/to alpine sh -c 'cp -a /from/. /to/'
-# Replace this with the old container name from docker ps -a
-docker cp <OLD_CONTAINER>:/etc/viya/secrets/master.key /opt/viya/data/master.key
-```
-
-Verify that the new directory contains the database and `master.key`. Change Compose to the single-directory mount above, run `docker compose down` (without `-v`), then run `docker compose up -d`. Sign in and check DNS credentials, certificates and site files before removing the old volumes.
-
 ## Backups and restore
 
-Full Linux backups use scripts included in a release archive. Download and extract the package matching your server architecture, then run:
+Installed helpers live in `/opt/viya/scripts/` and require Python 3.11+. Ordinary backups include an online SQLite copy, managed websites, certificates and runtime files; the master key and access logs are excluded.
+
+Run as root (prepend `sudo` for a regular user):
 
 ```sh
-sudo sh ./viya-linux-amd64/scripts/backup-linux.sh
+sh /opt/viya/scripts/backup-linux.sh
+# Full migration backup: stop the service briefly, include the key, then restart.
+VIYA_BACKUP_INCLUDE_KEY=1 VIYA_BACKUP_STOP_SERVICE=1 sh /opt/viya/scripts/backup-linux.sh
 ```
 
-Archives are written to `/var/backups/viya/`. They contain a consistent SQLite copy and runtime files, but **exclude the master key**. Keep `/etc/viya/secrets/master.key` in a separate secure location. Restore only with the key from the same installation:
+Archives in `/var/backups/viya/` have a file manifest, SHA-256 checksums and a key fingerprint. Full archives contain accounts, credentials and private keys, are not additionally encrypted, and have mode `0600`. Store a protected off-host copy. Website roots outside the data directory need separate backups.
 
 ```sh
-sudo sh ./viya-linux-amd64/scripts/restore-linux.sh /var/backups/viya/viya-TIMESTAMP.tar.gz
+sh /opt/viya/scripts/restore-linux.sh --verify /path/to/backup.tar.gz
+VIYA_RESTORE_KEY=1 sh /opt/viya/scripts/restore-linux.sh --dry-run /path/to/backup.tar.gz
+VIYA_RESTORE_KEY=1 sh /opt/viya/scripts/restore-linux.sh /path/to/backup.tar.gz
 ```
 
-The panel's configuration export is for moving service configuration; it excludes accounts, passwords and sessions and does not replace a full backup. Docker users should stop the container and copy the complete `/opt/viya/data` directory to another device or secure location.
+Verification and dry runs leave the installation unchanged. Restoring first backs up current data, validates files and SQLite, then checks service readiness; failure restores the previous data and key. These restore scripts target systemd installations. Install Viya on the destination first and keep the same data-directory path. Omit `VIYA_RESTORE_KEY=1` for ordinary archives and supply the original master key separately. Paths can be configured with `VIYA_DATA_DIR`, `VIYA_MASTER_KEY_FILE` and `VIYA_BACKUP_DIR`.
 
-## Manual OpenWrt installation
+Encrypted panel configuration exports exclude panel accounts, account passwords, sessions and website files, but include business credentials and certificates. Docker users should stop the container and back up its whole mounted data directory.
 
-OpenWrt uses procd, so the systemd one-line installer does not apply. Download and extract the Release archive for your CPU architecture, then copy its binaries and init script to the device:
+Settings → Storage shows data usage and retention. Log rotation remains under Logs. Cleanup removes expired statistics, recent access records beyond the cap and expired sessions; it preserves websites, certificates and recovery points. SQLite reuses freed pages rather than immediately shrinking its file.
+
+
+## One-line OpenWrt installation
+
+For procd-based OpenWrt on amd64, arm64 or armv7 (MIPS is not supported), run as root:
 
 ```sh
-mkdir -p /opt/viya/bin
-cp viya-linux-armv7/bin/viya-linux-armv7 /opt/viya/bin/viya
-cp viya-linux-armv7/bin/caddy-linux-armv7 /opt/viya/bin/caddy
-cp viya-linux-armv7/deploy/openwrt/viya /etc/init.d/viya
-chmod +x /etc/init.d/viya
-/etc/init.d/viya enable
-/etc/init.d/viya start
+wget -qO- https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
 ```
 
-Choose the archive matching your router architecture. The sample procd service binds the panel to `127.0.0.1:8181`; use LuCI reverse proxying or an SSH tunnel for remote access. Consider the router's CPU and memory before enabling certificate management or heavy forwarding workloads.
+The entry script detects OpenWrt. The dedicated installer is `deploy/install-openwrt.sh`; download it to `/tmp/viya-install.sh` and run `VERSION=v0.3.0 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh` to pin a release and initial port. It verifies SHA-256, checks free space and port conflicts, enables procd startup, and checks readiness.
+
+New installations listen on `0.0.0.0:8181`: open `http://router-LAN-IP:8181`. Persistent data: `/opt/viya/data`; master key: `/etc/viya/secrets/master.key`. Use persistent storage for `/opt`; allow space for binaries, data and upgrade backups, and roughly 128 MiB free in `/tmp` for download/extraction. Requirements include curl/wget, tar, sha256sum, netstat, UCI and HTTPS CA certificates. The installer does not open WAN firewall rules.
+
+New services use UCI: `uci set viya.main.listen='0.0.0.0:8182'; uci commit viya; /etc/init.d/viya restart`. Existing custom init scripts and data paths are preserved. Upgrade copies are stored under `/opt/viya/backups/install-*`. Installation control flow is checked in isolation; actual firmware and device behavior still require hardware validation.
 
 ## Build from source
 

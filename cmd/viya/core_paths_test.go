@@ -55,6 +55,42 @@ func TestLayer4ConflictRejectsReservedPorts(t *testing.T) {
 	}
 }
 
+func TestLayer4UDPDoesNotConflictWithTCPManagement(t *testing.T) {
+	app, db := newTestApp(t)
+	defer db.Close()
+	request := httptest.NewRequest("POST", "/", nil)
+	rule := Layer4Rule{ListenAddress: "0.0.0.0", ListenPort: 2019, Protocol: "udp"}
+	if err := app.checkLayer4Conflict(request, 0, rule); err != nil {
+		t.Fatalf("UDP should not conflict with TCP admin: %v", err)
+	}
+}
+
+func TestDisabledLayer4SaveReturnsIdentityAfterApplyFailure(t *testing.T) {
+	app, db := newTestApp(t)
+	defer db.Close()
+	// A disabled rule may be prepared on a currently occupied TCP port.
+	// The incomplete fixture deliberately fails compilation after persistence.
+	request := httptest.NewRequest("POST", "/", strings.NewReader(`{"name":"staged","listen_address":"0.0.0.0","listen_port":2019,"upstream_address":"127.0.0.1:22","protocol":"tcp","enabled":false}`))
+	response := httptest.NewRecorder()
+	app.createLayer4Rule(response, request)
+	if response.Code != 502 {
+		t.Fatalf("expected persistence then apply failure, got %d: %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ID <= 0 {
+		t.Fatal("partial save must expose its identity to prevent duplicate creation")
+	}
+	var enabled int
+	if err := db.QueryRow(`SELECT enabled FROM layer4_rules WHERE id=?`, body.ID).Scan(&enabled); err != nil || enabled != 0 {
+		t.Fatalf("disabled draft not persisted: %d %v", enabled, err)
+	}
+}
+
 func TestLayer4ConflictIgnoresDisabledRules(t *testing.T) {
 	app, db := newTestApp(t)
 	defer db.Close()

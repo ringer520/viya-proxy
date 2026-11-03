@@ -1,24 +1,65 @@
 <script setup lang="ts">
-import { ArrowRight, Copy, ExternalLink, Folder, FolderUp, Globe2, Pencil, Plus, ScrollText, Search, ShieldCheck, Trash2 } from "@lucide/vue";
+import ServiceTrafficCell from "./ServiceTrafficCell.vue";
+import { ArrowLeftRight, ArrowRight, CornerUpRight, Copy, ExternalLink, Folder, FolderUp, Globe2, MoreHorizontal, Pencil, Plus, ScrollText, Search, ShieldCheck, Trash2 } from "@lucide/vue";
 import {openSiteDetails} from "../composables/useSiteWorkspace";
-import { Info, Activity } from "@lucide/vue";
+import { Activity } from "@lucide/vue";
 import { t } from "../i18n";
+import { onMounted, onUnmounted, ref } from "vue";
+import type { Host } from "../types";
 import { formatBytes } from "../format";
 import AccessLogTable from "./AccessLogTable.vue";
 import { clearListFilters, hasListFilter, hosts, listSearch, readOnly, statusFilter, upstreamHealth } from "../composables/useState";
 
-import { barHeight, hourlyTraffic, siteStats } from "../composables/useTraffic";
-import { cloneHost, hostContentStats, hostToggling, openCreate, openEdit, openListenerEditor, openSiteFiles, openSiteLogs, previewLayout, previewSite, remove, selectedListener, selectedPortState, selectListener, siteGroups, siteIconColors, siteIconStyle, siteLogs, siteURL, toggleHost, toggleWebSearch, visibleHosts, webListeners, webSearchInput, webSearchOpen } from "../composables/useHosts";
-import { openSecurityDefaults, securityDefaults } from "../composables/useSecurity";
-import { upstreamLabel } from "../composables/useOverview";
-import { previewLimit, trafficCharts } from "../composables/usePreferences";
+import { siteStats } from "../composables/useTraffic";
+import { cloneHost, hostContentStats, hostToggling, openCreate, openEdit, openListenerEditor, openSiteFiles, openSiteLogs, previewLayout, previewSite, remove, selectedListener, selectedPortState, selectListener, siteGroups, siteIconStyle, siteLogs, siteURL, toggleHost, toggleWebSearch, visibleHosts, webListeners, webSearchInput, webSearchOpen } from "../composables/useHosts";
+import { openSecurityDefaults, resolveSecurityPolicy } from "../composables/useSecurity";
+import { previewLimit } from "../composables/usePreferences";
+function hasSiteName(host: Host) { return !!host.name?.trim() && host.name.trim() !== host.domain; }
+function certificateDetails(host: Host) {
+  const source = host.certificate_source;
+  if (!source) return t("暂无证书");
+  return [source.kind === "wildcard" ? t("泛域名证书") : t(source.label), source.domain,
+    source.not_after ? t("到期 ") + new Date(source.not_after).toLocaleString() : ""].filter(Boolean).join(" · ");
+}
+function closeSiteMenu(event: Event) {
+  (event.currentTarget as HTMLElement).closest("details")?.removeAttribute("open");
+}
+const sitePanel = ref<HTMLElement | null>(null);
+function closeOutsideMenus(event: PointerEvent) {
+  sitePanel.value?.querySelectorAll<HTMLDetailsElement>(".site-more-menu[open]").forEach(menu => {
+    if (!menu.contains(event.target as Node)) menu.open = false;
+  });
+}
+function closeMenusOnEscape(event: KeyboardEvent) {
+  if (event.key !== "Escape") return;
+  sitePanel.value?.querySelectorAll<HTMLDetailsElement>(".site-more-menu[open]").forEach(menu => {
+    menu.open = false;
+    menu.querySelector<HTMLElement>("summary")?.focus();
+    event.stopPropagation();
+  });
+}
+onMounted(() => { document.addEventListener("pointerdown", closeOutsideMenus); document.addEventListener("keydown", closeMenusOnEscape); });
+onUnmounted(() => { document.removeEventListener("pointerdown", closeOutsideMenus); document.removeEventListener("keydown", closeMenusOnEscape); });
+function certificateIssue(host: Host) {
+  const source = host.certificate_source;
+  if (!host.enabled || !source || source.kind === "http") return "";
+  if (["failed", "error"].includes(source.status)) return t("证书申请失败");
+  if (source.not_after) {
+    const remaining = new Date(source.not_after).getTime() - Date.now();
+    if (remaining <= 0) return t("证书已过期");
+    // Caddy internal certificates are deliberately short-lived and renew automatically.
+    if (source.kind !== "internal" && host.tls_mode !== "internal" && remaining <= 14 * 86400000) return t("证书即将到期");
+  }
+  return "";
+}
 </script>
 
 <template>
-      <section class="panel site-panel">
+      <section ref="sitePanel" class="panel site-panel">
         <div class="panel-head">
           <div class="site-list-heading">
             <h2>{{ t("站点列表") }}</h2>
+            <div class="inline-list-controls site-list-controls">
             <button
               class="icon-btn"
               :aria-expanded="webSearchOpen"
@@ -49,6 +90,9 @@ import { previewLimit, trafficCharts } from "../composables/usePreferences";
                 <option value="disabled">{{ t("已停用") }}</option>
               </select>
             </label>
+            <span class="inline-list-count" role="status">{{ visibleHosts.length }} {{ t("项") }}</span>
+            <button v-if="hasListFilter" class="secondary" @click="clearListFilters">{{ t("清除筛选") }}</button>
+            </div>
           </div>
         </div>
 
@@ -118,17 +162,17 @@ import { previewLimit, trafficCharts } from "../composables/usePreferences";
               <div class="site-group-actions">
                 <button
                   class="icon-btn group-security-btn"
-                  :class="{ enabled: securityDefaults.domains[group.domain]?.enabled }"
+                  :class="{ enabled: resolveSecurityPolicy(group.domain).policy.mode !== 'none' }"
                   type="button"
                   :disabled="readOnly"
-                  :aria-label="t('安全响应头默认配置')"
-                  :title="t('为这个域名设置默认安全响应头')"
+                  :aria-label="t('域名安全策略')"
+                  :title="t('管理此域名的安全策略与继承方式')"
                   @click="openSecurityDefaults(group.domain)"
                 >
                   <ShieldCheck :size="16" />
-                  <span class="security-default-label">{{t("默认安全配置")}}</span>
+                  <span class="security-default-label">{{t("域名安全策略")}}</span>
                   <span
-                    v-if="securityDefaults.domains[group.domain]?.enabled"
+                    v-if="resolveSecurityPolicy(group.domain).policy.mode !== 'none'"
                     class="security-dot"
                   ></span>
                 </button>
@@ -141,40 +185,41 @@ import { previewLimit, trafficCharts } from "../composables/usePreferences";
                 </button>
               </div>
             </div>
+            <div class="site-columns" aria-hidden="true"><span>{{t('访问入口')}}</span><span>{{t('转发目标')}}</span><span>{{t('近30天')}}</span><span>{{t('操作')}}</span></div>
             <div class="site-group-sites">
               <div
                 v-for="host in group.hosts"
                 :key="host.id"
                 role="group"
                 :aria-label="host.domain"
-                class="host-row"
+                class="host-row site-list-row"
+                :class="{ 'site-is-disabled': !host.enabled, 'site-has-name': hasSiteName(host), 'site-route-down': host.enabled && host.type === 'proxy' && upstreamHealth[String(host.id)]?.ok === false }"
               >
-                <div
-                  class="host-icon site-icon"
-                  :style="siteIconStyle(host.icon_color)"
-                >
-                  <Folder v-if="host.type === 'static'" :size="18" />
-                  <ArrowRight v-else-if="host.type === 'redirect'" :size="18" />
-                  <Globe2 v-else :size="18" />
-                </div>
-                <div class="host-main site-main">
-                  <div class="site-title"><button class="site-diagnose-icon" :aria-label="t('一键诊断')" :title="t('一键诊断')" @click="openSiteDetails(host,true)"><Activity :size="15"/></button>
-                    <button class="site-name-link" :title="t('站点详情')" @click="openSiteDetails(host)"><strong class="entity-name" :style="{color:siteIconColors.find(color=>color.key===host.icon_color)?.value||'var(--accent)'}">{{ host.name||host.domain }}</strong></button
-                    ><small
-                      class="proto-tag"
-                      :class="{ plain: host.tls_mode === 'none' }"
-                      >{{ host.tls_mode === "none" ? "HTTP" : "HTTPS" }}</small
-                    ><small v-if="host.type === 'static'" class="proto-tag kind">
-                      {{ t("静态") }}</small
-                    ><small
-                      v-else-if="host.type === 'redirect'"
-                      class="proto-tag kind"
-                      >{{ t("重定向") }}</small
-                    ><small v-if="host.name" class="site-alias">{{
-                      host.domain
-                    }}</small>
+                <div class="site-identity">
+                  <div class="host-icon site-icon" :style="siteIconStyle(host.icon_color)">
+                    <Folder v-if="host.type === 'static'" :size="17" />
+                    <ArrowRight v-else-if="host.type === 'redirect'" :size="17" />
+                    <Globe2 v-else :size="17" />
                   </div>
-                  <div v-if="host.tags?.length" class="site-tags"><span v-for="tag in host.tags" :key="tag">{{tag}}</span></div>
+                  <div class="site-identity-text">
+                    <button v-if="hasSiteName(host)" class="site-name-link" :title="t('站点详情')" @click="openSiteDetails(host)"><span class="site-display-name">{{ host.name }}</span></button>
+                    <div class="site-domain-row">
+                      <a class="site-domain-link" :href="siteURL(host)" target="_blank" rel="noopener noreferrer" :title="siteURL(host)">{{ host.domain }}<span class="site-domain-path">{{ host.path === '/' ? '' : host.path }}</span></a>
+<span class="site-entry-security">
+                      <small class="site-protocol">{{ host.tls_mode === 'none' ? 'HTTP' : 'HTTPS' }}</small>
+                      <span v-if="host.certificate_source && host.certificate_source.kind !== 'http'" class="site-certificate-hint" tabindex="0" :aria-label="certificateDetails(host)" :class="{ 'certificate-warning': certificateIssue(host) }">
+                        <ShieldCheck :size="13" />
+                        <span class="site-certificate-tooltip" role="tooltip">{{certificateDetails(host)}}</span>
+                      </span>
+                      <span v-if="certificateIssue(host)" class="site-certificate-error">{{certificateIssue(host)}}</span>
+                      <span v-if="!host.enabled" class="site-disabled-label">{{t('已停用')}}</span>
+                    </span>
+                    </div>
+                    <div v-if="host.tags?.length" class="site-tags"><span v-for="tag in host.tags" :key="tag">{{tag}}</span></div>
+                  </div>
+                </div>
+                <div class="site-route">
+                  <span class="site-connection" aria-hidden="true"><Folder v-if="host.type === 'static'" :size="16" /><CornerUpRight v-else-if="host.type === 'redirect'" :size="16" /><ArrowLeftRight v-else :size="16" /></span>
                   <div v-if="host.type === 'static'" class="static-path-row">
                     <button
                       class="static-upload-btn"
@@ -202,9 +247,7 @@ import { previewLimit, trafficCharts } from "../composables/usePreferences";
                       </template>
                       <template v-else>{{ t("空站点 · 点此上传") }}</template>
                     </button>
-                    <span class="static-root-path">{{
-                      host.root_path || t("托管目录")
-                    }}</span>
+                    <span class="static-root-path" tabindex="0" :title="host.root_path || t('托管目录')">{{t('托管目录')}}</span>
                   </div>
                   <span v-else class="site-upstream">{{
                     host.type === "redirect"
@@ -213,39 +256,39 @@ import { previewLimit, trafficCharts } from "../composables/usePreferences";
                   }}</span>
                   <div class="site-badges">
                     <span
-                      v-if="upstreamHealth[String(host.id)]"
+                      v-if="host.enabled && host.type === 'proxy' && upstreamHealth[String(host.id)]"
                       class="upstream-state"
                       :class="
                         upstreamHealth[String(host.id)].ok ? 'ok' : 'down'
                       "
                       :title="upstreamHealth[String(host.id)].error || ''"
-                      ><i class="dot"></i>{{ upstreamLabel(host.id) }}</span
+                      ><i class="dot"></i>{{ upstreamHealth[String(host.id)].ok ? Math.round(upstreamHealth[String(host.id)].latency_ms) + ' ms' : t('上游无响应') }}</span
                     >
-                    <span
-                      v-if="host.certificate_source"
-                      class="cert-line"
-                      :class="host.certificate_source.kind"
-                      :title="
-                        [
-                          t(host.certificate_source.label),
-                          host.certificate_source.domain,
-                          host.certificate_source.not_after
-                            ? t('到期 ') +
-                              new Date(
-                                host.certificate_source.not_after,
-                              ).toLocaleDateString()
-                            : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')
-                      "
-                      ><ShieldCheck :size="14" />{{
-                        t(host.certificate_source.label)
-                      }}<small
-                        v-if="host.certificate_source.kind === 'wildcard'"
-                        >{{ host.certificate_source.domain }}</small
-                      ></span
-                    >
+                  </div>
+                </div>
+                <ServiceTrafficCell class="site-metrics" :stats="siteStats(host)" kind="web"/>
+                <div class="site-actions">
+                  <div class="site-actions-top">
+                <button
+                  class="site-switch"
+                  type="button"
+                  role="switch"
+                  :aria-checked="host.enabled"
+                  :aria-label="
+                    (host.enabled ? t('停用站点 ') : t('启用站点 ')) +
+                    host.domain
+                  "
+                  :class="{ on: host.enabled }"
+                  :disabled="readOnly || !!hostToggling[host.id]"
+                  :title="
+                    host.enabled ? t('已启用，点击停用') : t('已停用，点击启用')
+                  "
+                  @click="toggleHost(host)"
+                >
+                  <span /></button
+                >
+                  </div>
+                  <div class="site-actions-buttons">
                     <div class="site-log-preview-wrap">
                       <button
                         class="site-log-trigger"
@@ -291,102 +334,19 @@ import { previewLimit, trafficCharts } from "../composables/usePreferences";
                         </button>
                       </div>
                     </div>
+
+                    <button class="icon-btn site-diagnostic-action" :aria-label="t('一键诊断')" :title="t('一键诊断')" @click="openSiteDetails(host,true)"><Activity :size="16" /></button>
+                    <button class="icon-btn" :disabled="readOnly" :aria-label="t('编辑')" :title="t('编辑')" @click="openEdit(host)"><Pencil :size="16" /></button>
+                    <details class="site-more-menu">
+                      <summary class="icon-btn" :aria-label="t('更多操作')" :title="t('更多操作')"><MoreHorizontal :size="17" /></summary>
+                      <div class="site-more-options">
+                        <a :href="siteURL(host)" target="_blank" rel="noopener noreferrer" @click="closeSiteMenu"><ExternalLink :size="15" />{{t('打开站点')}}</a>
+                        <button :disabled="readOnly" @click="cloneHost(host); closeSiteMenu($event)"><Copy :size="15" />{{t('克隆站点')}}</button>
+                        <button class="danger" :disabled="readOnly" @click="remove(host); closeSiteMenu($event)"><Trash2 :size="15" />{{t('删除')}}</button>
+                      </div>
+                    </details>
                   </div>
                 </div>
-                <div class="site-traffic">
-                  <div>
-                    <span>{{ t("近24小时") }}</span
-                    ><strong
-                      >{{ siteStats(host).recent.requests.toLocaleString() }}
-                      {{ t("次") }}</strong
-                    ><span
-                      >↑ {{ formatBytes(siteStats(host).recent.upload) }} · ↓
-                      {{ formatBytes(siteStats(host).recent.download) }}</span
-                    >
-                  </div>
-                  <div
-                    v-if="trafficCharts"
-                    class="traffic-spark"
-                    :aria-label="t('最近24小时流量趋势')"
-                  >
-                    <i
-                      v-for="point in hourlyTraffic(host)"
-                      :key="point.hour"
-                      :style="{
-                        height:
-                          barHeight(host, point.upload + point.download) + 'px',
-                      }"
-                      :title="
-                        new Date(point.hour * 1000).toLocaleString() +
-                        ' · ' +
-                        point.requests +
-                        t(' 次 · ') +
-                        formatBytes(point.upload + point.download)
-                      "
-                    ></i>
-                  </div>
-                  <small
-                    >{{ t("累计") }}
-                    {{ siteStats(host).total.requests.toLocaleString() }}
-                    {{ t("次 ·") }}
-                    {{
-                      formatBytes(
-                        siteStats(host).total.upload +
-                          siteStats(host).total.download,
-                      )
-                    }}</small
-                  >
-                </div>
-                <button
-                  class="site-switch"
-                  type="button"
-                  role="switch"
-                  :aria-checked="host.enabled"
-                  :aria-label="
-                    (host.enabled ? t('停用站点 ') : t('启用站点 ')) +
-                    host.domain
-                  "
-                  :class="{ on: host.enabled }"
-                  :disabled="!!hostToggling[host.id]"
-                  :title="
-                    host.enabled ? t('已启用，点击停用') : t('已停用，点击启用')
-                  "
-                  @click="toggleHost(host)"
-                >
-                  <span /></button
-                ><a
-                  class="icon-btn"
-                  :href="siteURL(host)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  :title="
-                    host.tls_mode === 'none'
-                      ? t('通过 HTTP 打开 ') + host.domain
-                      : t('通过 HTTPS 打开 ') + host.domain
-                  "
-                  ><ExternalLink :size="16" /></a
-                ><button
-                  class="icon-btn"
-                  :aria-label="t('克隆站点')"
-                  :title="t('克隆站点')"
-                  @click="cloneHost(host)"
-                >
-                  <Copy :size="15" /></button
-                ><button
-                  class="icon-btn"
-                  :aria-label="t('编辑')"
-                  :title="t('编辑')"
-                  @click="openEdit(host)"
-                >
-                  <Pencil :size="15" /></button
-                ><button
-                  class="icon-btn danger"
-                  :aria-label="t('删除')"
-                  :title="t('删除')"
-                  @click="remove(host)"
-                >
-                  <Trash2 :size="16" />
-                </button>
               </div>
             </div>
           </section>

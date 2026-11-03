@@ -1,0 +1,53 @@
+name: Checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Frontend types and production build
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web typecheck
+          pnpm --dir web build
+      - name: Backend checks
+        run: |
+          go vet ./...
+          go test ./...
+      - name: Backup and restore checks
+        run: |
+          sh -n install.sh
+          sh -n deploy/install-debian.sh
+          sh -n deploy/install-openwrt.sh
+          sh -n deploy/openwrt/viya
+          sh -n scripts/backup-linux.sh
+          sh -n scripts/restore-linux.sh
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Browser flow checks
+        env:
+          LANG: zh_CN.UTF-8
+        run: |
+          npx --yes --package @playwright/cli@0.1.23 playwright-cli install-browser chrome --with-deps
+          sh scripts/browser-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-diagnostics
+          path: output/playwright/

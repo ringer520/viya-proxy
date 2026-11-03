@@ -124,19 +124,22 @@ func (a *App) watchTraffic() {
 	}
 }
 
-// trafficRetention bounds per-hour history; cumulative totals stay available
-// because they are aggregated before pruning.
-const trafficRetention = 90 * 24 * time.Hour
+// Hourly statistics use a configurable bounded retention window.
 
 func (a *App) pruneTraffic(ctx context.Context) error {
-	cutoff := time.Now().Add(-trafficRetention).Unix()
+	policy := a.retention(ctx)
+	cutoff := time.Now().Add(-time.Duration(policy.TrafficDays) * 24 * time.Hour).Unix()
 	if _, err := a.db.ExecContext(ctx, `DELETE FROM traffic_hours WHERE hour<?`, cutoff); err != nil {
 		return err
 	}
-	_, err := a.db.ExecContext(ctx, `DELETE FROM layer4_traffic_hours WHERE hour<?`, cutoff)
-	return err
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM layer4_traffic_hours WHERE hour<?`, cutoff); err != nil {
+		return err
+	}
+	return pruneRecentAccess(ctx, a.db, policy.AccessEvents)
 }
 func (a *App) ingestTraffic() error {
+	a.trafficMu.Lock()
+	defer a.trafficMu.Unlock()
 	var paths []string
 	for _, pattern := range []string{"access*.log*", "l4*.log*"} {
 		found, err := filepath.Glob(filepath.Join(a.dataDir, pattern))
@@ -278,6 +281,10 @@ func (a *App) ingestTrafficFile(path string) error {
 	if err != nil {
 		return err
 	}
+	eventLimit := a.retention(a.ctx).AccessEvents
+	var resetAt string
+	_ = a.db.QueryRowContext(a.ctx, `SELECT value FROM panel_settings WHERE key='traffic_reset_at'`).Scan(&resetAt)
+	resetTime, _ := strconv.ParseFloat(resetAt, 64)
 	tx, err := a.db.BeginTx(a.ctx, nil)
 	if err != nil {
 		return err
@@ -297,7 +304,7 @@ func (a *App) ingestTrafficFile(path string) error {
 		}
 		offset += int64(len(line))
 		var event accessEntry
-		if json.Unmarshal(line, &event) != nil || event.Time <= 0 {
+		if json.Unmarshal(line, &event) != nil || event.Time <= 0 || event.Time < resetTime {
 			continue
 		}
 		// Layer4 connection accounting is emitted under the "layer4" logger and
@@ -316,6 +323,10 @@ func (a *App) ingestTrafficFile(path string) error {
 			if _, err = tx.ExecContext(a.ctx, `INSERT INTO layer4_traffic_hours(rule_id,hour,connections,upload,download) VALUES(?,?,1,?,?) ON CONFLICT(rule_id,hour) DO UPDATE SET connections=connections+1,upload=upload+excluded.upload,download=download+excluded.download`, ruleID, hour, int64(l4.Read), int64(l4.Written)); err != nil {
 				return err
 			}
+			continue
+		}
+		// Caddy may log one failed request both as an error and as an access event.
+		if strings.HasPrefix(event.Logger, "http.log.error") {
 			continue
 		}
 		if event.Status < 100 || event.Status > 599 {
@@ -357,7 +368,7 @@ func (a *App) ingestTrafficFile(path string) error {
 		}
 	}
 	for _, id := range allIDs {
-		if _, err = tx.ExecContext(a.ctx, `DELETE FROM site_access_events WHERE site_id=? AND id NOT IN (SELECT id FROM site_access_events WHERE site_id=? ORDER BY id DESC LIMIT 100)`, id, id); err != nil {
+		if _, err = tx.ExecContext(a.ctx, `DELETE FROM site_access_events WHERE site_id=? AND id NOT IN (SELECT id FROM site_access_events WHERE site_id=? ORDER BY id DESC LIMIT ?)`, id, id, eventLimit); err != nil {
 			return err
 		}
 	}

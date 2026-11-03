@@ -50,6 +50,7 @@ export const certExpiring = ref<ExpiringCertificate[]>([]);
 export const ipBans = ref<IPBan[]>([]);
 export const upstreamHealth = ref<Record<string, UpstreamHealth>>({});
 export const networkInterfaces = ref<NetworkInterface[]>([]);
+export const refreshErrors = ref<Record<string,string>>({});
 export const online = ref(false);
 export const refreshing = ref(false);
 export const lastRefreshedAt = ref(0);

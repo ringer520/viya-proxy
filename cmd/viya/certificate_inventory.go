@@ -62,6 +62,14 @@ func (a *App) certificateSources(ctx context.Context, hosts []Host) (map[int64]C
 			source = CertificateSource{Kind: "custom", Domain: host.Domain, Label: "指定上传证书", Status: "configured"}
 			if host.CustomCertificateID != nil {
 				source.CertificateID = *host.CustomCertificateID
+				if a.db.QueryRowContext(ctx, `SELECT not_after FROM custom_certificates WHERE id=?`, *host.CustomCertificateID).Scan(&source.NotAfter) == nil {
+					if expiry, e := time.Parse(time.RFC3339, source.NotAfter); e == nil {
+						source.Status = "issued"
+						if !expiry.After(time.Now()) {
+							source.Status = "expired"
+						}
+					}
+				}
 				for _, name := range custom[*host.CustomCertificateID] {
 					if strings.HasPrefix(name, "*.") && certificateMatchesDomain([]string{name}, host.Domain) {
 						source.Domain = name
@@ -120,7 +128,7 @@ func (a *App) certificateSources(ctx context.Context, hosts []Host) (map[int64]C
 			return nil
 		}
 		for id, source := range result {
-			if source.Domain != "" && certificateMatchesDomain(cert.DNSNames, source.Domain) {
+			if source.Kind != "custom" && source.Domain != "" && certificateMatchesDomain(cert.DNSNames, source.Domain) {
 				if source.NotAfter != "" {
 					existing, e := time.Parse(time.RFC3339, source.NotAfter)
 					if e == nil && !cert.NotAfter.After(existing) {
@@ -178,7 +186,7 @@ func (a *App) deleteAutomaticCertificate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err = a.applyLocked(r.Context()); err != nil {
-		fail(w, 502, errors.New("证书已删除，但引擎未重新应用配置"))
+		failSavedApplication(w)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"domain": domain, "removed": removed})

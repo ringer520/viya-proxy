@@ -21,7 +21,6 @@ export type Host = {
   listener_id: string;
   certificate_source?: CertificateSource;
   name: string;
-  favorite?:boolean;
   tags?:string[];
   domain: string;
   upstream: string;
@@ -41,8 +40,6 @@ export type Host = {
   rate_limit_window?: string;
   type: string;
   root_path?: string;
-  spa_fallback?: boolean;
-  browse?: boolean;
   redirect_target?: string;
   redirect_status?: number;
   redirect_keep_path?: boolean;
@@ -55,6 +52,7 @@ export type Host = {
 export type SiteGroup = { domain: string; hosts: Host[] };
 
 export type Revision = {
+ summary?:string;actor?:string;
   id: number;
   status: string;
   error?: string;
@@ -62,6 +60,7 @@ export type Revision = {
 };
 
 export type Provider = {
+ check_status?:string;check_message?:string;checked_at?:number;
   id: number;
   name: string;
   provider_type: string;
@@ -71,6 +70,7 @@ export type Provider = {
 export type DNSZoneOption = { name: string; status?: string };
 
 export type Layer4Rule = {
+ runtime?:{state:string;message:string;checked_at:number};
   id: number;
   name: string;
   listen_address: string;
@@ -82,6 +82,7 @@ export type Layer4Rule = {
 };
 
 export type DDNSRecord = {
+ last_changed_at?:number;last_success_at?:number;last_status?:string;last_stage?:string;running?:boolean;
   id: number;
   name: string;
   comment: string;
@@ -106,6 +107,7 @@ export type NetworkInterfaceAddress = {
   family: "ipv4" | "ipv6";
   scope: string;
   temporary?: boolean;
+ deprecated?:boolean;tentative?:boolean;
 };
 
 export type NetworkInterface = {
@@ -165,7 +167,7 @@ export type UpstreamHealth = {
   failures: number;
 };
 
-export type Palette = "light" | "dark" | "aurora" | "ember" | "cyber";
+export type Palette = "light" | "dark" | "aurora" | "ember" | "cyber" | "sakura" | "neon" | "lunar";
 export type ThemeChoice = "system" | Palette;
 
 export type WebListener = {

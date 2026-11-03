@@ -1,57 +1,27 @@
 #!/bin/sh
 set -eu
-
+umask 077
 DATA_DIR=${VIYA_DATA_DIR:-/var/lib/viya}
 BACKUP_DIR=${VIYA_BACKUP_DIR:-/var/backups/viya}
-if [ -f "$DATA_DIR/viya.db" ]; then
-  DB_FILE=viya.db
-elif [ -f "$DATA_DIR/crpm.db" ]; then
-  DB_FILE=crpm.db
-else
-  echo "Viya database not found in $DATA_DIR" >&2
-  exit 1
+MASTER_KEY_FILE=${VIYA_MASTER_KEY_FILE:-}
+if [ -z "$MASTER_KEY_FILE" ]; then
+  if [ -s "$DATA_DIR/master.key" ]; then MASTER_KEY_FILE="$DATA_DIR/master.key"; else MASTER_KEY_FILE=/etc/viya/secrets/master.key; fi
 fi
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ ! -s "$MASTER_KEY_FILE" ] && [ -s "$DATA_DIR/master.key" ]; then MASTER_KEY_FILE="$DATA_DIR/master.key"; fi
 mkdir -p "$BACKUP_DIR"
 chmod 0700 "$BACKUP_DIR"
-umask 077
+restart=0
+cleanup() { if [ "$restart" -eq 1 ]; then systemctl start viya.service; fi; }
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+consistency=online-database
+if [ "${VIYA_BACKUP_STOP_SERVICE:-0}" = 1 ]; then
+  command -v systemctl >/dev/null 2>&1 || { echo "Stop Viya before backup on non-systemd installations." >&2; exit 1; }
+  if systemctl is-active --quiet viya.service; then restart=1; systemctl stop viya.service; fi
+  consistency=service-stopped
+fi
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
-output="$BACKUP_DIR/viya-$stamp.tar.gz"
-stage=$(mktemp -d)
-trap 'rm -rf "$stage"' EXIT HUP INT TERM
-mkdir -p "$stage/data"
-
-# SQLite's backup API makes a consistent copy while the service is running,
-# including committed pages that may still reside in the WAL.
-python3 - "$DATA_DIR/$DB_FILE" "$stage/data/viya.db" <<'PY'
-import sqlite3, sys
-src = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True, timeout=15)
-dst = sqlite3.connect(sys.argv[2])
-src.backup(dst)
-result = dst.execute("PRAGMA integrity_check").fetchone()[0]
-dst.close(); src.close()
-if result != "ok":
-    raise SystemExit("SQLite backup integrity check failed: " + str(result))
-PY
-
-# Preserve Caddy certificate storage, application-managed certificates, and
-# other runtime state, while keeping the master key out of this archive.
-for entry in "$DATA_DIR"/* "$DATA_DIR"/.[!.]* "$DATA_DIR"/..?*; do
-  [ -e "$entry" ] || continue
-  name=${entry##*/}
-  case "$name" in
-    viya.db|viya.db-*|crpm.db|crpm.db-*|master.key|access.log|access.log-*) continue ;;
-  esac
-  cp -a "$entry" "$stage/data/"
-done
-cat > "$stage/MANIFEST.txt" <<EOF
-Viya backup format: 1
-Created UTC: $stamp
-SQLite: consistent online backup
-Included: application database and runtime files except master.key and access logs
-Restore requires the same separately protected master.key used by the source instance.
-EOF
-tar -czf "$output.tmp" -C "$stage" .
-chmod 0600 "$output.tmp"
-mv "$output.tmp" "$output"
-echo "$output"
-
+set -- create "$BACKUP_DIR/viya-$stamp-$$.tar.gz" --data "$DATA_DIR" --key "$MASTER_KEY_FILE" --consistency "$consistency"
+if [ "${VIYA_BACKUP_INCLUDE_KEY:-0}" = 1 ]; then set -- "$@" --include-key; fi
+python3 "$SCRIPT_DIR/backup_archive.py" "$@"

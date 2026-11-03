@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Network, Pencil, RefreshCw, Trash2, Search } from "@lucide/vue";
 import { t } from "../i18n";
-import { clearListFilters, hasListFilter, listSearch, statusFilter } from "../composables/useState";
+import { clearListFilters, hasListFilter, listSearch, readOnly, statusFilter } from "../composables/useState";
 import { nextTick, ref } from "vue";
 
 import { ddnsFeedback, ddnsRunning, ddnsToggling, formatDDNSTime, openDDNS, removeDDNS, runDDNS, toggleDDNS, visibleDDNS } from "../composables/useNetwork";
@@ -72,8 +72,8 @@ async function toggleSearch() {
                 role="status"
                 >{{ record.last_error }}</small
               ><small>{{ t("备注：") }}{{ record.comment || "viya" }}</small
-              ><small class="ddns-last-run"
-                >{{ t("上次执行：")
+              ><small class="op-status" :class="{bad:!!record.last_error}">{{record.running?t('正在更新')+' · '+t(({address:'获取地址',credentials:'读取凭据',compare:'比较 DNS',update:'提交修改',verify:'验证服务商结果'} as Record<string,string>)[record.last_stage||'address']):t(({updated:'已更新并验证',unchanged:'地址未变化',unverified:'已提交 · 验证待完成',failed:'更新失败'} as Record<string,string>)[record.last_status||'']||'等待首次执行')}}<template v-if="record.last_error"> · {{t('失败阶段')}}：{{t(({address:'获取地址',credentials:'读取凭据',compare:'比较 DNS',update:'提交修改',verify:'验证服务商结果'} as Record<string,string>)[record.last_stage||'']||'未知')}}</template></small><small>{{t('上次实际修改')}}：{{record.last_changed_at?formatDDNSTime(record.last_changed_at):t('暂无记录')}}</small><small class="ddns-last-run"
+                >{{ t("上次检查：")
                 }}{{ formatDDNSTime(record.last_run_at) }}</small
               >
             </div>
@@ -86,7 +86,7 @@ async function toggleSearch() {
                 :aria-checked="record.enabled"
                 :aria-label="t('自动更新') + ' ' + record.name"
                 :class="{ on: record.enabled }"
-                :disabled="!!ddnsToggling[record.id]"
+                :disabled="readOnly || !!ddnsToggling[record.id]"
                 @click="toggleDDNS(record, !record.enabled)"
               >
                 <span />
@@ -99,7 +99,7 @@ async function toggleSearch() {
               >{{ ddnsFeedback[record.id] }}</span
             ><button
               class="secondary ddns-run-button"
-              :disabled="ddnsRunning[record.id]"
+              :disabled="readOnly || ddnsRunning[record.id]"
               :aria-busy="ddnsRunning[record.id]"
               :title="t('立即手动更新')"
               @click="runDDNS(record)"
@@ -112,6 +112,7 @@ async function toggleSearch() {
               }}</button
             ><button
               class="icon-btn"
+              :disabled="readOnly"
               :aria-label="t('编辑')"
               :title="t('编辑')"
               @click="openDDNS(record)"
@@ -119,6 +120,7 @@ async function toggleSearch() {
               <Pencil :size="15" /></button
             ><button
               class="icon-btn danger"
+              :disabled="readOnly"
               :aria-label="t('删除')"
               :title="t('删除')"
               @click="removeDDNS(record)"

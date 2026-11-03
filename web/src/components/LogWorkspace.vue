@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { apiFetch as fetch } from "../api";
 
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount,watch } from 'vue'
 import { ScrollText, Terminal, Settings, RefreshCw, ShieldCheck } from '@lucide/vue'
 import AccessLogTable from './AccessLogTable.vue'
 import { t } from '../i18n'
+import {hosts,readOnly} from '../composables/useState'
+import {pauseHidden} from '../composables/usePreferences'
 
 interface AuditEntry {
   id: number
@@ -40,37 +42,31 @@ const tabs = computed(() => [
   { id: 'audit', name: t('登录审计'), icon: ShieldCheck },
   { id: 'settings', name: t('日志配置'), icon: Settings },
 ])
+const domain=ref(''),queryText=ref(''),status=ref('all'),from=ref(''),to=ref('')
+let request:AbortController|null=null
 let sequence = 0
 
-function endpoint(which: string) {
-  if (which === 'program') return '/api/v1/logs/program'
-  if (which === 'audit') return '/api/v1/auth/audit?limit=200'
-  return '/api/v1/logs'
+function endpoint(which:string){
+ const params=new URLSearchParams({limit:'200',q:queryText.value});if(from.value)params.set('from',String(Math.floor(new Date(from.value).getTime()/1000)));if(to.value)params.set('to',String(Math.floor(new Date(to.value).getTime()/1000)));
+ if(which==='access'){params.set('domain',domain.value);params.set('status',status.value)}
+ if(which==='program')params.set('level',filter.value)
+ if(which==='audit')params.set('result',auditFilter.value)
+ return (which==='program'?'/api/v1/logs/program':which==='audit'?'/api/v1/auth/audit':'/api/v1/logs')+'?'+params
 }
-
-async function load() {
-  if (loading.value || tab.value === 'settings') return
-  loading.value = true
-  const selected = tab.value,
-    current = ++sequence
-  try {
-    const r = await fetch(endpoint(selected))
-    if (!r.ok) throw Error(t('读取失败'))
-    const body = await r.json()
-    if (current !== sequence || selected !== tab.value) return
-    if (selected === 'program') program.value = body
-    else if (selected === 'audit') audit.value = Array.isArray(body) ? body : []
-    else events.value = body
-    error.value = ''
-  } catch (e) {
-    error.value = e instanceof Error ? t(e.message) : t('读取失败')
-  } finally {
-    if (current === sequence) loading.value = false
-  }
+async function load(force=false){
+ if(tab.value==='settings'||loading.value&&!force)return
+ request?.abort();const controller=new AbortController();request=controller
+ loading.value=true;const selected=tab.value,current=++sequence
+ try{const r=await fetch(endpoint(selected),{signal:controller.signal});const body=await r.json();if(!r.ok)throw Error(body.error||t('读取失败'));if(current!==sequence||selected!==tab.value)return
+ if(selected==='program')program.value=body;else if(selected==='audit')audit.value=Array.isArray(body)?body:[];else events.value=body;error.value=''
+ }catch(e){if(current===sequence&&!controller.signal.aborted)error.value=e instanceof Error?t(e.message):t('读取失败')}
+ finally{if(current===sequence)loading.value=false}
 }
+watch([filter,auditFilter],()=>void load(true))
+function visibility(){if(!document.hidden&&props.autoRefresh)void load()}
 
 async function save() {
-  if (busy.value) return
+  if (busy.value||readOnly.value) return
   busy.value = true
   message.value = ''
   error.value = ''
@@ -92,7 +88,7 @@ async function save() {
 }
 
 async function select(value: string) {
-  ++sequence
+  request?.abort();++sequence
   loading.value = false
   tab.value = value
   error.value = ''
@@ -101,7 +97,7 @@ async function select(value: string) {
     try {
       const r = await fetch('/api/v1/logs/settings')
       if (!r.ok) throw Error(t('读取失败'))
-      settings.value = await r.json()
+      const data=await r.json();if(tab.value==='settings')settings.value=data
     } catch {
       error.value = t('读取设置失败')
     }
@@ -137,19 +133,20 @@ function reasonLabel(entry: AuditEntry) {
 
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
+  document.addEventListener('visibilitychange',visibility)
   void load()
   timer = setInterval(() => {
-    if (props.autoRefresh) void load()
+    if (props.autoRefresh&&(!pauseHidden.value||!document.hidden)) void load()
   }, 5000)
 })
-onBeforeUnmount(() => clearInterval(timer))
+onBeforeUnmount(()=>{++sequence;request?.abort();clearInterval(timer);document.removeEventListener('visibilitychange',visibility)})
 </script>
 
 <template>
   <section class="panel log-workspace">
     <header class="panel-head">
       <h2>{{ t('日志') }}</h2>
-      <button v-if="tab !== 'settings'" class="secondary" :disabled="loading" @click="load">
+      <button v-if="tab !== 'settings'" class="secondary" :disabled="loading" @click="load(true)">
         <RefreshCw :size="15" :class="{ spinning: loading }" />{{ t('刷新') }}
       </button>
     </header>
@@ -165,6 +162,7 @@ onBeforeUnmount(() => clearInterval(timer))
         <component :is="item.icon" :size="16" />{{ item.name }}
       </button>
     </nav>
+    <template v-if="tab!=='settings'"><details class="op-disclosure"><summary>{{t('筛选日志')}}</summary><form class="op-toolbar" @submit.prevent="load(true)"><label v-if="tab==='access'">{{t('站点')}}<select v-model="domain"><option value="">{{t('全部站点')}}</option><option v-for="host in hosts" :key="host.id" :value="host.domain">{{host.domain}}</option></select></label><label>{{t('关键词')}}<input v-model="queryText" maxlength="200"/></label><label>{{t('开始时间')}}<input v-model="from" type="datetime-local"/></label><label>{{t('结束时间')}}<input v-model="to" type="datetime-local"/></label><label v-if="tab==='access'">{{t('状态码')}}<select v-model="status"><option value="all">{{t('全部')}}</option><option value="errors">{{t('错误请求')}}</option><option value="blocked">{{t('403 / 429 拦截响应')}}</option><option v-for="code in ['2xx','3xx','4xx','5xx']" :key="code">{{code}}</option></select></label><button class="primary">{{t('应用筛选')}}</button></form><p class="auth-hint">{{tab==='audit'?t('在保留的登录审计中筛选，最多返回 200 条。'):t('在当前日志文件尾部最多 2 MiB 内筛选，返回最近 200 条匹配记录；不包含已轮转的归档。')}}</p></details></template>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="message" class="probe-ok" role="status">{{ message }}</p>
 
@@ -216,7 +214,7 @@ onBeforeUnmount(() => clearInterval(timer))
       <p v-else class="revision-empty">{{ t('暂无登录审计记录') }}</p>
     </div>
 
-    <form v-else class="log-config-form" @submit.prevent="save">
+    <form v-else class="log-config-form" @submit.prevent="save"><p v-if="readOnly" class="auth-hint">{{t("只读账户可以查看日志配置，不能修改。")}}</p><fieldset class="op-fieldset" :disabled="readOnly||busy">
       <label
         >{{ t('程序日志级别') }}<select v-model="settings.level">
           <option v-for="level in ['DEBUG', 'INFO', 'WARN', 'ERROR']" :key="level">{{ level }}</option>
@@ -253,7 +251,7 @@ onBeforeUnmount(() => clearInterval(timer))
         }}
       </p>
       <button class="primary" :disabled="busy">{{ busy ? t('应用中…') : t('保存并应用') }}</button>
-    </form>
+    </fieldset></form>
   </section>
 </template>
 

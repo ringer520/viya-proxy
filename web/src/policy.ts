@@ -3,6 +3,7 @@
 // Used by both the default-policy dialog and the site form.
 
 export type SecurityHeaders = {
+  mode?: "follow" | "custom" | "inherit" | "none";
   enabled: boolean;
   inherit: boolean;
   frame_options: string;
@@ -27,6 +28,7 @@ export type SitePolicy = SecurityHeaders & {
 
 export function emptySecurityHeaders(): SecurityHeaders {
   return {
+    mode: "follow",
     enabled: false,
     inherit: false,
     frame_options: "",
@@ -40,6 +42,7 @@ export function emptySecurityHeaders(): SecurityHeaders {
 export function emptySitePolicy(): SitePolicy {
   return {
     ...emptySecurityHeaders(),
+    mode: "custom",
     basic_auth_user: "",
     basic_auth_enabled: false,
     custom_headers: {},

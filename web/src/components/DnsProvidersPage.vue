@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import ProviderActions from "./ProviderActions.vue";
 import ResourceUsage from "./ResourceUsage.vue";
-import { KeyRound, Pencil, ShieldCheck, Trash2 } from "@lucide/vue";
+import { KeyRound, Pencil, Trash2 } from "@lucide/vue";
 import { t } from "../i18n";
-import { hasListFilter } from "../composables/useState";
+import { hasListFilter, readOnly } from "../composables/useState";
 
 import { editProvider, removeProvider, visibleProviders } from "../composables/useNetwork";
 </script>
@@ -25,30 +26,35 @@ import { editProvider, removeProvider, visibleProviders } from "../composables/u
             :key="provider.id"
             role="group"
             :aria-label="provider.name"
-            class="host-row"
+            class="host-row provider-row"
           >
-            <div class="host-icon"><ShieldCheck :size="17" /></div>
-            <div class="host-main">
-              <ResourceUsage kind="provider" :id="provider.id"/>
+            <div class="provider-identity"><div class="host-icon"><KeyRound :size="18" /></div>
+            <div class="provider-details">
               <strong>{{ provider.name }}</strong
               ><span
                 >{{ provider.provider_type }}
                 {{ t("· 凭据已保存，不会在列表中显示") }}</span
               >
-            </div>
+              <ResourceUsage kind="provider" :id="provider.id"/>
+            </div></div>
+            <ProviderActions :provider="provider">
             <button
-              class="icon-btn"
+              class="secondary"
+              :disabled="readOnly"
               :title="t('替换凭据')"
               @click="editProvider(provider)"
             >
-              <Pencil :size="15" /></button
+              <Pencil :size="15" />{{t('替换凭据')}}</button
             ><button
               class="icon-btn danger"
+              :disabled="readOnly"
+              :aria-label="t('删除凭据')"
               :title="t('删除凭据')"
               @click="removeProvider(provider)"
             >
               <Trash2 :size="16" />
             </button>
+            </ProviderActions>
           </div>
         </div>
         <div v-else class="empty">

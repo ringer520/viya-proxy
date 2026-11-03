@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import {computed,ref} from "vue";
+import AccessRuleInspector from "./AccessRuleInspector.vue";
 import { Ban, Pencil, ShieldCheck } from "@lucide/vue";
 import { t } from "../i18n";
-import { hasListFilter } from "../composables/useState";
 
 import { openBan, removeBan, visibleBans } from "../composables/useNetwork";
+const kind=ref('manual');const counts=computed(()=>({manual:visibleBans.value.filter(b=>b.ip!=='foreign'&&b.source==='manual').length,region:visibleBans.value.filter(b=>b.ip==='foreign').length,auto:visibleBans.value.filter(b=>b.ip!=='foreign'&&b.source!=='manual').length}));const displayBans=computed(()=>visibleBans.value.filter(b=>kind.value==='region'?b.ip==='foreign':kind.value==='manual'?b.ip!=='foreign'&&b.source==='manual':b.ip!=='foreign'&&b.source!=='manual'));
 </script>
 
 <template>
@@ -20,9 +22,11 @@ import { openBan, removeBan, visibleBans } from "../composables/useNetwork";
             </p>
           </div>
         </div>
-        <div v-if="visibleBans.length" class="host-list">
+        <nav class="op-tabs" role="tablist" :aria-label="t('访问规则分类')"><button v-for="item in [{id:'manual',name:'手动 IP 封禁'},{id:'region',name:'地区访问限制'},{id:'auto',name:'自动封禁'}]" :key="item.id" class="secondary" role="tab" :aria-selected="kind===item.id" @click="kind=item.id">{{t(item.name)}} · {{counts[item.id as keyof typeof counts]}}</button></nav>
+<AccessRuleInspector/>
+<div v-if="displayBans.length" class="host-list">
           <div
-            v-for="ban in visibleBans"
+            v-for="ban in displayBans"
             :key="ban.id"
             role="group"
             :aria-label="ban.ip"
@@ -54,9 +58,7 @@ import { openBan, removeBan, visibleBans } from "../composables/useNetwork";
         <div v-else class="empty">
           <div class="empty-icon"><Ban :size="23" /></div>
           <strong>{{
-            hasListFilter
-              ? t("未找到匹配项目")
-              : t("当前没有封禁记录")
+            t("此分类没有规则")
           }}</strong
           ><span>{{ t("添加封禁规则，阻止恶意来源访问站点。") }}</span>
         </div>

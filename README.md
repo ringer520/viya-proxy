@@ -10,12 +10,24 @@
 
 - [界面预览](#界面预览) · [功能概览](#功能概览)
 - [Linux 安装](#linux-安装) · [Docker 安装与更新](#docker-安装与更新)
-- [备份与恢复](#备份与恢复) · [OpenWrt 手动安装](#openwrt-手动安装)
+- [备份与恢复](#备份与恢复) · [OpenWrt 一键安装](#openwrt-一键安装)
 - [从源码构建](#从源码构建) · [卸载](#卸载)
+
+### 操作状态与访问保护
+
+- 端口转发分别展示配置启停与实际监听核实结果；保存前支持检查端口冲突。监听正常不等于上游业务正常。
+- DDNS 展示获取地址、比较、提交和服务商回读阶段，分别记录检查与实际修改时间。IPv6 可选择跟随网卡或固定地址；固定地址失效不会被静默替换。
+- SSL 证书支持申请、自动续期、克隆与上传，关联使用统一显示在每项信息末行；站点诊断可检查访问链路。
+- DNS 凭据支持只读验证、替换凭据和关联资源检查。读取通过不代表具有 DNS 写入权限。
+- IP 规则分为手动、地区与自动封禁，可查询某地址命中的规则。修改面板自身的限制需在 120 秒内通过对应域名确认，否则恢复原规则；局域网入口可以取消。
+- 日志支持服务端站点、关键词、时间及状态筛选，文件查询范围为当前文件尾部最多 2 MiB；配置历史保留最近 10 条操作摘要与操作者。
+
+地区限制按连接到 Caddy 的来源地址判断；使用 CDN 或其他代理时，代理出口可能被地区规则拦截。现有规则不会因升级被自动解除。
+
 
 ## 界面预览
 
-运行概览展示服务器资源、24 小时流量趋势和需要关注的服务状态。其他管理页面可展开查看。
+运行概览展示服务器资源、可切换时间范围的流量趋势和需要关注的服务状态。点击 Web 错误率可按站点和状态码定位近期异常；其他管理页面可展开查看。
 
 ![Viya 运行概览](docs/screenshots/02-overview.png)
 
@@ -47,20 +59,23 @@
 - **TLS 证书**：申请和自动续期证书、查看申请进度、上传自定义证书；站点可复用匹配的泛域名证书。
 - **动态 DNS**：支持 A、AAAA、CNAME；可选网卡地址或公网 IP，支持定时更新和手动更新。
 - **DNS 凭据**：支持 Cloudflare、DNSPod、阿里云等服务商，凭据使用独立主密钥加密存储。
-- **TCP / UDP 转发**：管理 TCP、UDP 或双协议规则，并查看连接与流量统计。
+- **TCP / UDP 转发**：管理 TCP、UDP 或双协议规则；与 Web 服务分别展示近 30 天的请求或连接、上行、下行和趋势统计。转发流量在连接结束后记账。
 - **访问安全**：IP/CIDR 封禁、访问控制、登录限流、自动封禁、默认安全配置和安全响应头。
 - **运行维护**：CPU、内存和磁盘监控；访问日志、程序日志、流量趋势、配置历史、备份和恢复。
-- **账户与界面**：管理员和只读账号、中文/英文界面、多种主题及简洁显示模式。
+- **账户与界面**：管理员和只读账号、中文/英文、五套基础主题及三套原创二次元主题；配套导航、按钮与动效，尊重系统减少动态效果偏好。
+- **统计与异常定位**：点击 Web 错误率，按站点、状态码、次数查看近期保留日志；在设置 → 存储中可确认清空所有流量统计并重新计数。原始日志、账户、证书与业务配置保留。
 
 ## Linux 安装
 
-一键安装适用于使用 **systemd** 的 Linux，提供 `amd64`、`arm64` 和 `armv7` 版本。安装会校验 Release 包的 SHA-256、创建服务并设置开机自启。需要 `curl` 或 `wget`、`tar`、`python3` 和系统 CA 证书；安装器会尝试通过系统包管理器补齐依赖。
+一键安装适用于使用 **systemd** 的 Linux，提供 `amd64`、`arm64` 和 `armv7` 版本。安装会校验 Release 包的 SHA-256、创建服务并设置开机自启；下载显示进度并支持重试和超时。需要 `curl` 或 `wget`、`tar`、`python3` 和系统 CA 证书；安装器会尝试通过系统包管理器补齐依赖。
 
 使用 root 运行：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
 ```
+
+也支持 `wget -qO- https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh`。
 
 普通用户也可执行同一命令；安装器会通过 `sudo` 重新下载并运行。普通用户需要预先安装且获准使用 `sudo`。安装完成后，面板默认监听 `0.0.0.0:8181`，可从局域网访问 `http://服务器IP:8181`。首次打开时创建管理员账号。
 
@@ -75,6 +90,8 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 ```
 
 启用了系统防火墙时，请允许局域网访问面板 TCP 端口，以及所用 Web 服务端口（通常为 80/443）。
+
+固定安装版本可使用 `curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.3.0 sh`。环境变量应放在管道右侧。
 
 ### 服务管理与更新
 
@@ -128,52 +145,73 @@ docker compose up -d
 
 更新前备份 `/opt/viya/data`，并保留其中的 `master.key`，否则已有 DNS 凭据无法解密。不要使用 `docker compose down -v` 更新，它会删除 Docker 卷。
 
-### 从旧版双卷 Docker 迁移
-
-旧版可能将业务数据放在 `/var/lib/viya`，主密钥单独挂载到 `/etc/viya/secrets`。先停止旧容器但保留容器和卷，然后复制数据：
-
-```sh
-docker compose stop
-sudo mkdir -p /opt/viya/data
-# 用 docker volume ls 中的实际卷名替换 <旧业务数据卷>
-docker run --rm -v <旧业务数据卷>:/from:ro -v /opt/viya/data:/to alpine sh -c 'cp -a /from/. /to/'
-# 用 docker ps -a 中的旧容器名替换 <旧容器名>
-docker cp <旧容器名>:/etc/viya/secrets/master.key /opt/viya/data/master.key
-```
-
-确认新目录包含数据库和 `master.key`，再改用上面的单目录 Compose 映射。运行 `docker compose down`（不要加 `-v`）后执行 `docker compose up -d`。登录检查 DNS 凭据、证书和站点文件后再清理旧卷。
-
 ## 备份与恢复
 
-完整 Linux 备份脚本包含在 Release 包中。下载并解压匹配服务器架构的包后运行：
+安装后的备份工具位于 `/opt/viya/scripts/`，需要 Python 3.11 或更新版本。也可使用 Release 解压目录中的 `scripts/`。
+
+普通备份包含一致性 SQLite 副本、托管网站文件、证书和运行数据，默认不含主密钥及访问日志。主密钥 `/etc/viya/secrets/master.key` 需要单独保护。
 
 ```sh
-sudo sh ./viya-linux-amd64/scripts/backup-linux.sh
+sh /opt/viya/scripts/backup-linux.sh
 ```
 
-备份写入 `/var/backups/viya/`，包含一致性 SQLite 副本和运行数据，但**不包含主密钥**。请另外安全保存 `/etc/viya/secrets/master.key`。恢复时必须提供同一套安装的主密钥：
+完整迁移建议短暂停止服务并包含主密钥，脚本完成后自动启动原先运行的服务。以下命令以 root 运行，普通用户在命令前加 `sudo`：
 
 ```sh
-sudo sh ./viya-linux-amd64/scripts/restore-linux.sh /var/backups/viya/viya-时间戳.tar.gz
+VIYA_BACKUP_INCLUDE_KEY=1 VIYA_BACKUP_STOP_SERVICE=1 sh /opt/viya/scripts/backup-linux.sh
 ```
 
-面板配置导出适合迁移业务配置，不包含账号、密码或会话，不能代替完整备份。Docker 用户应停止容器后复制整个 `/opt/viya/data` 至其他设备或安全位置。
+备份保存在 `/var/backups/viya/`，含文件清单、SHA-256 校验和及主密钥指纹。完整备份包含账户、凭据与私钥，未额外加密，文件权限为 `0600`，应复制到受保护的离机位置。数据目录外的网站根目录需要另行备份。
 
-## OpenWrt 手动安装
-
-OpenWrt 使用 procd，不适用 systemd 一键安装脚本。下载对应架构的 Release 包并解压，将二进制和服务脚本复制到设备：
+先校验备份，再演练恢复检查（两者均不修改现有安装）：
 
 ```sh
-mkdir -p /opt/viya/bin
-cp viya-linux-armv7/bin/viya-linux-armv7 /opt/viya/bin/viya
-cp viya-linux-armv7/bin/caddy-linux-armv7 /opt/viya/bin/caddy
-cp viya-linux-armv7/deploy/openwrt/viya /etc/init.d/viya
-chmod +x /etc/init.d/viya
-/etc/init.d/viya enable
-/etc/init.d/viya start
+sh /opt/viya/scripts/restore-linux.sh --verify /path/to/viya-backup.tar.gz
+VIYA_RESTORE_KEY=1 sh /opt/viya/scripts/restore-linux.sh --dry-run /path/to/viya-backup.tar.gz
 ```
 
-示例 procd 服务默认绑定 `127.0.0.1:8181`；远程访问请使用 LuCI 反代或 SSH 隧道。请按路由器 CPU 和内存评估证书与转发负载。
+恢复完整备份时显式允许使用包内密钥；恢复普通备份则省略 `VIYA_RESTORE_KEY=1`，并提供原主密钥：
+
+```sh
+VIYA_RESTORE_KEY=1 sh /opt/viya/scripts/restore-linux.sh /path/to/viya-backup.tar.gz
+```
+
+恢复会先备份当前数据，验证后替换数据，并检查 Viya/Caddy 就绪状态；启动失败会回退数据和密钥。脚本适用于 systemd 安装，目标机应先安装 Viya，并使用与备份相同的数据目录。可用 `VIYA_DATA_DIR`、`VIYA_MASTER_KEY_FILE`、`VIYA_BACKUP_DIR` 指定路径。
+
+面板中的加密配置导出不含面板账户、账户密码、会话和网站文件，但含业务凭据与证书，不应公开分享。Docker 用户应停止容器后备份整个映射数据目录。
+
+在“面板设置 → 存储”可查看占用并设置统计保留策略；日志轮转在“日志”中配置。手动清理只处理过期统计、近期访问记录及过期会话，不删除网站、证书和恢复点；SQLite 空闲页会复用，不承诺数据库文件立即缩小。
+
+
+## OpenWrt 一键安装
+
+支持使用 procd 的 OpenWrt **amd64、arm64、armv7**；不支持 MIPS。SSH 登录路由器，以 root 执行：
+
+```sh
+wget -qO- https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
+```
+
+通用入口会识别 OpenWrt 并调用专用安装器。也可直接下载脚本，便于指定版本和端口：
+
+```sh
+wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
+VERSION=v0.3.0 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+```
+
+安装器验证 SHA-256，检查空间和端口，创建 procd 服务并启用开机自启。新安装默认局域网访问 **`http://路由器IP:8181`**，数据位于 `/opt/viya/data`，主密钥位于 `/etc/viya/secrets/master.key`。`/opt` 必须是持久化目录或已挂载的外部存储；请为程序、数据和升级备份保留充足空间，下载与解压还需要 `/tmp` 至少约 128 MiB 可用空间。小内存路由器建议使用外部存储或在独立 Linux 主机部署。
+
+需要 `curl` 或 `wget`、`tar`、`sha256sum`、`netstat`、UCI 和 HTTPS CA 证书。缺少证书时，opkg 系统可执行 `opkg update && opkg install ca-bundle`；使用 apk 的 OpenWrt 可安装 `ca-certificates`。安装器不会自动开放 WAN 防火墙端口。
+
+新服务可通过 UCI 修改监听地址，再重启：
+
+```sh
+uci set viya.main.listen='0.0.0.0:8182'
+uci commit viya
+/etc/init.d/viya restart
+logread -e viya
+```
+
+已有安装会保留原服务脚本及数据路径，升级前复制数据、密钥和程序到 `/opt/viya/backups/install-*`。旧版自定义服务可能仍使用脚本中的监听地址，请按现有配置调整。安装和升级流程经过隔离模拟验证；OpenWrt 的 CPU、存储、固件与网络差异仍需在实际设备确认。
 
 ## 从源码构建
 

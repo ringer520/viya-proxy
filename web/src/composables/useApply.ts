@@ -35,7 +35,7 @@ export async function retryApply() {
     providerError.value = "";
     l4Error.value = "";
     await load();
-    if (!error.value) error.value = t("当前配置已成功重新应用到 Caddy。");
+
     if (partialSave.value && editingID.value === null) {
       const saved = hosts.value.find(
         (host) =>

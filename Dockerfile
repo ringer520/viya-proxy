@@ -35,6 +35,8 @@ FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS viya-builder
 ARG TARGETARCH
 ARG TARGETVARIANT
 ARG VERSION=dev
+ARG BUILD_COMMIT=unknown
+ARG BUILD_TIME=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -46,7 +48,7 @@ RUN set -e; \
     if [ "$TARGETARCH" = "arm" ]; then ARMV="${TARGETVARIANT#v}"; fi; \
     CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH GOARM=$ARMV \
       go build -trimpath -buildvcs=false \
-        -ldflags "-s -w -X main.version=${VERSION}" \
+        -ldflags "-s -w -X main.version=${VERSION} -X main.buildCommit=${BUILD_COMMIT} -X main.buildTime=${BUILD_TIME} -X main.buildSource=${BUILD_COMMIT}" \
         -o /out/viya ./cmd/viya
 
 # ---- Stage 4: runtime ----

@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -115,6 +116,11 @@ func sanitizeProgramText(s string) string {
 	})
 }
 func (a *App) recentProgramLogs(w http.ResponseWriter, r *http.Request) {
+	query, err := parseLogQuery(r)
+	if err != nil {
+		fail(w, 400, err)
+		return
+	}
 	// Read only the structured, redacted program log; never shell out to journalctl.
 	f, e := os.Open(filepath.Join(a.dataDir, "program.log"))
 	if errors.Is(e, os.ErrNotExist) {
@@ -143,12 +149,12 @@ func (a *App) recentProgramLogs(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		var v map[string]any
-		if json.Unmarshal([]byte(line), &v) == nil && v != nil {
+		if json.Unmarshal([]byte(line), &v) == nil && v != nil && query.matches(v) {
 			out = append(out, v)
 		}
 	}
-	if len(out) > 200 {
-		out = out[len(out)-200:]
+	if len(out) > query.Limit {
+		out = out[len(out)-query.Limit:]
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
@@ -187,7 +193,13 @@ func (a *App) updateLogSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if e = a.applyLocked(r.Context()); e != nil {
 		raw, _ = json.Marshal(old)
-		_, _ = a.db.ExecContext(context.WithoutCancel(r.Context()), `UPDATE panel_settings SET value=? WHERE key='log_settings'`, string(raw))
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Second)
+		defer cancel()
+		if _, err := a.db.ExecContext(ctx, `UPDATE panel_settings SET value=? WHERE key='log_settings'`, string(raw)); err != nil {
+			fail(w, 500, errors.New("日志设置恢复失败，请检查配置历史"))
+			return
+		}
+		a.confirmRestoredApplication(ctx, nil)
 		fail(w, 502, errors.New("Log settings were not applied; previous settings restored"))
 		return
 	}

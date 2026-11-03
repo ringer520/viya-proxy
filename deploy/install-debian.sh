@@ -322,7 +322,9 @@ fi
 
 # Snapshot the legacy installation before migrating its files and names.
 if { [ -f "$legacy_data/crpm.db" ] || [ -f "$legacy_data/viya.db" ]; } && [ -x "$ROOT/scripts/backup-linux.sh" ]; then
-  VIYA_DATA_DIR="$legacy_data" VIYA_BACKUP_DIR=/var/backups/crpm sh "$ROOT/scripts/backup-linux.sh"
+  legacy_backup_key="$legacy_data/master.key"
+  if [ ! -s "$legacy_backup_key" ]; then legacy_backup_key="$legacy_config/secrets/master.key"; fi
+  VIYA_DATA_DIR="$legacy_data" VIYA_MASTER_KEY_FILE="$legacy_backup_key" VIYA_BACKUP_DIR=/var/backups/crpm sh "$ROOT/scripts/backup-linux.sh"
 fi
 if [ "$viya_was_active" -eq 1 ]; then
   systemctl stop viya.service || { echo "Could not stop the running Viya service; installation cancelled." >&2; exit 1; }
@@ -420,6 +422,10 @@ chown -R viya:viya /var/lib/viya
 chmod 0700 /var/lib/viya
 install -o viya -g viya -m 0755 "$viya_bin" /opt/viya/bin/viya
 install -o viya -g viya -m 0755 "$caddy_bin" /opt/viya/bin/caddy
+install -d -o root -g root -m 0755 /opt/viya/scripts
+for helper in backup-linux.sh restore-linux.sh backup_archive.py; do
+  install -o root -g root -m 0755 "$ROOT/scripts/$helper" "/opt/viya/scripts/$helper"
+done
 install -o root -g root -m 0644 "$ROOT/deploy/systemd/viya.service" /etc/systemd/system/viya.service
 if [ -n "${VIYA_INSTALL_LISTEN:-}" ]; then
   install -d -o root -g root -m 0755 /etc/systemd/system/viya.service.d

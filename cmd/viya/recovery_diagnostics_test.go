@@ -92,7 +92,7 @@ func TestSiteMetadataRequiresExistingSiteAndLimitsTags(t *testing.T) {
 			}
 			hosts := []Host{{ID: 1, Domain: "app.localhost"}}
 			a.attachSiteMetadata(context.Background(), hosts)
-			if !hosts[0].Favorite || len(hosts[0].Tags) != 2 {
+			if len(hosts[0].Tags) != 2 {
 				t.Fatalf("metadata: %+v", hosts[0])
 			}
 		} else if w.Code != 400 {

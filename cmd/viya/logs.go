@@ -16,17 +16,23 @@ import (
 )
 
 type IPBan struct {
-	Source    string `json:"source"`
-	ID        int64  `json:"id"`
-	Domain    string `json:"domain"`
-	IP        string `json:"ip"`
-	Reason    string `json:"reason"`
-	ExpiresAt int64  `json:"expires_at"`
-	CreatedAt string `json:"created_at"`
+	ConfirmRisk bool   `json:"confirm_risk,omitempty"`
+	Source      string `json:"source"`
+	ID          int64  `json:"id"`
+	Domain      string `json:"domain"`
+	IP          string `json:"ip"`
+	Reason      string `json:"reason"`
+	ExpiresAt   int64  `json:"expires_at"`
+	CreatedAt   string `json:"created_at"`
 }
 
 func (a *App) recentLogs(w http.ResponseWriter, r *http.Request) {
-	events, err := readRecentLogFile(filepathJoin(a.dataDir, "access.log"), 200)
+	query, err := parseLogQuery(r)
+	if err != nil {
+		fail(w, 400, err)
+		return
+	}
+	events, err := readRecentLogFileWhere(filepathJoin(a.dataDir, "access.log"), query.Limit, func(event map[string]any) bool { return caddyLogKind(event) == "access" && query.matches(event) })
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		fail(w, 500, errors.New("could not read access logs"))
 		return
@@ -174,9 +180,13 @@ func readRecentLogFileWhere(path string, limit int, keep func(map[string]any) bo
 	if info.Size() > 2<<20 {
 		start = info.Size() - (2 << 20)
 		_, _ = f.Seek(start, io.SeekStart)
-		_, _ = bufio.NewReader(f).ReadString('\n')
+
 	}
-	scanner := bufio.NewScanner(f)
+	reader := bufio.NewReader(f)
+	if start > 0 {
+		_, _ = reader.ReadString('\n')
+	}
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 1<<20)
 	ring := make([]map[string]any, 0, limit)
 	for scanner.Scan() {
@@ -184,10 +194,10 @@ func readRecentLogFileWhere(path string, limit int, keep func(map[string]any) bo
 		if json.Unmarshal(scanner.Bytes(), &event) != nil {
 			continue
 		}
+		sanitizeAccessEvent(event)
 		if keep != nil && !keep(event) {
 			continue
 		}
-		sanitizeAccessEvent(event)
 		if len(ring) == limit {
 			copy(ring, ring[1:])
 			ring = ring[:limit-1]
@@ -233,6 +243,29 @@ func readLogLines(path string, offset int64) ([][]byte, int64, error) {
 	return lines, offset + consumed, nil
 }
 func sanitizeAccessEvent(event map[string]any) {
+	if headers, ok := event["resp_headers"].(map[string]any); ok {
+		for key, value := range headers {
+			if strings.EqualFold(key, "X-Viya-Access-Rule") {
+				var raw string
+				switch v := value.(type) {
+				case []any:
+					if len(v) > 0 {
+						raw, _ = v[0].(string)
+					}
+				case []string:
+					if len(v) > 0 {
+						raw = v[0]
+					}
+				case string:
+					raw = v
+				}
+				if id, e := strconv.ParseInt(raw, 10, 64); e == nil && id > 0 {
+					event["access_rule_id"] = id
+				}
+			}
+		}
+	}
+	delete(event, "resp_headers")
 	if request, ok := event["request"].(map[string]any); ok {
 		if uri, ok := request["uri"].(string); ok {
 			if parsed, e := url.Parse(uri); e == nil {
@@ -301,6 +334,13 @@ func (a *App) observeAttack(line []byte) bool {
 		return false
 	}
 	status := intValue(event["status"])
+	if headers, ok := event["resp_headers"].(map[string]any); ok {
+		for key := range headers {
+			if strings.EqualFold(key, "X-Viya-Access-Rule") {
+				return false
+			}
+		}
+	}
 	if status != 400 && status != 401 && status != 403 {
 		return false
 	}
@@ -377,7 +417,7 @@ func (a *App) observeAttack(line []byte) bool {
 		return false
 	}
 	banFor := time.Duration(policy.BanMin) * time.Minute
-	_, err := a.db.ExecContext(a.ctx, `INSERT INTO ip_bans(domain,ip,reason,expires_at) VALUES(?,?,?,?) ON CONFLICT(domain,ip) DO UPDATE SET reason=excluded.reason,expires_at=excluded.expires_at WHERE ip_bans.source='auto'`, host, ranges[0], "20 denied client requests within 5 minutes", now.Add(banFor).Unix())
+	_, err := a.db.ExecContext(a.ctx, `INSERT INTO ip_bans(domain,ip,reason,expires_at) VALUES(?,?,?,?) ON CONFLICT(domain,ip) DO UPDATE SET reason=excluded.reason,expires_at=excluded.expires_at WHERE ip_bans.source='auto'`, host, ranges[0], fmt.Sprintf("%d denied client requests within %d minutes", policy.Threshold, policy.WindowMin), now.Add(banFor).Unix())
 	return err == nil
 }
 func intValue(value any) int {
@@ -418,6 +458,14 @@ func (a *App) removeIPBan(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, errors.New("invalid ban id"))
 		return
 	}
+	if pending := a.pendingAccessConfirmation(r.Context()); pending != nil {
+		var guarded int64
+		_ = a.db.QueryRowContext(r.Context(), `SELECT ban_id FROM access_rule_guards WHERE id=1`).Scan(&guarded)
+		if guarded == id {
+			fail(w, 409, errors.New("该规则正在限时确认，请使用取消修改恢复原规则"))
+			return
+		}
+	}
 	res, e := a.db.ExecContext(r.Context(), `DELETE FROM ip_bans WHERE id=?`, id)
 	if e != nil {
 		fail(w, 500, errors.New("could not remove IP ban"))
@@ -429,7 +477,7 @@ func (a *App) removeIPBan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if e = a.apply(r.Context()); e != nil {
-		fail(w, 502, errors.New("ban removed but Caddy could not reload configuration"))
+		failSavedApplication(w)
 		return
 	}
 	w.WriteHeader(204)

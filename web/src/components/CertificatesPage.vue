@@ -30,7 +30,6 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
           >
             <div class="host-icon"><ShieldCheck :size="18" /></div>
             <div class="host-main">
-              <ResourceUsage kind="certificate" :domain="cert.domain"/>
               <strong>{{ cert.name }} · {{ cert.domain }}</strong
               ><span
                 >{{
@@ -69,6 +68,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
                 </div>
                 <small v-if="cert.last_error">{{ cert.last_error }}</small>
               </div>
+              <ResourceUsage kind="certificate" :domain="cert.domain"/>
             </div>
             <span
               class="badge"
@@ -166,6 +166,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
                       : t("等待引擎签发，查看申请进度或引擎日志")
                 }}</span
               >
+              <ResourceUsage kind="certificate" :domain="cert.domain"/>
             </div>
             <span class="certificate-origin individual">{{
               cert.source.kind === "internal"
@@ -237,12 +238,12 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
           <div v-for="cert in visibleCerts" :key="cert.id" class="host-row">
             <div class="host-icon"><ShieldCheck :size="17" /></div>
             <div class="host-main">
-              <ResourceUsage kind="certificate" :id="cert.id"/>
               <strong>{{ cert.name }}</strong
               ><span
                 >{{ cert.dns_names.join(", ") }} {{ t("· 到期") }}
                 {{ new Date(cert.not_after).toLocaleDateString() }}</span
               >
+              <ResourceUsage kind="certificate" :id="cert.id"/>
             </div>
             <button
               class="icon-btn danger"

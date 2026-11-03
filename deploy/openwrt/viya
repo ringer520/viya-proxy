@@ -14,11 +14,17 @@ USE_PROCD=1
 
 PROG=/opt/viya/bin/viya
 CADDY=/opt/viya/bin/caddy
-DATA_DIR=/var/lib/viya
+DATA_DIR=/opt/viya/data
 MASTER_KEY=/etc/viya/secrets/master.key
 
 start_service() {
-	mkdir -p "$DATA_DIR" /etc/viya/secrets
+ umask 077
+ config_load viya
+ config_get LISTEN main listen "0.0.0.0:8181"
+ config_get DATA_DIR main data_dir "/opt/viya/data"
+ config_get MASTER_KEY main master_key "/etc/viya/secrets/master.key"
+	mkdir -p "$DATA_DIR" "$(dirname "$MASTER_KEY")"
+ chmod 700 "$DATA_DIR"
 	[ -s "$MASTER_KEY" ] || {
 		umask 077
 		head -c 32 /dev/urandom > "$MASTER_KEY"
@@ -26,7 +32,7 @@ start_service() {
 
 	procd_open_instance
 	procd_set_param command "$PROG"
-	procd_set_param env VIYA_LISTEN=127.0.0.1:8181
+	procd_set_param env VIYA_LISTEN="$LISTEN"
 	procd_set_param env VIYA_DATA_DIR="$DATA_DIR"
 	procd_set_param env VIYA_MASTER_KEY_FILE="$MASTER_KEY"
 	procd_set_param env VIYA_CADDY_BIN="$CADDY"

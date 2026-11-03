@@ -282,7 +282,7 @@ func (a *App) deleteManagedCertificate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = a.applyLocked(r.Context()); err != nil {
-		fail(w, 502, errors.New("托管配置已删除，但 Caddy 尚未重新应用"))
+		failSavedApplication(w)
 		return
 	}
 	w.WriteHeader(204)

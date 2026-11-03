@@ -346,7 +346,7 @@ func (a *App) requireSession(next http.Handler, holdConfigLock bool) http.Handle
 				return
 			}
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionContextKey{}, session)))
+		next.ServeHTTP(w, r.WithContext(context.WithValue(requestOperation(r, session.username), sessionContextKey{}, session)))
 	})
 }
 

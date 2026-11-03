@@ -3,15 +3,13 @@ import { ref } from "vue";
 import { t } from "../i18n";
 import { httpMethods, type SitePolicy } from "../policy";
 
-// Reusable editor for the inheritable per-site policy. `variant="defaults"`
-// edits a stored default (no password, "预留" wording); `variant="site"` edits a
-// concrete host and can also carry a Basic Auth password. The list-style fields
-// (request headers, IP allow/deny) are edited through textareas whose raw text
-// is mirrored locally so partial lines are never dropped mid-typing.
+// Policy editors expose browser, IP and request controls. Authentication and
+// upstream headers use separate site-owned variants. Raw textarea input stays
+// local while typing, so partially entered lines are not discarded.
 const props = withDefaults(
   defineProps<{
     modelValue: SitePolicy;
-    variant?: "defaults" | "site";
+    variant?: "defaults" | "site" | "local" | "upstream";
     password?: string;
     editing?: boolean;
   }>(),
@@ -53,12 +51,8 @@ function patch(partial: Partial<SitePolicy>) {
   emit("update:modelValue", { ...props.modelValue, ...partial });
 }
 function emitLists() {
-  emit("update:modelValue", {
-    ...props.modelValue,
-    custom_headers: parseHeaders(headersText.value),
-    ip_allowlist: toLines(allowText.value),
-    ip_denylist: toLines(denyText.value),
-  });
+  if (props.variant === "upstream") patch({custom_headers: parseHeaders(headersText.value)});
+  else patch({ip_allowlist: toLines(allowText.value), ip_denylist: toLines(denyText.value)});
 }
 function toggleMethod(method: string, checked: boolean) {
   const set = new Set(props.modelValue.allowed_methods || []);
@@ -69,19 +63,9 @@ function toggleMethod(method: string, checked: boolean) {
 </script>
 
 <template>
-  <div class="policy-group">
+  <div v-if="variant === 'defaults' || variant === 'site'" class="policy-group">
     <div class="policy-group-head">
-      <strong>{{ t("安全响应头") }}</strong>
-      <label v-if="variant === 'site'" class="drawer-check-line policy-inherit">
-        <input
-          type="checkbox"
-          :checked="modelValue.inherit"
-          @change="
-            patch({ inherit: ($event.target as HTMLInputElement).checked })
-          "
-        />
-        {{ t("跟随根域名默认") }}
-      </label>
+      <strong>{{ t("浏览器防护") }}</strong>
     </div>
     <label class="enabled-label"
       ><input
@@ -147,9 +131,18 @@ function toggleMethod(method: string, checked: boolean) {
           @input="patch({ csp: ($event.target as HTMLInputElement).value })"
       /></label>
     </template>
+    <label class="enabled-label"
+      ><input
+        type="checkbox"
+        :checked="modelValue.hide_server"
+        @change="
+          patch({ hide_server: ($event.target as HTMLInputElement).checked })
+        "
+      />{{ t("隐藏 Server / X-Powered-By 响应头") }}</label
+    >
   </div>
 
-  <div class="policy-group">
+  <div v-if="variant === 'local'" class="policy-group">
     <strong class="policy-group-title">{{ t("访问认证") }}</strong>
     <label class="enabled-label"
       ><input
@@ -160,9 +153,7 @@ function toggleMethod(method: string, checked: boolean) {
             basic_auth_enabled: ($event.target as HTMLInputElement).checked,
           })
         "
-      />{{
-        variant === "defaults" ? t("预留 Basic Auth 账号") : t("启用 Basic Auth")
-      }}</label
+      />{{ t("启用 Basic Auth") }}</label
     ><template v-if="modelValue.basic_auth_enabled"
       ><label
         >{{ t("Basic Auth 用户名")
@@ -173,7 +164,7 @@ function toggleMethod(method: string, checked: boolean) {
           @input="
             patch({ basic_auth_user: ($event.target as HTMLInputElement).value })
           " /></label
-      ><label v-if="variant === 'site'"
+      ><label
         >{{
           editing
             ? t("替换密码（留空保留原密码）")
@@ -192,14 +183,11 @@ function toggleMethod(method: string, checked: boolean) {
           @input="
             emit('update:password', ($event.target as HTMLInputElement).value)
           " /></label
-      ><small v-else>{{
-        t("密码不随默认配置保存，新建站点时需再填一次。")
-      }}</small></template
+      ></template
     >
   </div>
 
-  <div class="policy-group">
-    <strong class="policy-group-title">{{ t("请求与网络") }}</strong>
+  <div v-if="variant === 'upstream'" class="policy-group">
     <label
       >{{ t("上游请求头")
       }}<textarea
@@ -208,8 +196,10 @@ function toggleMethod(method: string, checked: boolean) {
         placeholder="X-Environment: production"
         @input="emitLists"
       /><small>{{ t("每行一条，格式为“名称: 值”。") }}</small></label
-    ><label
-      >{{ t("IP 白名单（每行一个 IP 或 CIDR）")
+    >  </div>
+  <div v-if="variant === 'defaults' || variant === 'site'" class="policy-group">
+    <strong class="policy-group-title">{{ t("访问限制") }}</strong>
+    <label      >{{ t("IP 白名单（每行一个 IP 或 CIDR）")
       }}<textarea
         v-model="allowText"
         rows="2"
@@ -225,6 +215,9 @@ function toggleMethod(method: string, checked: boolean) {
         @input="emitLists"
       />
     </label>
+  </div>
+  <div v-if="variant === 'defaults' || variant === 'site'" class="policy-group">
+    <strong class="policy-group-title">{{t('请求限制')}}</strong>
     <div class="rate-limit-fields">
       <label
         >{{ t("速率限制请求数")
@@ -291,14 +284,6 @@ function toggleMethod(method: string, checked: boolean) {
     <small class="method-hint">{{
       t("不勾选表示不限制；勾选后其余方法返回 405。")
     }}</small>
-    <label class="enabled-label"
-      ><input
-        type="checkbox"
-        :checked="modelValue.hide_server"
-        @change="
-          patch({ hide_server: ($event.target as HTMLInputElement).checked })
-        "
-      />{{ t("隐藏 Server / X-Powered-By 响应头") }}</label
-    >
+
   </div>
 </template>

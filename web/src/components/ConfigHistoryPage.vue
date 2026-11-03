@@ -29,7 +29,7 @@ onMounted(async()=>{try{const r=await apiFetch("/api/v1/config/backups");if(!r.o
           <div>
             <h2><History :size="16" />{{ t("配置历史") }}</h2>
             <p>
-              {{ t("最近 10 条配置应用记录；业务配置可从上方保存或恢复。") }}
+              {{ t("最近 10 条应用记录用于审计与对比；上方恢复点用于回退业务配置，完整备份还包括账户和网站文件。") }}
             </p>
           </div>
         </div>
@@ -39,14 +39,14 @@ onMounted(async()=>{try{const r=await apiFetch("/api/v1/config/backups");if(!r.o
             :key="revision.id"
             class="revision-row"
           >
-            <span class="revision-id">#{{ revision.id }}</span
+            <span class="revision-id">#{{ revision.id }}</span><span class="op-revision-summary">{{t(revision.summary||"配置应用")}}<small v-if="revision.actor">{{revision.actor}}</small></span
             ><span class="revision-state" :class="revision.status">{{
               revision.status === "applied" ? t("已应用") : t("失败")
             }}</span
             ><span class="revision-error" v-if="revision.error">{{
               revision.error
             }}</span
-            ><time>{{ revision.created_at }}</time
+            ><time>{{ new Date(revision.created_at).toLocaleString() }}</time
             ><button
               class="secondary revision-diff-btn"
               type="button"
@@ -94,7 +94,9 @@ onMounted(async()=>{try{const r=await apiFetch("/api/v1/config/backups");if(!r.o
           >
             {{ t("两个版本内容相同。") }}
           </p>
-          <div v-if="revisionDiff.added.length" class="diff-group added">
+          <p>{{t("新增")}} {{revisionDiff.added.length}} · {{t("移除")}} {{revisionDiff.removed.length}} · {{t("变更")}} {{revisionDiff.changed.length}}</p>
+<details><summary>{{t("展开原始配置差异")}}</summary>
+<div v-if="revisionDiff.added.length" class="diff-group added">
             <h5>{{ t("新增") }} · {{ revisionDiff.added.length }}</h5>
             <ul>
               <li v-for="item in revisionDiff.added" :key="'a' + item.path">
@@ -123,6 +125,6 @@ onMounted(async()=>{try{const r=await apiFetch("/api/v1/config/backups");if(!r.o
               </li>
             </ul>
           </div>
-        </div>
+        </details></div>
       </section>
 </template>

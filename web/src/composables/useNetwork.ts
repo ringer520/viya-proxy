@@ -1,3 +1,4 @@
+import {refreshConfigStatus} from "./useConfigStatus";
 import {managedCertificates} from "./useState";
 import { apiFetch as fetch } from "../api";
 // Layer4 port forwards, DDNS tasks, DNS provider credentials, and IP bans.
@@ -11,7 +12,6 @@ import type {
   IPBan,
   Layer4Rule,
   NetworkInterface,
-  NetworkInterfaceAddress,
   Provider,
   RuleLogState,
 } from "../types";
@@ -23,7 +23,11 @@ export const showBan = ref(false);
 export const editingBanID = ref<number | null>(null);
 export const banError = ref("");
 export const banKind = ref("ip");
-export const banForm = ref({ domain: "", ip: "", reason: "" });
+export const banForm = ref({ domain: "", ip: "", reason: "",expires_at:0 });
+export const banPreview=ref<{domain:string;client_ip:string;client_blocked:boolean;panel_domain:boolean;message:string}|null>(null),banRiskConfirmed=ref(false);
+watch([banForm,banKind],()=>{banPreview.value=null;banRiskConfirmed.value=false},{deep:true});
+export async function previewBan(){banError.value='';saving.value=true;try{const r=await fetch('/api/v1/ip-bans/preview',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken.value},body:JSON.stringify({...banForm.value,ip:banKind.value==='foreign'?'foreign':banForm.value.ip})});const data=await r.json();if(!r.ok)throw Error(data.error);banPreview.value=data}catch(e){banError.value=e instanceof Error?t(e.message):t('读取失败')}finally{saving.value=false}}
+
 export function openBan(ban?: IPBan) {
   if (!guardWrite()) return;
   banKind.value = ban?.ip === "foreign" ? "foreign" : "ip";
@@ -32,11 +36,14 @@ export function openBan(ban?: IPBan) {
   banForm.value = {
     domain: ban?.domain || hosts.value[0]?.domain || "",
     ip: ban?.ip || "",
-    reason: ban?.reason || "",
+    reason: ban?.reason || "",expires_at:ban?.expires_at||0,
   };
   showBan.value = true;
 }
 export async function saveBan() {
+  if (!guardWrite()||saving.value) return;
+ if(!banPreview.value){await previewBan();return}
+ if(!banRiskConfirmed.value){banError.value=t("请核对影响预览并勾选确认");return}
   saving.value = true;
   banError.value = "";
   try {
@@ -54,7 +61,7 @@ export async function saveBan() {
           ...banForm.value,
           ip: banKind.value === "foreign" ? "foreign" : banForm.value.ip,
           // Bans are permanent until an administrator lifts them manually.
-          expires_at: 0,
+          expires_at: banForm.value.expires_at,confirm_risk:banRiskConfirmed.value,
         }),
       },
     );
@@ -70,6 +77,7 @@ export async function saveBan() {
     }
     showBan.value = false;
     await load();
+ void refreshConfigStatus();
   } catch (e) {
     banError.value = e instanceof Error ? t(e.message) : t("保存失败");
   } finally {
@@ -77,6 +85,7 @@ export async function saveBan() {
   }
 }
 export async function removeBan(id: number) {
+  if (!guardWrite()) return;
   if (await confirmDeletion(tr`确认解除这条 IP 封禁？`))
     await performDelete(`/api/v1/ip-bans/${id}`);
 }
@@ -165,6 +174,8 @@ export function openL4(rule?: Layer4Rule) {
   showL4.value = true;
 }
 export async function saveL4() {
+  if (!guardWrite() || saving.value) return;
+  if (l4PartialSave.value && l4EditingID.value === null) { l4Error.value=t('规则已保存但暂时无法定位，请关闭后刷新列表再编辑。'); return; }
   l4Error.value = "";
   saving.value = true;
   try {
@@ -193,6 +204,7 @@ export async function saveL4() {
         l4PartialSave.value = true;
         await load();
         if (creating) {
+          if (Number.isSafeInteger(body.id) && body.id > 0) l4EditingID.value = body.id;
           const saved = l4Rules.value.find(
             (rule) =>
               rule.listen_port === l4Form.value.listen_port &&
@@ -221,6 +233,7 @@ export async function saveL4() {
 }
 export const l4Toggling = ref<Record<number, boolean>>({});
 export async function toggleL4(rule: Layer4Rule) {
+  if (!guardWrite()) return;
   if (l4Toggling.value[rule.id]) return;
   l4Toggling.value[rule.id] = true;
   try {
@@ -244,6 +257,7 @@ export async function toggleL4(rule: Layer4Rule) {
   }
 }
 export async function removeL4(rule: Layer4Rule) {
+  if (!guardWrite()) return;
   if (
     await confirmDeletion(
       tr`删除 ${rule.protocol.toUpperCase()} ${rule.listen_address}:${rule.listen_port} 转发？`,
@@ -285,46 +299,8 @@ export const selectedInterfaceAddresses = computed(
           (ddnsForm.value.record_type === "A" ? "ipv4" : "ipv6"),
       ) || [],
 );
-export function preferredInterfaceIP(addresses: NetworkInterfaceAddress[]) {
-  return (
-    [...addresses].sort(
-      (a, b) =>
-        Number(a.temporary === true) - Number(b.temporary === true) ||
-        Number(a.scope === "内网") - Number(b.scope === "内网") ||
-        a.ip.localeCompare(b.ip),
-    )[0]?.ip || ""
-  );
-}
-watch(selectedInterfaceAddresses, (addresses) => {
-  if (!addresses.some((address) => address.ip === ddnsForm.value.interface_ip))
-    ddnsForm.value.interface_ip = preferredInterfaceIP(addresses);
-});
-watch(
-  () => ddnsForm.value.interface_name,
-  () => {
-    if (
-      !selectedInterfaceAddresses.value.some(
-        (address) => address.ip === ddnsForm.value.interface_ip,
-      )
-    )
-      ddnsForm.value.interface_ip = preferredInterfaceIP(
-        selectedInterfaceAddresses.value,
-      );
-  },
-);
-watch(
-  () => ddnsForm.value.record_type,
-  () => {
-    if (
-      !selectedInterfaceAddresses.value.some(
-        (address) => address.ip === ddnsForm.value.interface_ip,
-      )
-    )
-      ddnsForm.value.interface_ip = preferredInterfaceIP(
-        selectedInterfaceAddresses.value,
-      );
-  },
-);
+// Empty means follow the interface. Refreshing addresses never silently replaces a pin.
+watch(()=>[ddnsForm.value,ddnsForm.value.interface_name,ddnsForm.value.record_type] as const,([form,name,type],[previous,oldName,oldType])=>{if(form===previous&&(name!==oldName||type!==oldType))form.interface_ip=''});
 export function formatDDNSTime(value: number) {
   return value ? new Date(value * 1000).toLocaleString() : t("尚未更新");
 }
@@ -427,6 +403,7 @@ export async function openDDNS(record?: DDNSRecord) {
   void loadDDNSZones(false);
 }
 export async function saveDDNS() {
+  if (!guardWrite()) return;
   saving.value = true;
   ddnsError.value = "";
   try {
@@ -486,6 +463,7 @@ export function patchDDNS(id: number, patch: Partial<DDNSRecord>) {
   if (current) Object.assign(current, patch);
 }
 export async function toggleDDNS(record: DDNSRecord, enabled: boolean) {
+  if (!guardWrite()) return;
   if (ddnsToggling.value[record.id]) return;
   ddnsToggling.value[record.id] = true;
   ddnsFeedback.value[record.id] = "";
@@ -513,6 +491,7 @@ export async function toggleDDNS(record: DDNSRecord, enabled: boolean) {
   }
 }
 export async function runDDNS(record: DDNSRecord) {
+  if (!guardWrite()) return;
   if (ddnsRunning.value[record.id]) return;
   ddnsRunning.value[record.id] = true;
   ddnsFeedback.value[record.id] = "";
@@ -539,6 +518,7 @@ export async function runDDNS(record: DDNSRecord) {
   }
 }
 export async function removeDDNS(record: DDNSRecord) {
+  if (!guardWrite()) return;
   if (await confirmDeletion(tr`删除 DDNS 任务“${record.name}”？`))
     await performDelete(`/api/v1/ddns-records/${record.id}`);
 }
@@ -620,8 +600,10 @@ export async function saveProvider() {
   }
 }
 export async function removeProvider(provider: Provider) {
+  if (!guardWrite()) return;
 
-  const usage=[...hosts.value.filter(h=>h.dns_provider_id===provider.id).map(h=>h.domain),...ddnsRecords.value.filter(d=>d.dns_provider_id===provider.id).map(d=>"DDNS: "+d.name),...managedCertificates.value.filter(c=>c.dns_provider_id===provider.id).map(c=>t("证书")+": "+c.domain)];
+  let usage:string[]=[];try{const r=await fetch(`/api/v1/dns-providers/${provider.id}/usage`);const d=await r.json();if(!r.ok)throw Error(d.error);usage=d.map((v:{kind:string;name:string})=>v.kind+': '+v.name)}catch(e){error.value=e instanceof Error?t(e.message):t('读取失败');return}
+ if(usage.length){error.value=t('此凭据仍在使用，请先修改关联资源后再删除')+'：'+usage.join('；');return}
   if (await confirmDeletion(tr`删除 DNS 凭据“${provider.name}”？`+(usage.length?"\n"+t("当前关联：")+usage.join("；"):"")))
     await performDelete(`/api/v1/dns-providers/${provider.id}`);
 }
@@ -659,5 +641,5 @@ export const visibleProviders = computed(() =>
   ),
 );
 export const visibleBans = computed(() =>
-  ipBans.value.filter((ban) => matchesSearch(ban.domain, ban.ip, ban.reason)),
+  ipBans.value,
 );

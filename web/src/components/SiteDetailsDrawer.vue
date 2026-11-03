@@ -6,7 +6,7 @@ import {providers,readOnly} from '../composables/useState'
 import {openEdit,webListeners} from '../composables/useHosts'
 const tagText=ref(''),metadataBusy=ref(false),metadataNote=ref('')
 watch(detailID,()=>{tagText.value=detailHost.value?.tags?.join(', ')||'';metadataNote.value=''})
-async function saveTags(){if(!detailHost.value)return;metadataBusy.value=true;try{await saveSiteMetadata(detailHost.value,!!detailHost.value.favorite,tagText.value.split(/[,，]/));metadataNote.value=t('已保存')}catch(e){metadataNote.value=e instanceof Error?e.message:t('保存失败')}finally{metadataBusy.value=false}}
+async function saveTags(){if(!detailHost.value)return;metadataBusy.value=true;try{await saveSiteMetadata(detailHost.value,tagText.value.split(/[,，]/));metadataNote.value=t('已保存')}catch(e){metadataNote.value=e instanceof Error?e.message:t('保存失败')}finally{metadataBusy.value=false}}
 </script>
 <template><div v-if="detailID!==null" class="overlay detail-overlay" v-dialog><section class="modal site-detail-drawer"><div class="modal-top"><div><small>{{t('站点详情')}}</small><h2>{{detailHost?.name||detailHost?.domain}}</h2><p>{{detailHost?.domain}}</p></div><button class="icon-btn" :aria-label="t('关闭站点详情')" @click="closeSiteDetails">×</button></div>
 <template v-if="detailHost"><div class="detail-actions"><button class="secondary" :disabled="readOnly" @click="openEdit(detailHost);closeSiteDetails()">{{t('编辑')}}</button><button class="primary" :disabled="diagnosticBusy" @click="runDiagnostics">{{diagnosticBusy?t('正在诊断…'):t('一键诊断')}}</button></div>

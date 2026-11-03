@@ -14,6 +14,9 @@ import (
 )
 
 type DNSProvider struct {
+	CheckStatus    string `json:"check_status,omitempty"`
+	CheckMessage   string `json:"check_message,omitempty"`
+	CheckedAt      int64  `json:"checked_at,omitempty"`
 	ID             int64  `json:"id"`
 	Name           string `json:"name"`
 	ProviderType   string `json:"provider_type"`
@@ -55,6 +58,24 @@ func (a *App) listDNSProviders(w http.ResponseWriter, r *http.Request) {
 	if err := rows.Err(); err != nil {
 		fail(w, http.StatusInternalServerError, errors.New("could not read DNS providers"))
 		return
+	}
+	rows.Close()
+	checks, checkErr := a.db.QueryContext(r.Context(), `SELECT provider_id,status,message,checked_at FROM provider_checks`)
+	if checkErr == nil {
+		for checks.Next() {
+			var id, at int64
+			var status, message string
+			if checks.Scan(&id, &status, &message, &at) == nil {
+				for i := range providers {
+					if providers[i].ID == id {
+						providers[i].CheckStatus = status
+						providers[i].CheckMessage = message
+						providers[i].CheckedAt = at
+					}
+				}
+			}
+		}
+		checks.Close()
 	}
 	writeJSON(w, http.StatusOK, providers)
 }
@@ -156,6 +177,7 @@ func (a *App) updateDNSProvider(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, errors.New("could not update DNS provider"))
 		return
 	}
+	_, _ = a.db.ExecContext(r.Context(), `DELETE FROM provider_checks WHERE provider_id=?`, id)
 	if proxyHostReferences > 0 {
 		if err := a.apply(r.Context()); err != nil {
 			fail(w, http.StatusBadGateway, errors.New("DNS credentials were saved, but Caddy could not reload them; retry applying the configuration"))
@@ -177,7 +199,12 @@ func (a *App) deleteDNSProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if references > 0 {
-		fail(w, http.StatusConflict, errors.New("DNS provider is used by one or more proxy hosts or DDNS records"))
+		refs, err := a.providerReferences(r.Context(), id)
+		if err != nil {
+			fail(w, 500, err)
+			return
+		}
+		writeJSON(w, 409, map[string]any{"error": "此凭据仍在使用，请先修改关联资源后再删除", "references": refs})
 		return
 	}
 	result, err := a.db.ExecContext(r.Context(), `DELETE FROM dns_providers WHERE id=?`, id)

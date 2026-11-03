@@ -27,6 +27,9 @@ import (
 //
 // Unreleased builds keep the "dev" marker so the update button stays hidden.
 var version = "dev"
+var buildCommit = "unknown"
+var buildTime = "unknown"
+var buildSource = "unknown"
 
 const (
 	updateRepoOwner = "ringer520"
@@ -43,6 +46,10 @@ type releaseInfo struct {
 }
 
 type versionInfo struct {
+	Commit          string `json:"commit"`
+	BuiltAt         string `json:"built_at"`
+	Source          string `json:"source"`
+	Schema          int    `json:"schema_version"`
 	Current         string `json:"current"`
 	Latest          string `json:"latest,omitempty"`
 	UpdateAvailable bool   `json:"update_available"`
@@ -55,6 +62,8 @@ type versionInfo struct {
 }
 
 var (
+	updateCacheMu      sync.Mutex
+	updateRunMu        sync.Mutex
 	updateCacheRelease *releaseInfo
 	updateCacheAt      time.Time
 	updateProgressMu   sync.RWMutex
@@ -62,6 +71,7 @@ var (
 )
 
 type versionUpdateProgress struct {
+	Active  bool   `json:"active"`
 	Stage   string `json:"stage"`
 	Percent int    `json:"percent"`
 	Error   string `json:"error,omitempty"`
@@ -75,7 +85,7 @@ func setVersionUpdateProgress(stage string, percent int, err error) {
 		percent = 100
 	}
 	updateProgressMu.Lock()
-	updateProgress = versionUpdateProgress{Stage: stage, Percent: percent}
+	updateProgress = versionUpdateProgress{Stage: stage, Percent: percent, Active: percent > 0 && percent < 100 && err == nil}
 	if err != nil {
 		updateProgress.Error = err.Error()
 	}
@@ -113,6 +123,8 @@ func canSelfUpdate() bool {
 }
 
 func fetchLatestRelease(ctxTimeout time.Duration) (*releaseInfo, error) {
+	updateCacheMu.Lock()
+	defer updateCacheMu.Unlock()
 	if updateCacheRelease != nil && time.Since(updateCacheAt) < updateCacheTTL {
 		return updateCacheRelease, nil
 	}
@@ -192,9 +204,14 @@ func versionNewer(current, candidate string) bool {
 
 func (a *App) versionInfoHandler(w http.ResponseWriter, r *http.Request) {
 	info := versionInfo{
+		Commit: buildCommit, BuiltAt: buildTime, Source: buildSource, Schema: schemaVersion,
 		Current:  version,
 		InDocker: isDockerized(),
 		Managed:  canSelfUpdate(),
+	}
+	if r.URL.Query().Get("local") == "1" {
+		writeJSON(w, 200, info)
+		return
 	}
 	rel, err := fetchLatestRelease(8 * time.Second)
 	if err != nil {
@@ -397,6 +414,11 @@ func httpGetLimited(url string, limit int64) ([]byte, error) {
 // place, then exits so the service manager restarts the process on the new
 // build. Admin-only: a viewer write is rejected by the shared middleware.
 func (a *App) versionUpdateHandler(w http.ResponseWriter, r *http.Request) {
+	if !updateRunMu.TryLock() {
+		fail(w, 409, errors.New("更新正在进行，请等待完成"))
+		return
+	}
+	defer updateRunMu.Unlock()
 	if !canSelfUpdate() {
 		fail(w, 400, errors.New("当前运行环境不支持自动更新（容器或非 Linux），请拉取新镜像或手动替换二进制"))
 		return

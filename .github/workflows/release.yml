@@ -9,7 +9,10 @@ permissions:
   contents: write
 
 jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
   release:
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,6 +38,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
+      - name: Stamp build identity
+        run: echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Build frontend
         run: |
           pnpm --dir web install --frozen-lockfile
@@ -44,7 +50,7 @@ jobs:
         run: |
           set -eu
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
+            go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${{ github.ref_name }} -X main.buildCommit=${{ github.sha }} -X main.buildTime=$BUILD_TIME -X main.buildSource=${{ github.sha }}" \
             -o bin/viya-linux-amd64 ./cmd/viya
           cd build/caddy
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
@@ -55,7 +61,7 @@ jobs:
         run: |
           set -eu
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-            go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
+            go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${{ github.ref_name }} -X main.buildCommit=${{ github.sha }} -X main.buildTime=$BUILD_TIME -X main.buildSource=${{ github.sha }}" \
             -o bin/viya-linux-arm64 ./cmd/viya
           cd build/caddy
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
@@ -66,7 +72,7 @@ jobs:
         run: |
           set -eu
           CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
-            go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
+            go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${{ github.ref_name }} -X main.buildCommit=${{ github.sha }} -X main.buildTime=$BUILD_TIME -X main.buildSource=${{ github.sha }}" \
             -o bin/viya-linux-armv7 ./cmd/viya
           cd build/caddy
           CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
@@ -85,8 +91,10 @@ jobs:
             cp deploy/install-debian.sh "dist/$PKG/deploy/"
             cp deploy/systemd/viya.service "dist/$PKG/deploy/systemd/"
             cp deploy/openwrt/viya "dist/$PKG/deploy/openwrt/"
+            cp deploy/install-openwrt.sh "dist/$PKG/deploy/openwrt/install.sh"
             cp scripts/backup-linux.sh "dist/$PKG/scripts/"
             cp scripts/restore-linux.sh "dist/$PKG/scripts/"
+            cp scripts/backup_archive.py "dist/$PKG/scripts/"
             cp README.md LICENSE "dist/$PKG/"
             tar -czf "release/$PKG.tar.gz" -C dist "$PKG"
           done
@@ -122,7 +130,9 @@ jobs:
 
       - name: Extract version tag
         id: meta
-        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -132,6 +142,8 @@ jobs:
           push: true
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.meta.outputs.built }}
           tags: |
             ringer520/viya-proxy:latest
             ringer520/viya-proxy:${{ steps.meta.outputs.version }}

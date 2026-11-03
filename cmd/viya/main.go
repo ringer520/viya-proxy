@@ -35,6 +35,7 @@ import (
 // "apply to existing sites" run knows which rows it may overwrite. When
 // Enabled is false the site carries no policy at all.
 type SecurityHeaders struct {
+	Mode           string `json:"mode,omitempty"`
 	Enabled        bool   `json:"enabled"`
 	Inherit        bool   `json:"inherit"`
 	FrameOptions   string `json:"frame_options,omitempty"`
@@ -45,9 +46,9 @@ type SecurityHeaders struct {
 }
 
 type Host struct {
+	PolicySource        string             `json:"policy_source,omitempty"`
 	ID                  int64              `json:"id"`
 	Name                string             `json:"name"`
-	Favorite            bool               `json:"favorite"`
 	Tags                []string           `json:"tags"`
 	Domain              string             `json:"domain"`
 	ListenerID          string             `json:"listener_id"`
@@ -70,8 +71,6 @@ type Host struct {
 	RateLimitWindow     string             `json:"rate_limit_window,omitempty"`
 	Type                string             `json:"type"`
 	RootPath            string             `json:"root_path,omitempty"`
-	SpaFallback         bool               `json:"spa_fallback,omitempty"`
-	Browse              bool               `json:"browse,omitempty"`
 	RedirectTarget      string             `json:"redirect_target,omitempty"`
 	RedirectStatus      int                `json:"redirect_status,omitempty"`
 	RedirectKeepPath    bool               `json:"redirect_keep_path"`
@@ -83,17 +82,20 @@ type Host struct {
 }
 
 type Layer4Rule struct {
-	ID            int64  `json:"id"`
-	Name          string `json:"name"`
-	ListenAddress string `json:"listen_address"`
-	ListenPort    int    `json:"listen_port"`
-	Upstream      string `json:"upstream_address"`
-	Protocol      string `json:"protocol"`
-	Enabled       bool   `json:"enabled"`
-	Version       int64  `json:"version"`
+	Runtime       *forwardRuntime `json:"runtime,omitempty"`
+	ID            int64           `json:"id"`
+	Name          string          `json:"name"`
+	ListenAddress string          `json:"listen_address"`
+	ListenPort    int             `json:"listen_port"`
+	Upstream      string          `json:"upstream_address"`
+	Protocol      string          `json:"protocol"`
+	Enabled       bool            `json:"enabled"`
+	Version       int64           `json:"version"`
 }
 
 type App struct {
+	trafficMu      sync.Mutex
+	caddyPID       atomic.Int64
 	applyStateMu   sync.RWMutex
 	applyState     ApplyState
 	configMu       sync.RWMutex
@@ -194,6 +196,7 @@ func main() {
 	}
 	app := &App{db: db, adminURL: adminURL, adminListen: adminListen, httpListen: httpListen, caddyBin: env("VIYA_CADDY_BIN", filepath.Join("bin", "caddy")), secureCookies: secureCookies, trustedProxies: trustedProxies, ctx: runCtx, masterKey: masterKey, dataDir: dataDir, failCounts: make(map[string][]time.Time), certProgress: make(map[string]certificateProgress), applyKick: make(chan struct{}, 1), ddnsRunning: make(map[int64]bool)}
 	app.configureProgramLogging()
+	app.loadApplicationJournal()
 	if err := app.initListenerSites(); err != nil {
 		slog.Error("migrate listener sites", "error", err)
 		os.Exit(1)
@@ -218,6 +221,7 @@ func main() {
 		writeJSON(w, 200, map[string]any{"ok": true, "caddy_ready": app.isCaddyReady(), "time": time.Now().UTC()})
 	})
 	mux.Handle("GET /api/v1/layer4-rules", app.requireAuth(http.HandlerFunc(app.listLayer4Rules)))
+	mux.Handle("POST /api/v1/layer4-rules/check", app.requireAuth(http.HandlerFunc(app.checkForwardPort)))
 	mux.Handle("POST /api/v1/layer4-rules", app.requireAuth(http.HandlerFunc(app.createLayer4Rule)))
 	mux.Handle("PUT /api/v1/layer4-rules/{id}", app.requireAuth(http.HandlerFunc(app.updateLayer4Rule)))
 	mux.Handle("DELETE /api/v1/layer4-rules/{id}", app.requireAuth(http.HandlerFunc(app.deleteLayer4Rule)))
@@ -237,6 +241,7 @@ func main() {
 	mux.Handle("GET /api/v1/logs/settings", app.requireAuth(http.HandlerFunc(app.getLogSettings)))
 	mux.Handle("PUT /api/v1/logs/settings", app.requireAuth(http.HandlerFunc(app.updateLogSettings)))
 	mux.Handle("PATCH /api/v1/layer4-rules/{id}/enabled", app.requireAuth(http.HandlerFunc(app.toggleLayer4Enabled)))
+	mux.Handle("GET /api/v1/proxy-hosts/error-locations", app.requireAuth(http.HandlerFunc(app.webErrorLocations)))
 	mux.Handle("GET /api/v1/proxy-hosts/traffic", app.requireAuth(http.HandlerFunc(app.siteTraffic)))
 	mux.Handle("GET /api/v1/layer4-rules/traffic", app.requireAuth(http.HandlerFunc(app.l4Traffic)))
 	mux.Handle("GET /api/v1/proxy-hosts/health", app.requireAuth(http.HandlerFunc(app.upstreamHealthReport)))
@@ -291,6 +296,9 @@ func main() {
 	mux.Handle("GET /api/v1/config/revisions/{id}", app.requireAuth(http.HandlerFunc(app.configRevision)))
 	mux.Handle("GET /api/v1/config/revisions/{id}/diff", app.requireAuth(http.HandlerFunc(app.configRevisionDiff)))
 	mux.Handle("POST /api/v1/config/apply", app.requireAuth(http.HandlerFunc(app.reapplyConfig)))
+	mux.Handle("POST /api/v1/dns-providers/{id}/check", app.requireAuth(http.HandlerFunc(app.checkDNSProvider)))
+	mux.Handle("GET /api/v1/dns-providers/{id}/usage", app.requireAuth(http.HandlerFunc(app.dnsProviderUsage)))
+	mux.Handle("PATCH /api/v1/dns-providers/{id}/name", app.requireAuth(http.HandlerFunc(app.renameDNSProvider)))
 	mux.Handle("GET /api/v1/dns-providers", app.requireAuth(http.HandlerFunc(app.listDNSProviders)))
 	mux.Handle("GET /api/v1/dns-providers/{id}/zones", app.requireAuth(http.HandlerFunc(app.listDNSZones)))
 	mux.Handle("POST /api/v1/dns-providers", app.requireAuth(http.HandlerFunc(app.createDNSProvider)))
@@ -314,6 +322,7 @@ func main() {
 	mux.Handle("GET /api/v1/web-listeners/check", app.requireAuth(http.HandlerFunc(app.checkWebListener)))
 	mux.Handle("PATCH /api/v1/ddns-records/{id}/enabled", app.requireAuth(http.HandlerFunc(app.toggleDDNSEnabled)))
 	mux.Handle("DELETE /api/v1/proxy-hosts/{id}", app.requireAuth(http.HandlerFunc(app.deleteHost)))
+	mux.Handle("POST /api/v1/security-defaults/preview", app.requireAuth(http.HandlerFunc(app.previewSecurityPolicy)))
 	mux.Handle("GET /api/v1/security-defaults", app.requireAuth(http.HandlerFunc(app.getSecurityDefaults)))
 	mux.Handle("PUT /api/v1/security-defaults/global", app.requireAuth(http.HandlerFunc(app.saveSecurityGlobal)))
 	mux.Handle("PUT /api/v1/security-defaults/domain/{domain}", app.requireAuth(http.HandlerFunc(app.saveSecurityDomain)))
@@ -324,6 +333,14 @@ func main() {
 	mux.Handle("GET /api/v1/proxy-hosts/{id}/diagnostics", app.requireAuth(http.HandlerFunc(app.diagnoseSite)))
 	mux.Handle("PATCH /api/v1/proxy-hosts/{id}/metadata", app.requireAuth(http.HandlerFunc(app.updateSiteMetadata)))
 	mux.Handle("POST /api/v1/panel/settings/confirm", app.requireAuth(http.HandlerFunc(app.confirmPanelAccess)))
+	mux.Handle("GET /api/v1/storage", app.requireAuth(http.HandlerFunc(app.storageUsage)))
+	mux.Handle("PUT /api/v1/storage/retention", app.requireAuth(http.HandlerFunc(app.saveRetention)))
+	mux.Handle("POST /api/v1/traffic/reset", app.requireAuth(http.HandlerFunc(app.resetTraffic)))
+	mux.Handle("POST /api/v1/storage/cleanup", app.requireAuth(http.HandlerFunc(app.cleanupStorage)))
+	mux.Handle("POST /api/v1/ip-bans/preview", app.requireAuth(http.HandlerFunc(app.previewAccessRule)))
+	mux.Handle("GET /api/v1/ip-bans/explain", app.requireAuth(http.HandlerFunc(app.explainAccessRules)))
+	mux.Handle("POST /api/v1/ip-bans/guard/confirm", app.requireAuth(http.HandlerFunc(app.confirmAccessRule)))
+	mux.Handle("POST /api/v1/ip-bans/guard/cancel", app.requireAuth(http.HandlerFunc(app.cancelAccessRule)))
 	mux.Handle("GET /api/v1/config/backups", app.requireAuth(http.HandlerFunc(app.listRecoveryBackups)))
 	static := web.Handler()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
@@ -353,6 +370,7 @@ func main() {
 	}
 	app.panelListen = addr
 	go app.watchPanelConfirmation()
+	go app.watchAccessRules()
 	go app.watchRecoveryBackups()
 	slog.Info("Viya API listening", "address", addr)
 	// WriteTimeout must stay above the slowest business operation (DDNS run 35s,
@@ -420,11 +438,13 @@ func (a *App) superviseCaddy(configPath string, firstReady chan<- error) {
 			backoff = min(backoff*2, 30*time.Second)
 			continue
 		}
+		a.caddyPID.Store(int64(cmd.Process.Pid))
 		slog.Info("Caddy process started", "pid", cmd.Process.Pid)
 		done := make(chan struct{})
 		var processErr error
 		go func() {
 			processErr = cmd.Wait()
+			a.caddyPID.CompareAndSwap(int64(cmd.Process.Pid), 0)
 			stdoutLog.Flush()
 			stderrLog.Flush()
 			close(done)
@@ -522,7 +542,7 @@ func (a *App) isCaddyReady() bool {
 }
 
 func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,domain,listener_id,upstream,enabled,version,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,spa_fallback,browse,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server FROM proxy_hosts ORDER BY domain`)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,domain,listener_id,upstream,enabled,version,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server FROM proxy_hosts ORDER BY domain`)
 	if err != nil {
 		fail(w, 500, err)
 		return
@@ -531,19 +551,17 @@ func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
 	result := []Host{}
 	for rows.Next() {
 		var h Host
-		var enabled, spaFallback, browse, redirectKeepPath int
+		var enabled, redirectKeepPath int
 		var providerID sql.NullInt64
 		var certID sql.NullInt64
 		var headerJSON, allowJSON, denyJSON, securityJSON, methodsJSON string
 		var maxBody int64
 		var hideServer int
-		if err := rows.Scan(&h.ID, &h.Name, &h.Domain, &h.ListenerID, &h.Upstream, &enabled, &h.Version, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headerJSON, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &spaFallback, &browse, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &h.Domain, &h.ListenerID, &h.Upstream, &enabled, &h.Version, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headerJSON, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer); err != nil {
 			fail(w, 500, err)
 			return
 		}
 		h.Enabled = enabled == 1
-		h.SpaFallback = spaFallback == 1
-		h.Browse = browse == 1
 		h.RedirectKeepPath = redirectKeepPath == 1
 		if providerID.Valid {
 			h.DNSProviderID = &providerID.Int64
@@ -580,6 +598,10 @@ func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err)
 		return
 	}
+	global, domains := a.readSecurityGlobal(r.Context()), a.readSecurityDomains(r.Context())
+	for i := range result {
+		effectiveHostPolicy(&result[i], global, domains)
+	}
 	a.attachSiteMetadata(r.Context(), result)
 	sources, err := a.certificateSources(r.Context(), result)
 	if err != nil {
@@ -594,6 +616,8 @@ func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
 }
 
 type Revision struct {
+	Summary   string `json:"summary"`
+	Actor     string `json:"actor,omitempty"`
 	ID        int64  `json:"id"`
 	Status    string `json:"status"`
 	Error     string `json:"error,omitempty"`
@@ -601,7 +625,7 @@ type Revision struct {
 }
 
 func (a *App) listRevisions(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,status,error_text,created_at FROM config_revisions ORDER BY id DESC LIMIT 10`)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,status,error_text,created_at,summary,actor FROM config_revisions ORDER BY id DESC LIMIT 10`)
 	if err != nil {
 		fail(w, 500, err)
 		return
@@ -610,9 +634,12 @@ func (a *App) listRevisions(w http.ResponseWriter, r *http.Request) {
 	out := []Revision{}
 	for rows.Next() {
 		var v Revision
-		if err := rows.Scan(&v.ID, &v.Status, &v.Error, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.Status, &v.Error, &v.CreatedAt, &v.Summary, &v.Actor); err != nil {
 			fail(w, 500, err)
 			return
+		}
+		if created, e := time.Parse("2006-01-02 15:04:05", v.CreatedAt); e == nil {
+			v.CreatedAt = created.UTC().Format(time.RFC3339)
 		}
 		out = append(out, v)
 	}
@@ -686,7 +713,7 @@ func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
-	a.applyPolicyInheritance(r.Context(), &h)
+	a.prepareHostPolicy(r.Context(), &h)
 	if h.BasicAuthEnabled {
 		if len(h.BasicAuthPassword) < 8 || len(h.BasicAuthPassword) > 72 {
 			fail(w, 400, errors.New("Basic Auth password must be 8-72 bytes"))
@@ -708,7 +735,7 @@ func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
-	res, err := a.db.ExecContext(r.Context(), `INSERT INTO proxy_hosts(name,domain,listener_id,upstream,enabled,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,spa_fallback,browse,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, h.PasswordHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, boolInt(h.SpaFallback), boolInt(h.Browse), h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer))
+	res, err := a.db.ExecContext(r.Context(), `INSERT INTO proxy_hosts(name,domain,listener_id,upstream,enabled,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,spa_fallback,browse,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, h.PasswordHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, 0, 0, h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer))
 	if err != nil {
 		status, mapped := classifyHostWriteError(err)
 		fail(w, status, mapped)
@@ -717,7 +744,7 @@ func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
 	h.ID, _ = res.LastInsertId()
 	if err := a.apply(r.Context()); err != nil {
 		slog.Error("Caddy proxy-host apply failed; inspect redacted configuration history")
-		fail(w, 502, errors.New("saved but Caddy could not apply the configuration; review configuration history"))
+		failSavedApplication(w)
 		return
 	}
 	h.BasicAuthPassword = ""
@@ -760,6 +787,7 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
+	a.prepareHostPolicy(r.Context(), &h)
 	headerJSON, _ := json.Marshal(h.CustomHeaders)
 	allowJSON, _ := json.Marshal(h.IPAllowlist)
 	denyJSON, _ := json.Marshal(h.IPDenylist)
@@ -788,7 +816,7 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	res, err := a.db.ExecContext(r.Context(), `UPDATE proxy_hosts SET name=?,domain=?,listener_id=?,upstream=?,enabled=?,tls_mode=?,https_port=443,path=?,icon_color=?,dns_provider_id=?,custom_certificate_id=?,custom_headers=?,basic_auth_user=?,basic_auth_hash=?,ip_allowlist=?,ip_denylist=?,rate_limit_requests=?,rate_limit_window=?,type=?,root_path=?,spa_fallback=?,browse=?,redirect_target=?,redirect_status=?,redirect_keep_path=?,security_headers=?,max_body_bytes=?,allowed_methods=?,hide_server=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, storedHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, boolInt(h.SpaFallback), boolInt(h.Browse), h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer), id, h.Version)
+	res, err := a.db.ExecContext(r.Context(), `UPDATE proxy_hosts SET name=?,domain=?,listener_id=?,upstream=?,enabled=?,tls_mode=?,https_port=443,path=?,icon_color=?,dns_provider_id=?,custom_certificate_id=?,custom_headers=?,basic_auth_user=?,basic_auth_hash=?,ip_allowlist=?,ip_denylist=?,rate_limit_requests=?,rate_limit_window=?,type=?,root_path=?,spa_fallback=?,browse=?,redirect_target=?,redirect_status=?,redirect_keep_path=?,security_headers=?,max_body_bytes=?,allowed_methods=?,hide_server=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, storedHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, 0, 0, h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer), id, h.Version)
 	if err != nil {
 		status, mapped := classifyHostWriteError(err)
 		fail(w, status, mapped)
@@ -814,7 +842,7 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.apply(r.Context()); err != nil {
 		slog.Error("Caddy proxy-host apply failed; inspect redacted configuration history")
-		fail(w, 502, errors.New("saved but Caddy could not apply the configuration; review configuration history"))
+		failSavedApplication(w)
 		return
 	}
 	h.BasicAuthPassword = ""
@@ -900,18 +928,19 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err)
 		return
 	}
+	if deleteSiteFiles && !sharedSiteFiles {
+		if _, err = tx.ExecContext(r.Context(), `INSERT OR IGNORE INTO pending_file_deletions(root_path) VALUES(?)`, rootPath); err != nil {
+			fail(w, 500, err)
+			return
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		fail(w, 500, err)
 		return
 	}
 	if err := a.apply(r.Context()); err != nil {
 		slog.Error("Caddy proxy-host apply failed; inspect redacted configuration history")
-		if deleteSiteFiles && !sharedSiteFiles {
-			if cleanupErr := a.removeManagedStaticSite(rootPath); cleanupErr != nil {
-				slog.Error("could not remove deleted static site files", "error", cleanupErr)
-			}
-		}
-		fail(w, 502, errors.New("deleted but Caddy could not apply the configuration; review configuration history"))
+		failSavedApplication(w)
 		return
 	}
 	if deleteSiteFiles && !sharedSiteFiles {
@@ -1040,8 +1069,6 @@ func validateHost(h *Host) error {
 	case "redirect":
 		h.Upstream = ""
 		h.RootPath = ""
-		h.SpaFallback = false
-		h.Browse = false
 		target := strings.TrimSpace(h.RedirectTarget)
 		if target == "" {
 			return errors.New("redirect target is required")
@@ -1315,11 +1342,15 @@ func (a *App) recordRevision(ctx context.Context, config []byte, status string, 
 	if cause != nil {
 		errText = cause.Error()
 	}
+	operation, _ := ctx.Value(operationContextKey{}).(operationContext)
+	if operation.Summary == "" {
+		operation.Summary = "后台配置同步"
+	}
 	redacted, secrets := redactConfig(config)
 	for _, secret := range secrets {
 		errText = strings.ReplaceAll(errText, secret, "[redacted]")
 	}
-	if _, err := a.db.ExecContext(ctx, `INSERT INTO config_revisions(status,config_json,error_text) VALUES(?,?,?)`, status, string(redacted), errText); err != nil {
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO config_revisions(status,config_json,error_text,summary,actor) VALUES(?,?,?,?,?)`, status, string(redacted), errText, operation.Summary, operation.Actor); err != nil {
 		slog.Error("record config revision", "error", err)
 		return
 	}

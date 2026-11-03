@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -21,6 +22,7 @@ const (
 // limiting. Fields are flat so policies written by the earlier header-only
 // release still decode cleanly.
 type SitePolicy struct {
+	Mode           string            `json:"mode,omitempty"`
 	Enabled        bool              `json:"enabled"`
 	Inherit        bool              `json:"inherit"`
 	FrameOptions   string            `json:"frame_options,omitempty"`
@@ -81,15 +83,8 @@ func (a *App) readSecurityDomains(ctx context.Context) map[string]SitePolicy {
 // down to the registrable domain, returning the first enabled policy it finds
 // and falling back to the panel-wide default.
 func (a *App) resolveSitePolicy(ctx context.Context, domain string) SitePolicy {
-	candidate := canonicalSiteDomain(domain)
-	domains := a.readSecurityDomains(ctx)
-	for strings.Contains(candidate, ".") {
-		if p, ok := domains[candidate]; ok && p.Enabled {
-			return p
-		}
-		candidate = candidate[strings.Index(candidate, ".")+1:]
-	}
-	return a.readSecurityGlobal(ctx)
+	p, _ := resolvePolicySource(domain, a.readSecurityGlobal(ctx), a.readSecurityDomains(ctx))
+	return p
 }
 
 // applyPolicyInheritance fills a new site from its parent policy when the
@@ -173,6 +168,12 @@ func renderSecurityHeaders(sh SecurityHeaders) map[string][]string {
 }
 
 func validateSecurityHeaders(sh SecurityHeaders) error {
+	switch sh.Mode {
+	case "", "follow", "custom", "none":
+	default:
+		return errors.New("invalid site security policy mode")
+	}
+
 	switch sh.FrameOptions {
 	case "", "SAMEORIGIN", "DENY":
 	default:
@@ -193,6 +194,12 @@ func validateSecurityHeaders(sh SecurityHeaders) error {
 }
 
 func validateSitePolicy(p SitePolicy) error {
+	switch p.Mode {
+	case "", "custom", "inherit", "none":
+	default:
+		return errors.New("invalid default security policy mode")
+	}
+
 	if err := validateSecurityHeaders(SecurityHeaders{
 		Enabled:        p.Enabled,
 		FrameOptions:   p.FrameOptions,
@@ -217,6 +224,9 @@ func validateSitePolicy(p SitePolicy) error {
 	for _, list := range [][]string{p.IPAllowlist, p.IPDenylist} {
 		if len(list) > 64 {
 			return errors.New("at most 64 IP entries are allowed")
+		}
+		if _, err := normalizeCIDRs(list); err != nil {
+			return fmt.Errorf("invalid policy IP rule: %w", err)
 		}
 	}
 	if p.MaxBodyBytes < 0 || p.MaxBodyBytes > 10<<30 {
@@ -247,62 +257,35 @@ func (a *App) getSecurityDefaults(w http.ResponseWriter, r *http.Request) {
 func (a *App) saveSecurityGlobal(w http.ResponseWriter, r *http.Request) {
 	var p SitePolicy
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&p); err != nil {
-		fail(w, http.StatusBadRequest, errors.New("invalid JSON body"))
+		fail(w, 400, errors.New("invalid JSON body"))
 		return
 	}
-	if err := validateSitePolicy(p); err != nil {
-		fail(w, http.StatusBadRequest, err)
+	if p.Mode == "inherit" {
+		fail(w, 400, errors.New("global policy cannot inherit"))
 		return
 	}
-	p.Inherit = false
-	raw, _ := json.Marshal(p)
-	if err := writePanelSetting(r.Context(), a, securityGlobalKey, string(raw)); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not save the global security policy"))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	a.saveResolvedPolicy(w, r, "", p)
 }
-
 func (a *App) saveSecurityDomain(w http.ResponseWriter, r *http.Request) {
 	domain := canonicalSiteDomain(r.PathValue("domain"))
 	if domain == "" || !strings.Contains(domain, ".") {
-		fail(w, http.StatusBadRequest, errors.New("invalid root domain"))
+		fail(w, 400, errors.New("invalid root domain"))
 		return
 	}
 	var p SitePolicy
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&p); err != nil {
-		fail(w, http.StatusBadRequest, errors.New("invalid JSON body"))
+		fail(w, 400, errors.New("invalid JSON body"))
 		return
 	}
-	if err := validateSitePolicy(p); err != nil {
-		fail(w, http.StatusBadRequest, err)
-		return
-	}
-	p.Inherit = false
-	domains := a.readSecurityDomains(r.Context())
-	if p.Enabled {
-		domains[domain] = p
-	} else {
-		delete(domains, domain)
-	}
-	raw, _ := json.Marshal(domains)
-	if err := writePanelSetting(r.Context(), a, securityDomainsKey, string(raw)); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not save the domain security policy"))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	a.saveResolvedPolicy(w, r, domain, p)
 }
-
 func (a *App) deleteSecurityDomain(w http.ResponseWriter, r *http.Request) {
 	domain := canonicalSiteDomain(r.PathValue("domain"))
-	domains := a.readSecurityDomains(r.Context())
-	delete(domains, domain)
-	raw, _ := json.Marshal(domains)
-	if err := writePanelSetting(r.Context(), a, securityDomainsKey, string(raw)); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not remove the domain security policy"))
+	if domain == "" || !strings.Contains(domain, ".") {
+		fail(w, 400, errors.New("invalid root domain"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	a.saveResolvedPolicy(w, r, domain, SitePolicy{Mode: "inherit"})
 }
 
 type applySecurityInput struct {
@@ -320,6 +303,10 @@ func (a *App) applySecurityDefaults(w http.ResponseWriter, r *http.Request) {
 	var input applySecurityInput
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&input); err != nil {
 		fail(w, http.StatusBadRequest, errors.New("invalid JSON body"))
+		return
+	}
+	if input.Scope != "" && input.Scope != "inherited" {
+		fail(w, 400, errors.New("only inherited sites can be updated"))
 		return
 	}
 	root := canonicalSiteDomain(input.Domain)
@@ -356,6 +343,8 @@ func (a *App) applySecurityDefaults(w http.ResponseWriter, r *http.Request) {
 		denyJSON = []byte("[]")
 	}
 
+	domainPolicies := a.readSecurityDomains(r.Context())
+	globalPolicy := a.readSecurityGlobal(r.Context())
 	rows, err := a.db.QueryContext(r.Context(), `SELECT id,domain,security_headers FROM proxy_hosts`)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, errors.New("could not read sites"))
@@ -368,7 +357,7 @@ func (a *App) applySecurityDefaults(w http.ResponseWriter, r *http.Request) {
 		if rows.Scan(&id, &domain, &stored) != nil {
 			continue
 		}
-		if !domainUnder(canonicalSiteDomain(domain), root) {
+		if canonicalSiteDomain(domain) != root && !domainUnder(canonicalSiteDomain(domain), root) {
 			continue
 		}
 		if input.Scope != "all" {
@@ -377,6 +366,10 @@ func (a *App) applySecurityDefaults(w http.ResponseWriter, r *http.Request) {
 			if !existing.Inherit {
 				continue
 			}
+		}
+		_, source := resolvePolicySource(domain, globalPolicy, domainPolicies)
+		if source != root {
+			continue
 		}
 		ids = append(ids, id)
 	}

@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -43,6 +45,7 @@ func (a *App) diagnoseSite(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 14*time.Second)
 	defer cancel()
 	steps := []diagnosticStep{}
+	var served map[string]any
 	add := func(name, state, detail, advice string) {
 		steps = append(steps, diagnosticStep{name, state, detail, advice})
 	}
@@ -95,6 +98,8 @@ func (a *App) diagnoseSite(w http.ResponseWriter, r *http.Request) {
 				c.Close()
 				if len(certs) > 0 {
 					cert := certs[0]
+					fingerprint := sha256.Sum256(cert.Raw)
+					served = map[string]any{"dns_names": cert.DNSNames, "not_after": cert.NotAfter.UTC().Format(time.RFC3339), "issuer": cert.Issuer.CommonName, "fingerprint": hex.EncodeToString(fingerprint[:]), "hostname_valid": cert.VerifyHostname(h.Domain) == nil, "valid_now": time.Now().After(cert.NotBefore) && time.Now().Before(cert.NotAfter)}
 					pool := x509.NewCertPool()
 					for _, issuer := range certs[1:] {
 						pool.AddCert(issuer)
@@ -165,5 +170,5 @@ func (a *App) diagnoseSite(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		add("证书关联", "warn", "暂时无法读取证书来源", "")
 	}
-	writeJSON(w, 200, map[string]any{"site_id": id, "checked_at": time.Now().UTC().Format(time.RFC3339), "scope": "server-local", "steps": steps, "certificate": source[id]})
+	writeJSON(w, 200, map[string]any{"site_id": id, "checked_at": time.Now().UTC().Format(time.RFC3339), "scope": "server-local", "steps": steps, "certificate": source[id], "served_certificate": served})
 }

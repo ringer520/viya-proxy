@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { Cable, Pencil, ScrollText, Server, Trash2, Search } from "@lucide/vue";
+import ServiceTrafficCell from "./ServiceTrafficCell.vue";
+import { ArrowLeftRight, Cable, Pencil, ScrollText, Trash2, Search } from "@lucide/vue";
 import { t } from "../i18n";
-import { formatBytes } from "../format";
-import { clearListFilters, hasListFilter, listSearch, statusFilter } from "../composables/useState";
+import { clearListFilters, hasListFilter, listSearch, readOnly, statusFilter } from "../composables/useState";
 import { nextTick, ref } from "vue";
 
-import { l4BarHeight, hourlyL4Traffic, l4Stats } from "../composables/useTraffic";
+import { l4Stats } from "../composables/useTraffic";
 import { l4Logs, l4PreviewLayout, l4Toggling, openL4, previewL4, removeL4, toggleL4, visibleL4 } from "../composables/useNetwork";
-import { trafficCharts } from "../composables/usePreferences";
+import type { Layer4Rule } from "../types";
+function listenEndpoint(rule:Layer4Rule){return `${rule.listen_address.includes(":")?"["+rule.listen_address+"]":rule.listen_address}:${rule.listen_port}`}
 const searchOpen = ref(false);
 const searchInput = ref<HTMLInputElement | null>(null);
 async function toggleSearch() {
@@ -18,7 +19,7 @@ async function toggleSearch() {
 </script>
 
 <template>
-      <section class="panel provider-panel">
+      <section class="panel provider-panel forward-panel">
         <div class="panel-head">
           <div class="list-page-heading">
             <div class="list-page-title">
@@ -36,34 +37,16 @@ async function toggleSearch() {
             </div>
           </div>
         </div>
-        <div v-if="visibleL4.length" class="host-list">
-          <div
-            v-for="rule in visibleL4"
-            :key="rule.id"
-            role="group"
-            :aria-label="rule.name || String(rule.listen_port)"
-            class="host-row l4-row"
-          >
-            <div class="host-icon l4-icon"><Server :size="18" /></div>
-            <div class="host-main site-main">
-              <div class="site-title">
-                <strong class="entity-name">{{
-                  rule.name || t("未命名转发")
-                }}</strong
-                ><small class="l4-proto">{{
-                  rule.protocol.toUpperCase()
-                }}</small>
-              </div>
-              <div class="l4-detail">
-                <span class="l4-port"
-                  ><small>{{ t("监听端口") }}</small
-                  ><b>{{ rule.listen_port }}</b></span
-                ><span class="l4-target"
-                  ><small>{{ t("监听目标") }}</small
-                  ><code>{{ rule.upstream_address }}</code></span
-                ><span class="l4-state" :class="{ off: !rule.enabled }"
-                  ><i />{{ rule.enabled ? t("已启用") : t("已停用") }}</span
-                ><div class="site-log-preview-wrap">
+        <template v-if="visibleL4.length">
+          <div class="forward-columns" aria-hidden="true"><span>{{t('转发规则 / 监听入口')}}</span><span>{{t('上游目标')}}</span><span>{{t('近30天')}}</span><span>{{t('操作')}}</span></div>
+          <div class="forward-list">
+            <div v-for="rule in visibleL4" :key="rule.id" role="group" :aria-label="rule.name || String(rule.listen_port)" class="forward-row" :class="{disabled:!rule.enabled}">
+              <div class="forward-entry"><span class="forward-icon"><Cable :size="18"/></span><div><div class="forward-title"><strong>{{rule.name || t('未命名转发')}}</strong><span v-for="protocol in (rule.protocol==='both'?['tcp','udp']:[rule.protocol])" :key="protocol" class="forward-protocol" :class="protocol">{{protocol.toUpperCase()}}</span></div><code class="forward-address">{{listenEndpoint(rule)}}</code><small>{{rule.listen_address==='0.0.0.0'?t('所有 IPv4 网卡'):rule.listen_address==='::'?t('所有 IPv6 网卡'):t('指定本机地址')}}</small></div></div>
+              <div class="forward-target"><ArrowLeftRight class="forward-connector" :size="16" aria-hidden="true"/><code>{{rule.upstream_address}}</code><span class="forward-state" :class="{on:rule.runtime?.state==='listening'}" :title="t(rule.runtime?.message||'状态尚未核实')"><i/>{{t(({listening:'正在监听',loaded:'已加载 · 待核实',pending:'待生效',unbound:'监听未核实','still-active':'旧监听未停用',disabled:'已停用',unknown:'状态未知'} as Record<string,string>)[rule.runtime?.state||'unknown'])}}</span></div>
+              <ServiceTrafficCell class="forward-metrics" :stats="l4Stats(rule)" kind="forward" :protocol="rule.protocol"/>
+              <div class="forward-actions">
+                <button class="site-switch" type="button" role="switch" :aria-checked="rule.enabled" :aria-label="(rule.enabled?t('停用转发'):t('启用转发'))+' '+(rule.name||rule.listen_port)" :title="rule.enabled?t('停用转发'):t('启用转发')" :class="{on:rule.enabled}" :disabled="readOnly || !!l4Toggling[rule.id]" @click="toggleL4(rule)"><span/></button>
+<div class="site-log-preview-wrap">
                   <button
                     class="site-log-trigger"
                     :aria-label="t('预览转发日志')"
@@ -117,82 +100,12 @@ async function toggleSearch() {
                     </ul>
                   </div>
                 </div>
+                <button class="icon-btn" :disabled="readOnly" :aria-label="t('编辑')" :title="t('编辑')" @click="openL4(rule)"><Pencil :size="15"/></button>
+                <button class="icon-btn danger" :disabled="readOnly" :aria-label="t('删除')" :title="t('删除')" @click="removeL4(rule)"><Trash2 :size="15"/></button>
               </div>
             </div>
-            <div class="site-traffic">
-              <div>
-                <span>{{ t("近24小时") }}</span
-                ><strong
-                  >{{ l4Stats(rule).recent.requests.toLocaleString() }}
-                  {{ t("连接") }}</strong
-                ><span
-                  >↑ {{ formatBytes(l4Stats(rule).recent.upload) }} · ↓
-                  {{ formatBytes(l4Stats(rule).recent.download) }}</span
-                >
-              </div>
-              <div
-                v-if="trafficCharts"
-                class="traffic-spark"
-                :aria-label="t('最近24小时流量趋势')"
-              >
-                <i
-                  v-for="point in hourlyL4Traffic(rule)"
-                  :key="point.hour"
-                  :style="{
-                    height:
-                      l4BarHeight(rule, point.upload + point.download) + 'px',
-                  }"
-                  :title="
-                    new Date(point.hour * 1000).toLocaleString() +
-                    ' · ' +
-                    point.requests +
-                    t(' 连接 · ') +
-                    formatBytes(point.upload + point.download)
-                  "
-                ></i>
-              </div>
-              <small
-                >{{ t("累计") }}
-                {{ l4Stats(rule).total.requests.toLocaleString() }}
-                {{ t("连接 ·") }}
-                {{
-                  formatBytes(
-                    l4Stats(rule).total.upload +
-                      l4Stats(rule).total.download,
-                  )
-                }}</small
-              >
-            </div>
-            <button
-              class="site-switch"
-              type="button"
-              role="switch"
-              :aria-checked="rule.enabled"
-              :aria-label="
-                t('启用转发') + ' ' + (rule.name || rule.listen_port)
-              "
-              :class="{ on: rule.enabled }"
-              :disabled="!!l4Toggling[rule.id]"
-              @click="toggleL4(rule)"
-            >
-              <span /></button
-            ><button
-              class="icon-btn"
-              :aria-label="t('编辑')"
-              :title="t('编辑')"
-              @click="openL4(rule)"
-            >
-              <Pencil :size="15" /></button
-            ><button
-              class="icon-btn danger"
-              :aria-label="t('删除')"
-              :title="t('删除')"
-              @click="removeL4(rule)"
-            >
-              <Trash2 :size="16" />
-            </button>
           </div>
-        </div>
+        </template>
         <div v-else class="empty">
           <div class="empty-icon"><Cable :size="23" /></div>
           <strong>{{

@@ -22,8 +22,8 @@ import (
 
 const configFormat = "viya-config-v3"
 
-var configTables = []string{"dns_providers", "custom_certificates", "managed_certificates", "proxy_hosts", "layer4_rules", "ddns_records", "ip_bans", "panel_settings", "monitors", "config_revisions"}
-var runtimeTables = []string{"sessions", "traffic_hours", "site_access_events", "ddns_runs", "monitor_samples"}
+var configTables = []string{"dns_providers", "custom_certificates", "managed_certificates", "proxy_hosts", "layer4_rules", "ddns_records", "ip_bans", "panel_settings", "config_revisions"}
+var runtimeTables = []string{"sessions", "traffic_hours", "site_access_events", "ddns_runs"}
 
 type configCell struct {
 	Type  string `json:"type"`
@@ -134,6 +134,17 @@ func captureTables(ctx context.Context, db sqlReader, names []string) ([]tableDu
 	return out, nil
 }
 func restoreTables(ctx context.Context, tx *sql.Tx, tables []tableDump) error {
+	tables = activeArchiveTables(tables)
+	var resetAt string
+	for _, table := range tables {
+		if table.Name == "panel_settings" {
+			err := tx.QueryRowContext(ctx, `SELECT value FROM panel_settings WHERE key='traffic_reset_at'`).Scan(&resetAt)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+			break
+		}
+	}
 	allowed := map[string]bool{}
 	for _, name := range append(append([]string{}, configTables...), runtimeTables...) {
 		allowed[name] = true
@@ -205,6 +216,11 @@ func restoreTables(ctx context.Context, tx *sql.Tx, tables []tableDump) error {
 			if _, err = tx.ExecContext(ctx, query, values...); err != nil {
 				return err
 			}
+		}
+	}
+	if resetAt != "" {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO panel_settings(key,value) VALUES('traffic_reset_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, resetAt); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -401,6 +417,7 @@ func openConfiguration(input configImportInput) (configPayload, error) {
 	} else {
 		return payload, errors.New("备份缺少配置内容")
 	}
+	payload.Tables = activeArchiveTables(payload.Tables)
 	if payload.Format != configFormat || len(payload.Key) != 32 || len(payload.Tables) != len(configTables) {
 		return payload, errors.New("配置版本或表数量不兼容")
 	}
@@ -474,6 +491,7 @@ func (a *App) exportConfiguration(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, errors.New("无法读取完整配置"))
 		return
 	}
+	stripArchiveActors(payload.Tables)
 	archive, err := sealConfiguration(payload, input.Password)
 	if err != nil {
 		fail(w, 400, err)
@@ -501,6 +519,10 @@ func (a *App) inspectConfiguration(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"created": payload.Created, "counts": counts, "files": len(payload.Files), "preferences": len(payload.Preferences), "requires_login": false, "encrypted": input.Archive.Encrypted})
 }
 func (a *App) importConfiguration(w http.ResponseWriter, r *http.Request) {
+	if a.pendingAccessConfirmation(r.Context()) != nil {
+		fail(w, 409, errors.New("请先确认或取消待生效的面板访问限制"))
+		return
+	}
 	var input configImportInput
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 80<<20)).Decode(&input) != nil || !input.Confirmed {
 		fail(w, 400, errors.New("请预览备份并明确确认替换所有配置"))
@@ -749,7 +771,7 @@ func stripTransientSettings(tables []tableDump) {
 		}
 		kept := [][]configCell{}
 		for _, row := range tables[i].Rows {
-			if row[column].Value != "pending_panel_port" {
+			if row[column].Value != "pending_panel_port" && row[column].Value != "traffic_reset_at" {
 				kept = append(kept, row)
 			}
 		}

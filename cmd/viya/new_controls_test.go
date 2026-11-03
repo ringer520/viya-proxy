@@ -109,12 +109,12 @@ func TestDNSCredentialDeletionChecksAllCertificateReferences(t *testing.T) {
 				t.Fatal(e)
 			}
 			defer db.Close()
-			_, e = db.Exec(`CREATE TABLE dns_providers(id INTEGER PRIMARY KEY);INSERT INTO dns_providers VALUES(1);CREATE TABLE proxy_hosts(dns_provider_id INTEGER);CREATE TABLE managed_certificates(dns_provider_id INTEGER);CREATE TABLE ddns_records(dns_provider_id INTEGER)`)
+			_, e = db.Exec(`CREATE TABLE dns_providers(id INTEGER PRIMARY KEY);INSERT INTO dns_providers VALUES(1);CREATE TABLE proxy_hosts(dns_provider_id INTEGER,id INTEGER DEFAULT 1,domain TEXT DEFAULT 'site.test');CREATE TABLE managed_certificates(dns_provider_id INTEGER,id INTEGER DEFAULT 1,domain TEXT DEFAULT 'cert.test');CREATE TABLE ddns_records(dns_provider_id INTEGER,id INTEGER DEFAULT 1,name TEXT DEFAULT 'record')`)
 			if e != nil {
 				t.Fatal(e)
 			}
 			if used != "" {
-				_, e = db.Exec(`INSERT INTO ` + used + ` VALUES(1)`)
+				_, e = db.Exec(`INSERT INTO ` + used + `(dns_provider_id) VALUES(1)`)
 				if e != nil {
 					t.Fatal(e)
 				}

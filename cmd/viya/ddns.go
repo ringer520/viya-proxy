@@ -27,6 +27,12 @@ import (
 )
 
 type DDNSRecord struct {
+	LastChangedAt int64  `json:"last_changed_at"`
+	LastSuccessAt int64  `json:"last_success_at"`
+	LastStatus    string `json:"last_status"`
+	LastStage     string `json:"last_stage"`
+	Running       bool   `json:"running"`
+
 	ID              int64  `json:"id"`
 	Name            string `json:"name"`
 	Comment         string `json:"comment"`
@@ -47,10 +53,12 @@ type DDNSRecord struct {
 	LastError       string `json:"last_error,omitempty"`
 }
 type NetworkInterfaceAddress struct {
-	IP        string `json:"ip"`
-	Family    string `json:"family"`
-	Scope     string `json:"scope"`
-	Temporary bool   `json:"temporary,omitempty"`
+	Deprecated bool   `json:"deprecated,omitempty"`
+	Tentative  bool   `json:"tentative,omitempty"`
+	IP         string `json:"ip"`
+	Family     string `json:"family"`
+	Scope      string `json:"scope"`
+	Temporary  bool   `json:"temporary,omitempty"`
 }
 type NetworkInterface struct {
 	Name      string                    `json:"name"`
@@ -70,7 +78,13 @@ type ddnsProvider interface {
 }
 
 func (a *App) listDDNSRecords(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,comment,dns_provider_id,zone,record_name,record_type,cname_target,ip_source,interface_name,interface_ip,ttl_seconds,interval_minutes,enabled,last_ip,last_run_at,next_run_at,last_error FROM ddns_records ORDER BY name`)
+	running := map[int64]bool{}
+	a.ddnsMu.Lock()
+	for id, active := range a.ddnsRunning {
+		running[id] = active
+	}
+	a.ddnsMu.Unlock()
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,comment,dns_provider_id,zone,record_name,record_type,cname_target,ip_source,interface_name,interface_ip,ttl_seconds,interval_minutes,enabled,last_ip,last_run_at,next_run_at,last_error,last_changed_at,last_success_at,last_status,last_stage FROM ddns_records ORDER BY name`)
 	if err != nil {
 		fail(w, 500, errors.New("could not read DDNS records"))
 		return
@@ -80,11 +94,12 @@ func (a *App) listDDNSRecords(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var v DDNSRecord
 		var en int
-		if err := rows.Scan(&v.ID, &v.Name, &v.Comment, &v.DNSProviderID, &v.Zone, &v.RecordName, &v.RecordType, &v.CNAMETarget, &v.IPSource, &v.InterfaceName, &v.InterfaceIP, &v.TTLSeconds, &v.IntervalMinutes, &en, &v.LastIP, &v.LastRunAt, &v.NextRunAt, &v.LastError); err != nil {
+		if err := rows.Scan(&v.ID, &v.Name, &v.Comment, &v.DNSProviderID, &v.Zone, &v.RecordName, &v.RecordType, &v.CNAMETarget, &v.IPSource, &v.InterfaceName, &v.InterfaceIP, &v.TTLSeconds, &v.IntervalMinutes, &en, &v.LastIP, &v.LastRunAt, &v.NextRunAt, &v.LastError, &v.LastChangedAt, &v.LastSuccessAt, &v.LastStatus, &v.LastStage); err != nil {
 			fail(w, 500, errors.New("could not read DDNS records"))
 			return
 		}
 		v.Enabled = en == 1
+		v.Running = running[v.ID]
 		out = append(out, v)
 	}
 	if err := rows.Err(); err != nil {
@@ -104,6 +119,7 @@ func (a *App) listNetworkInterfaces(w http.ResponseWriter, r *http.Request) {
 
 func networkInterfaces() ([]NetworkInterface, error) {
 	temporaryAddresses := temporaryIPv6Addresses()
+	flags := ipv6AddressFlags()
 	items, err := net.Interfaces()
 	if err != nil {
 		return nil, err
@@ -135,14 +151,14 @@ func networkInterfaces() ([]NetworkInterface, error) {
 			if ip.IsPrivate() {
 				scope = "内网"
 			}
-			entry.Addresses = append(entry.Addresses, NetworkInterfaceAddress{IP: ip.String(), Family: family, Scope: scope, Temporary: family == "ipv6" && temporaryAddresses[ip.String()]})
+			entry.Addresses = append(entry.Addresses, NetworkInterfaceAddress{IP: ip.String(), Family: family, Scope: scope, Temporary: family == "ipv6" && temporaryAddresses[ip.String()], Deprecated: flags[ip.String()]&0x20 != 0, Tentative: flags[ip.String()]&0x48 != 0})
 		}
 		sort.Slice(entry.Addresses, func(i, j int) bool {
-			if entry.Addresses[i].Temporary != entry.Addresses[j].Temporary {
-				return !entry.Addresses[i].Temporary
-			}
 			if entry.Addresses[i].Scope != entry.Addresses[j].Scope {
 				return entry.Addresses[i].Scope == "公网"
+			}
+			if entry.Addresses[i].Temporary != entry.Addresses[j].Temporary {
+				return !entry.Addresses[i].Temporary
 			}
 			return entry.Addresses[i].IP < entry.Addresses[j].IP
 		})
@@ -193,6 +209,7 @@ func interfaceIP(name string, v6 bool) (netip.Addr, error) {
 	if err != nil {
 		return netip.Addr{}, fmt.Errorf("无法读取网络接口 %q 的地址", name)
 	}
+	flags := ipv6AddressFlags()
 	candidates := []netip.Addr{}
 	for _, raw := range addresses {
 		prefix, err := netip.ParsePrefix(raw.String())
@@ -201,6 +218,9 @@ func interfaceIP(name string, v6 bool) (netip.Addr, error) {
 		}
 		ip := prefix.Addr().Unmap()
 		if !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified() || ip.Is6() != v6 {
+			continue
+		}
+		if v6 && flags[ip.String()]&0x68 != 0 {
 			continue
 		}
 		candidates = append(candidates, ip)
@@ -214,11 +234,11 @@ func interfaceIP(name string, v6 bool) (netip.Addr, error) {
 	}
 	temporary := temporaryIPv6Addresses()
 	sort.Slice(candidates, func(i, j int) bool {
-		if v6 && temporary[candidates[i].String()] != temporary[candidates[j].String()] {
-			return !temporary[candidates[i].String()]
-		}
 		if candidates[i].IsPrivate() != candidates[j].IsPrivate() {
 			return !candidates[i].IsPrivate()
+		}
+		if v6 && temporary[candidates[i].String()] != temporary[candidates[j].String()] {
+			return !temporary[candidates[i].String()]
 		}
 		return candidates[i].Less(candidates[j])
 	})
@@ -232,6 +252,9 @@ func interfaceIPSelected(name string, v6 bool, selected string) (netip.Addr, err
 	want, err := netip.ParseAddr(strings.TrimSpace(selected))
 	if err != nil || want.Is6() != v6 || !want.IsGlobalUnicast() || want.IsLoopback() || want.IsLinkLocalUnicast() || want.IsMulticast() || want.IsUnspecified() {
 		return netip.Addr{}, errors.New("所选网卡 IP 地址无效，请重新选择")
+	}
+	if v6 && ipv6AddressFlags()[want.String()]&0x68 != 0 {
+		return netip.Addr{}, errors.New("所选 IPv6 地址已弃用或尚未就绪，请重新选择或使用自动模式")
 	}
 	iface, err := net.InterfaceByName(strings.TrimSpace(name))
 	if err != nil || iface.Flags&net.FlagUp == 0 {
@@ -469,7 +492,7 @@ func (a *App) runDDNSRecord(w http.ResponseWriter, r *http.Request) {
 	ip, e := a.executeDDNSRecord(r.Context(), id, true)
 	if e != nil {
 		slog.Warn("DDNS record update failed", "id", id, "error", e)
-		fail(w, 502, errors.New("DDNS 更新失败，请稍后重试；详细原因已写入服务日志"))
+		fail(w, 502, errors.New("DDNS 更新未完成，请查看列表中的失败阶段与结果"))
 		return
 	}
 	var completed int64
@@ -610,6 +633,8 @@ func (a *App) executeDDNSRecord(ctx context.Context, id int64, manual bool) (str
 		return "", errors.New("DDNS record is disabled")
 	}
 	status := "failed"
+	stage := "address"
+	a.setDDNSStage(ctx, id, stage)
 	message := ""
 	observed := ""
 	if v.RecordType == "CNAME" {
@@ -628,11 +653,15 @@ func (a *App) executeDDNSRecord(ctx context.Context, id int64, manual bool) (str
 	if err != nil {
 		message = err.Error()
 	} else {
+		stage = "credentials"
+		a.setDDNSStage(ctx, id, stage)
 		provider, pErr := providerFor(ctx, a.loadDNSProvider, v.DNSProviderID)
 		if pErr != nil {
 			err = pErr
 			message = err.Error()
 		} else {
+			stage = "compare"
+			a.setDDNSStage(ctx, id, stage)
 			records, gErr := provider.GetRecords(ctx, v.Zone+".")
 			if gErr != nil {
 				err = gErr
@@ -677,16 +706,43 @@ func (a *App) executeDDNSRecord(ctx context.Context, id int64, manual bool) (str
 						}
 					}
 					if err == nil {
+						stage = "update"
+						a.setDDNSStage(ctx, id, stage)
 						_, err = provider.SetRecords(ctx, v.Zone+".", []libdns.Record{target})
 						if err != nil {
 							message = fmt.Sprintf("DNS provider rejected the record update: %v", err)
 						} else {
 							status = "updated"
+							stage = "verify"
+							a.setDDNSStage(ctx, id, stage)
+							confirmed, verifyErr := provider.GetRecords(ctx, v.Zone+".")
+							if verifyErr != nil {
+								err = errors.New("DNS 已提交，但无法读取服务商记录验证，请重试检查")
+							} else {
+								verified := false
+								for _, rec := range confirmed {
+									rr := rec.RR()
+									if strings.EqualFold(rr.Name, v.RecordName) && rr.Type == v.RecordType && sameDNSValue(v.RecordType, rr.Data, observed) {
+										verified = true
+									}
+								}
+								if !verified {
+									err = errors.New("DNS 已提交，服务商暂未返回目标值，请稍后重试检查")
+								}
+							}
+							if err != nil {
+								status = "unverified"
+								message = err.Error()
+							}
+
 						}
 					}
 				}
 			}
 		}
+	}
+	if message != "" {
+		message = a.redactDNSError(context.WithoutCancel(ctx), v.DNSProviderID, message)
 	}
 	now := time.Now().Unix()
 	// Record the completed attempt even if the network deadline or browser request expired.
@@ -704,7 +760,7 @@ func (a *App) executeDDNSRecord(ctx context.Context, id int64, manual bool) (str
 		_ = tx.Rollback()
 		return observed, dbErr
 	}
-	if _, dbErr = tx.ExecContext(persistCtx, `UPDATE ddns_records SET last_ip=CASE WHEN ? IN ('updated','unchanged') THEN ? ELSE last_ip END,last_run_at=?,next_run_at=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, status, observed, now, now+int64(v.IntervalMinutes*60), message, id); dbErr != nil {
+	if _, dbErr = tx.ExecContext(persistCtx, `UPDATE ddns_records SET last_ip=CASE WHEN ? IN ('updated','unchanged') THEN ? ELSE last_ip END,last_run_at=?,next_run_at=?,last_error=?,last_changed_at=CASE WHEN ? IN ('updated','unverified') THEN ? ELSE last_changed_at END,last_success_at=CASE WHEN ? IN ('updated','unchanged') THEN ? ELSE last_success_at END,last_status=?,last_stage=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, status, observed, now, now+int64(v.IntervalMinutes*60), message, status, now, status, now, status, stage, id); dbErr != nil {
 		_ = tx.Rollback()
 		return observed, dbErr
 	}

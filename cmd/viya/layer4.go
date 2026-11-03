@@ -35,6 +35,8 @@ func (a *App) listLayer4Rules(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, errors.New("could not read layer 4 rules"))
 		return
 	}
+	rows.Close()
+	a.forwardRuntimeStates(r.Context(), out)
 	writeJSON(w, 200, out)
 }
 
@@ -46,6 +48,7 @@ func validateLayer4Rule(v *Layer4Rule) error {
 	if len(v.Name) > 100 {
 		return errors.New("rule name is too long")
 	}
+	v.ListenAddress = strings.TrimSpace(v.ListenAddress)
 	if v.ListenAddress == "" {
 		v.ListenAddress = "0.0.0.0"
 	}
@@ -89,9 +92,15 @@ func (a *App) saveLayer4Rule(w http.ResponseWriter, r *http.Request, id int64, c
 		fail(w, 400, err)
 		return
 	}
-	if err := a.checkLayer4Conflict(r, id, v); err != nil {
-		fail(w, 409, err)
-		return
+	if v.Enabled {
+		if err := a.checkForwardSocket(r.Context(), id, v); err != nil {
+			fail(w, 409, err)
+			return
+		}
+		if err := a.checkLayer4Conflict(r, id, v); err != nil {
+			fail(w, 409, err)
+			return
+		}
 	}
 	var result int64
 	var err error
@@ -130,7 +139,7 @@ func (a *App) saveLayer4Rule(w http.ResponseWriter, r *http.Request, id int64, c
 		id = result
 	}
 	if err := a.apply(r.Context()); err != nil {
-		fail(w, 502, errors.New("rule saved but Caddy could not apply it; review configuration history"))
+		writeJSON(w, 502, map[string]any{"id": id, "error": "配置已保存，但尚未生效。请重试应用或在配置历史中恢复。", "saved": true, "applied": false, "code": "configuration_pending"})
 		return
 	}
 	v.ID = id
@@ -154,6 +163,9 @@ func (a *App) checkLayer4Conflict(r *http.Request, id int64, v Layer4Rule) error
 	}
 	apiListen := env("VIYA_LISTEN", "127.0.0.1:8181")
 	for _, reserved := range []struct{ name, address string }{{"Caddy Admin API", a.adminListen}, {"Caddy HTTP", a.httpListen}, {"Viya management API", apiListen}} {
+		if v.Protocol == "udp" {
+			continue
+		} // These management listeners are TCP, not UDP.
 		rh, rp, e1 := net.SplitHostPort(reserved.address)
 		if e1 != nil {
 			continue
@@ -235,7 +247,7 @@ func (a *App) deleteLayer4Rule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.apply(r.Context()); err != nil {
-		fail(w, 502, errors.New("rule deleted but Caddy could not apply the configuration"))
+		failSavedApplication(w)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -6,7 +6,7 @@ import { confirmationTitle, deleteConfirmOption, deletePrompt, resolveDelete } f
 </script>
 
 <template>
-  <div v-if="deletePrompt" class="overlay" v-dialog>
+  <div v-if="deletePrompt" class="overlay delete-confirm-overlay" v-dialog>
     <section
       class="modal confirm-delete-modal"
       role="alertdialog"

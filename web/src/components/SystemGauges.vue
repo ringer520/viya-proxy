@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { apiFetch as fetch } from "../api";
+import AnimatedMetric from '../AnimatedMetric.vue'
 
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { Cpu, MemoryStick, HardDrive, RefreshCw, Activity } from '@lucide/vue'
 
-const props = defineProps<{ autoRefresh: boolean }>()
+const props = defineProps<{ autoRefresh: boolean; compact?: boolean }>()
 type Usage = { percent: number; used: number; total: number; path?: string }
 type Metrics = { cpu_percent?: number; cores: number; platform: string; uptime?: number; memory?: Usage; disk?: Usage; sampled_at: number; errors: string[] }
 
@@ -30,7 +31,7 @@ const gauges = computed(() => [
     icon: Cpu,
     value: data.value?.cpu_percent,
     detail: data.value ? data.value.cores + ' ' + t('逻辑核心') : t('等待采样'),
-    color: '#38bdf8',
+    color: 'var(--metric-cpu)',
     glow: 'rgba(56,189,248,.45)',
   },
   {
@@ -39,7 +40,7 @@ const gauges = computed(() => [
     icon: MemoryStick,
     value: data.value?.memory?.percent,
     detail: data.value?.memory ? bytes(data.value.memory.used) + ' / ' + bytes(data.value.memory.total) : t('暂不可用'),
-    color: '#a78bfa',
+    color: 'var(--metric-memory)',
     glow: 'rgba(167,139,250,.45)',
   },
   {
@@ -48,7 +49,7 @@ const gauges = computed(() => [
     icon: HardDrive,
     value: data.value?.disk?.percent,
     detail: data.value?.disk ? bytes(data.value.disk.used) + ' / ' + bytes(data.value.disk.total) : t('暂不可用'),
-    color: '#34d399',
+    color: 'var(--success)',
     glow: 'rgba(52,211,153,.45)',
   },
 ])
@@ -100,17 +101,17 @@ onBeforeUnmount(() => clearInterval(timer))
 </script>
 
 <template>
-  <section class="system-observatory" aria-labelledby="system-title">
+  <section class="system-observatory" :class="{compact}" aria-labelledby="system-title">
     <header class="telemetry-head">
       <div class="telemetry-title">
-        <span class="eyebrow"><Activity :size="13" /> HOST TELEMETRY</span>
+        <span v-if="!compact" class="eyebrow"><Activity :size="13" /> HOST TELEMETRY</span>
         <h2 id="system-title">{{ t('服务器监控') }}</h2>
-        <p>{{ t('服务器实时资源占用') }} · {{ data?.platform || '—' }}</p>
+        <p v-if="!compact">{{ t('服务器实时资源占用') }} · {{ data?.platform || '—' }}</p>
       </div>
       <div class="telemetry-meta">
         <span class="live-pill"><i />{{ autoRefresh ? t('实时采样') : t('已暂停') }}</span>
         <span class="meta-item"><small>{{ t('运行时长') }}</small><strong>{{ uptime }}</strong></span>
-        <span class="meta-item meta-disk"><small>{{ t('数据目录所在磁盘') }}</small><strong>{{ data?.disk?.path || '—' }}</strong></span>
+        <span v-if="!compact" class="meta-item meta-disk"><small>{{ t('数据目录所在磁盘') }}</small><strong>{{ data?.disk?.path || '—' }}</strong></span>
         <button class="icon-btn telemetry-refresh" :disabled="busy" :title="t('刷新')" :aria-label="t('刷新')" @click="load">
           <RefreshCw :size="16" :class="{ spinning: busy }" />
         </button>
@@ -125,19 +126,19 @@ onBeforeUnmount(() => clearInterval(timer))
         :key="g.key"
         class="gauge-card"
         :class="{ alert: (g.value ?? 0) >= 90 }"
-        :style="{ '--gauge': g.value !== undefined && g.value >= 90 ? '#fb7185' : g.color, '--gauge-glow': g.value !== undefined && g.value >= 90 ? 'rgba(251,113,133,.5)' : g.glow }"
+        :style="{ '--gauge': g.value !== undefined && g.value >= 90 ? 'var(--danger)' : g.color, '--gauge-glow': g.value !== undefined && g.value >= 90 ? 'rgba(251,113,133,.5)' : g.glow }"
       >
         <div class="gauge-top">
           <span class="gauge-icon"><component :is="g.icon" :size="15" /></span>
           <strong>{{ g.label }}</strong>
-          <span class="gauge-state">{{ g.value === undefined ? t('等待采样') : g.value >= 90 ? t('高占用') : t('实时') }}</span>
+          <span class="gauge-state">{{ g.value === undefined ? t('等待采样') : g.value >= 90 ? t('高占用') : compact ? '' : t('实时') }}</span>
         </div>
         <div class="gauge-body">
           <svg class="gauge-ring" viewBox="0 0 132 132" role="img" :aria-label="g.label + ': ' + (g.value === undefined ? t('暂不可用') : g.value.toFixed(1) + '%')">
             <defs>
               <linearGradient :id="'ring-' + g.key" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" :stop-color="g.value !== undefined && g.value >= 90 ? '#fb7185' : g.color" stop-opacity=".55" />
-                <stop offset="100%" :stop-color="g.value !== undefined && g.value >= 90 ? '#f43f5e' : g.color" />
+                <stop offset="0%" :stop-color="g.value !== undefined && g.value >= 90 ? 'var(--danger)' : g.color" stop-opacity=".55" />
+                <stop offset="100%" :stop-color="g.value !== undefined && g.value >= 90 ? 'var(--danger)' : g.color" />
               </linearGradient>
             </defs>
             <circle cx="66" cy="66" :r="R" class="ring-track" />
@@ -152,21 +153,22 @@ onBeforeUnmount(() => clearInterval(timer))
             />
           </svg>
           <div class="gauge-center">
-            <b>{{ g.value === undefined ? '—' : g.value.toFixed(1) }}</b><i>%</i>
+            <b><AnimatedMetric v-if="g.value !== undefined" :value="g.value" format="decimal"/><template v-else>—</template></b><i>%</i>
           </div>
         </div>
         <svg v-if="trend(g.key)" class="gauge-spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true">
-          <polyline :points="trend(g.key)" fill="none" :stroke="g.value !== undefined && g.value >= 90 ? '#fb7185' : g.color" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <polyline :points="trend(g.key)" fill="none" :stroke="g.value !== undefined && g.value >= 90 ? 'var(--danger)' : g.color" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         <p class="gauge-detail">{{ g.detail }}</p>
       </article>
     </div>
 
-    <footer class="telemetry-foot">
+    <footer v-if="!compact" class="telemetry-foot">
       <span class="system-pulse" />{{ t('真实服务器数据') }} · {{ t('每 5 秒刷新') }}<span v-if="!autoRefresh"> · {{ t('自动刷新已暂停') }}</span>
       <time v-if="data">{{ new Date(data.sampled_at * 1000).toLocaleTimeString() }}</time>
       <span v-if="data?.errors.length" class="error">{{ data.errors.join(' · ') }}</span>
     </footer>
+    <p v-if="compact && data?.errors.length" class="compact-sample-error" role="status">{{data.errors.join(' · ')}}</p>
   </section>
 </template>
 
@@ -249,4 +251,30 @@ onBeforeUnmount(() => clearInterval(timer))
   .gauge-card { transition: none; }
   .ring-value { transition: none; }
 }
+</style>
+
+<style scoped>
+.compact.system-observatory{padding:16px 20px;border-radius:18px;box-shadow:none;background:linear-gradient(130deg,color-mix(in srgb,var(--accent) 4%,var(--surface)),var(--surface));overflow:visible}
+.compact .telemetry-head{align-items:center;gap:8px}
+.compact .telemetry-title h2{font-size:13px;margin:0}
+.compact .telemetry-meta{gap:12px}
+.compact .meta-item{flex-direction:row;align-items:center;gap:7px}
+.compact .meta-item strong{font-size:11px}
+.compact .live-pill{font-size:10px;padding:3px 8px}
+.compact .telemetry-refresh{min-height:26px;min-width:26px;width:26px;height:26px}
+.compact .gauge-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
+.compact .gauge-card{display:grid;grid-template-columns:86px minmax(0,1fr);grid-template-rows:22px 22px 22px;align-items:center;gap:0 12px;padding:10px 12px;min-height:86px;border-radius:13px;box-shadow:none;overflow:hidden}
+.compact .gauge-body{grid-column:1;grid-row:1 / 4;width:86px;height:86px;margin:0}
+.compact .gauge-ring{width:86px;height:86px}
+.compact .gauge-center b{font-size:21px}
+.compact .gauge-center i{font-size:10px}
+.compact .gauge-top{grid-column:2;grid-row:1;gap:5px;min-width:0}
+.compact .gauge-top strong{font-size:12px}
+.compact .gauge-icon{width:22px;height:22px;border-radius:6px}
+.compact .gauge-state{font-size:9px}
+.compact .gauge-detail{grid-column:2;grid-row:2;font-size:10px;text-align:left;margin:0;white-space:normal;line-height:1.5}
+.compact .gauge-spark{grid-column:2;grid-row:3;position:static;width:100%;height:20px;margin:0;opacity:.8}
+.compact-sample-error{font-size:11px;color:#e05264;margin:8px 0 0}
+@media(max-width:1200px){.compact .gauge-card{grid-template-columns:70px minmax(0,1fr);padding:8px;gap:0 6px}.compact .gauge-body,.compact .gauge-ring{width:70px;height:70px}.compact .gauge-center b{font-size:18px}}
+@media(max-width:700px){.compact .gauge-grid{grid-template-columns:1fr}.compact .gauge-card{grid-template-columns:74px minmax(0,1fr);padding:8px 14px;gap:0 16px}.compact .gauge-state{margin-left:auto}.compact.system-observatory{padding:14px}.compact .meta-item{display:none}}
 </style>

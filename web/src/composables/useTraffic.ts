@@ -18,6 +18,14 @@ import { authenticated, csrfToken, hosts, l4Rules } from "./useState";
 export const traffic = ref<Record<string, SiteTraffic>>({});
 export const l4Traffic = ref<Record<string, SiteTraffic>>({});
 export const trafficError = ref("");
+// List statistics always describe 30 days, regardless of the overview's selected range.
+const siteTrafficMonth = ref<Record<string, SiteTraffic>>({});
+const forwardTrafficMonth = ref<Record<string, SiteTraffic>>({});
+export const webListTotals = computed(() => sumRecent(siteTrafficMonth.value));
+export const forwardListTotals = computed(() => sumRecent(forwardTrafficMonth.value));
+function sumRecent(data: Record<string, SiteTraffic>) {
+ const sum=emptyCounters(); for(const item of Object.values(data)) addCounter(sum,item.recent); return sum;
+}
 
 const emptyCounters = (): Counters => ({
   requests: 0,
@@ -53,7 +61,7 @@ const EMPTY_SITE_TRAFFIC: SiteTraffic = {
 export const siteTrafficIndex = computed(() => {
   const index: Record<number, SiteTraffic> = {};
   for (const host of hosts.value)
-    index[host.id] = traffic.value[host.id] || EMPTY_SITE_TRAFFIC;
+    index[host.id] = siteTrafficMonth.value[host.id] || EMPTY_SITE_TRAFFIC;
   return index;
 });
 export function siteStats(host: Host): SiteTraffic {
@@ -62,7 +70,7 @@ export function siteStats(host: Host): SiteTraffic {
 export const l4TrafficIndex = computed(() => {
   const index: Record<number, SiteTraffic> = {};
   for (const rule of l4Rules.value)
-    index[rule.id] = l4Traffic.value[rule.id] || EMPTY_SITE_TRAFFIC;
+    index[rule.id] = forwardTrafficMonth.value[rule.id] || EMPTY_SITE_TRAFFIC;
   return index;
 });
 export function l4Stats(rule: Layer4Rule): SiteTraffic {
@@ -111,15 +119,18 @@ function emptyHourPoints() {
     };
   return emptyHourCache.points;
 }
+const siteHours24 = computed(() => hourIndexFor(siteTrafficMonth.value));
+const forwardHours24 = computed(() => hourIndexFor(forwardTrafficMonth.value));
 export function hourlyTraffic(host: Host) {
-  return trafficHourIndex.value[host.id]?.points || emptyHourPoints();
+  return siteHours24.value[host.id]?.points || emptyHourPoints();
 }
 export function hourlyL4Traffic(rule: Layer4Rule) {
-  return l4HourIndex.value[rule.id]?.points || emptyHourPoints();
+  return forwardHours24.value[rule.id]?.points || emptyHourPoints();
 }
 // Longer windows reuse the same card but aggregate by day: traffic_hours keeps
 // 90 days, so 30d is the widest honest window.
 export const trafficRange = ref<"24h" | "7d" | "30d">("24h");
+export const trafficLoadedRange = ref<"24h" | "7d" | "30d" | null>(null);
 // The window is chosen by the backend, so the series has to be re-fetched.
 watch(trafficRange, () => {
   void refreshTraffic();
@@ -202,14 +213,14 @@ export function barHeight(host: Host, bytes: number) {
   if (bytes <= 0) return 0;
   return Math.max(
     3,
-    (bytes / Math.max(1, trafficHourIndex.value[host.id]?.max || 0)) * 30,
+    (bytes / Math.max(1, siteHours24.value[host.id]?.max || 0)) * 30,
   );
 }
 export function l4BarHeight(rule: Layer4Rule, bytes: number) {
   if (bytes <= 0) return 0;
   return Math.max(
     3,
-    (bytes / Math.max(1, l4HourIndex.value[rule.id]?.max || 0)) * 30,
+    (bytes / Math.max(1, forwardHours24.value[rule.id]?.max || 0)) * 30,
   );
 }
 let trafficSequence = 0;
@@ -218,16 +229,18 @@ export async function refreshTraffic() {
   const seq = ++trafficSequence;
   const range = trafficRange.value;
   try {
-    const [siteRes, l4Res] = await Promise.all([
+    const responses = await Promise.all([
       fetch(`/api/v1/proxy-hosts/traffic?range=${range}`),
       fetch(`/api/v1/layer4-rules/traffic?range=${range}`),
+      ...(range === "30d" ? [] : [fetch("/api/v1/proxy-hosts/traffic?range=30d"),fetch("/api/v1/layer4-rules/traffic?range=30d")]),
     ]);
+    const [siteRes,l4Res] = responses;
     if (siteRes.status === 401 || l4Res.status === 401) {
       authenticated.value = false;
       csrfToken.value = "";
       return;
     }
-    if (!siteRes.ok || !l4Res.ok) throw Error(t("流量统计暂不可用"));
+    if (responses.some(response=>!response.ok)) throw Error(t("流量统计暂不可用"));
     const [siteData, l4Data] = await Promise.all([
       siteRes.json(),
       l4Res.json(),
@@ -235,6 +248,9 @@ export async function refreshTraffic() {
     if (seq !== trafficSequence) return;
     traffic.value = siteData;
     l4Traffic.value = l4Data;
+    trafficLoadedRange.value = range;
+    if (range === '30d') { siteTrafficMonth.value = siteData; forwardTrafficMonth.value = l4Data; }
+    else { const [webMonth,forwardMonth]=await Promise.all([responses[2]!.json(),responses[3]!.json()]); if(seq!==trafficSequence)return;siteTrafficMonth.value=webMonth;forwardTrafficMonth.value=forwardMonth; }
     trafficError.value = "";
   } catch (e) {
     if (seq !== trafficSequence) return;

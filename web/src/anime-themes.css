@@ -1,0 +1,171 @@
+/* Illustrated themes: self-contained palette tokens, locally bundled artwork. */
+html[data-palette="sakura"] {
+  color-scheme: light;
+  --bg:#f5edf2; --bg-tint-1:#f4dbe8; --bg-tint-2:#eee8fa;
+  --surface:#fff9fc; --surface-2:#f8edf3; --surface-3:#efdeea;
+  --line:#e5cedc; --line-strong:#c9a6bb; --text:#412e40; --muted:#796176;
+  --accent:#a84d74; --accent-2:#8062a9; --accent-contrast:#fff;
+  --accent-soft:#a84d7414; --ring:#a84d7466; --glow:#ba639426;
+  --nav-bg:#37283c; --nav-bg-2:#493347; --nav-active:#634459; --nav-text:#eadde7;
+  --metric-cpu:#9b527d; --metric-memory:#8063a8; --success:#28765a; --warning:#94621c; --danger:#b93855;
+  --shadow-card:0 5px 25px -14px #6c3d6738,inset 0 1px 0 #ffffffa8;
+  --shadow-float:0 22px 65px -20px #4b274a66;
+  --scene-image:url('/themes/sakura.webp'); --scene-glass:#fff9fce8;
+  --scene-veil:#f3e7ef24; --scene-scrim:#f7edf25e; --scene-ink:#fff5fb;
+}
+html[data-palette="neon"] {
+  color-scheme:dark;
+  --bg:#080f23; --bg-tint-1:#132d46; --bg-tint-2:#221b3e;
+  --surface:#111d33; --surface-2:#18283f; --surface-3:#233753;
+  --line:#30455f; --line-strong:#4e6f8b; --text:#e7f5fc; --muted:#a1b8cc;
+  --accent:#79e6f1; --accent-2:#d7a1f4; --accent-contrast:#06252d;
+  --accent-soft:#79e6f115; --ring:#79e6f166; --glow:#58dceb30;
+  --nav-bg:#090f22; --nav-bg-2:#111b34; --nav-active:#19364a; --nav-text:#c2d9eb;
+  --metric-cpu:#79d7ef; --metric-memory:#c2a2f4; --success:#85dfb6; --warning:#ebc78a; --danger:#f39cb3;
+  --shadow-card:0 10px 35px -22px #0009,inset 0 1px 0 #85e8ff0a;
+  --shadow-float:0 22px 65px -15px #000b;
+  --scene-image:url('/themes/neon.webp'); --scene-glass:#101c32e8;
+  --scene-veil:#060c2310; --scene-scrim:#080f2338; --scene-ink:#defcff;
+}
+html[data-palette="lunar"] {
+  color-scheme:dark;
+  --bg:#10152c; --bg-tint-1:#252e53; --bg-tint-2:#302b4a;
+  --surface:#1a223e; --surface-2:#252e4b; --surface-3:#333d5d;
+  --line:#414a6a; --line-strong:#646b8d; --text:#f0edf7; --muted:#b6b9d2;
+  --accent:#d9c391; --accent-2:#b8b0f1; --accent-contrast:#28202e;
+  --accent-soft:#d9c39116; --ring:#d9c39166; --glow:#dbc49028;
+  --nav-bg:#12162b; --nav-bg-2:#1a2039; --nav-active:#38354b; --nav-text:#ddd7e9;
+  --metric-cpu:#a0bff3; --metric-memory:#c4b1ef; --success:#9edcc1; --warning:#e7c98c; --danger:#f1a0b1;
+  --shadow-card:0 10px 35px -22px #0009,inset 0 1px 0 #e4d3a80e;
+  --shadow-float:0 22px 65px -15px #000b;
+  --scene-image:url('/themes/lunar.webp'); --scene-glass:#18203be8;
+  --scene-veil:#10132d10; --scene-scrim:#10152c38; --scene-ink:#f8edcf;
+}
+
+.anime-backdrop { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; isolation:isolate; }
+.anime-wallpaper { position:absolute; inset:0; background:var(--scene-image) right top / cover no-repeat; }
+.anime-atmosphere { position:absolute; inset:0; background:linear-gradient(90deg,var(--scene-scrim),var(--scene-veil) 65%,transparent); }
+.anime-signature { position:absolute; right:24px; bottom:28px; display:grid; gap:8px; width:180px; color:var(--scene-ink); text-shadow:0 2px 12px #0008; }
+.anime-signature > span { font-size:8px; letter-spacing:.2em; opacity:.85; }
+.anime-signature > strong { font-size:11px; letter-spacing:.15em; font-weight:500; line-height:1.8; }
+.anime-particles { position:absolute; inset:0; }
+.anime-particles i { position:absolute; left:calc(12% + var(--particle) * 8%); top:calc(7% + var(--particle) * 7%); width:3px; height:3px; border-radius:50%; background:var(--accent); opacity:0; animation:anime-drift calc(10s + var(--particle) * 1s) calc(var(--particle) * -2s) ease-in-out infinite; }
+html[data-palette="sakura"] .anime-particles i { width:7px; height:5px; border-radius:80% 0 80% 30%; background:#cf709b; }
+html[data-palette="neon"] .anime-particles i { border-radius:1px; box-shadow:0 0 10px #79e6f1; }
+html[data-palette="lunar"] .anime-particles i { box-shadow:0 0 7px #fff0ba; }
+@keyframes anime-drift { 0%,100% {opacity:0;transform:translate3d(0,12px,0) rotate(0deg)} 40% {opacity:.6} 65% {opacity:.35;transform:translate3d(12px,-22px,0) rotate(60deg)} }
+
+
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .auth-screen { position:relative; z-index:1; background:transparent; }
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .auth-modal { background:var(--scene-glass); backdrop-filter:blur(16px); }
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) :is(.panel,.mission-card,.mission-counts,.system-observatory) { background:var(--scene-glass); backdrop-filter:blur(12px); box-shadow:var(--shadow-card); }
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .sidebar { background:linear-gradient(180deg,color-mix(in srgb,var(--nav-bg) 95%,transparent),color-mix(in srgb,var(--nav-bg-2) 95%,transparent)); backdrop-filter:blur(16px); }
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .workspace-bar { border-color:var(--line); }
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .mission-intro > span { letter-spacing:.2em; }
+html[data-palette="neon"] .nav.active { box-shadow:inset 0 0 0 1px #79e6f138,0 0 24px -14px #79e6f1; }
+html[data-palette="lunar"] .mission-kicker { color:var(--accent); letter-spacing:.18em; }
+
+.anime-theme-group > h4 { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px; }
+.anime-theme-group > h4 > small { font-size:10px; font-weight:400; color:var(--muted); }
+.anime-theme-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.anime-theme-grid > button { position:relative; display:grid; min-width:0; text-align:left; overflow:hidden; padding:0; border:1px solid var(--line); border-radius:12px; background:var(--surface-2); color:var(--text); cursor:pointer; transition:border-color .2s,box-shadow .2s; }
+.anime-theme-grid > button > img { width:100%; height:auto; aspect-ratio:16/9; display:block; object-fit:cover; }
+.anime-theme-grid > button:hover { border-color:var(--accent); }
+.anime-theme-grid > button.selected { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+.anime-theme-card-label { display:grid; gap:5px; padding:11px 10px; }
+.anime-theme-card-label > strong { font-size:12px; font-weight:600; }
+.anime-theme-card-label > small { font-size:9px; color:var(--muted); }
+.anime-theme-selected { position:absolute; top:7px; right:7px; display:grid; place-items:center; width:20px; height:20px; border-radius:50%; background:var(--accent); color:var(--accent-contrast); box-shadow:0 2px 8px #0003; }
+
+/* Leave the portrait visible beside the workspace on larger screens. */
+@media(min-width:1360px) {
+  html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) main { padding-left:32px; padding-right:clamp(220px,17vw,340px); }
+}
+@media(min-width:1520px) {
+  html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) main { padding-right:clamp(300px,22vw,420px); }
+}
+@media(max-width:1359px) {
+  .anime-signature { display:none; }
+  .anime-wallpaper { opacity:.65; }
+
+
+
+}
+@media(max-width:760px) {
+  .anime-wallpaper { opacity:.3; }
+  .anime-atmosphere { background:color-mix(in srgb,var(--bg) 40%,transparent); }
+
+  .anime-particles { display:none; }
+  .anime-theme-grid { grid-template-columns:1fr; }
+  .anime-theme-grid > button { grid-template-columns:112px minmax(0,1fr); align-items:center; }
+  .anime-theme-grid > button > img { height:76px; aspect-ratio:auto; object-position:right center; }
+  .anime-theme-card-label { padding:10px 14px; }
+  .anime-theme-selected { top:5px; right:5px; width:17px; height:17px; font-size:10px; }
+  html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) :is(.panel,.mission-card,.mission-counts,.system-observatory) { backdrop-filter:none; }
+}
+html[data-motion="reduced"] .anime-particles { display:none; }
+@media(prefers-reduced-motion:reduce) { html:not([data-motion="full"]) .anime-particles { display:none; } }
+/* Theme motifs extend into navigation, controls and workspace surfaces. */
+.theme-emblem{display:block;width:20px;height:20px;flex:none}
+.brand-theme{display:flex;align-items:center;gap:6px;margin-top:5px;font-size:10px;color:var(--nav-text);opacity:.86}
+.brand-theme .theme-emblem{width:12px;height:12px;color:var(--accent)}
+.sidebar-ornament{position:absolute;right:18px;bottom:100px;width:112px;height:112px;color:var(--accent);opacity:.065;pointer-events:none;transform:rotate(-15deg)}
+html[data-palette] .nav > .nav-theme-emblem{width:16px;height:16px;margin-left:auto;color:var(--accent);opacity:.75;transform:none}
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .brand small{display:none}
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .sidebar{border-right-color:color-mix(in srgb,var(--accent) 28%,var(--line))}
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) :is(.panel-head h2,.mission-card-head h2)::after{content:'';display:inline-block;vertical-align:middle;width:18px;height:18px;margin-left:9px;opacity:.65;background:var(--theme-motif) center/contain no-repeat;pointer-events:none}
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .primary{position:relative;overflow:hidden;isolation:isolate;border-color:color-mix(in srgb,var(--accent) 75%,var(--accent-2));transition:box-shadow .25s,border-color .2s,transform .16s,background .2s}
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) :is(.secondary,.icon-btn){border-color:color-mix(in srgb,var(--accent) 17%,var(--line))}
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) :is(.modal,.settings-drawer){border-top:1px solid color-mix(in srgb,var(--accent) 45%,var(--line))}
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .brand-logo{border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);box-shadow:0 0 18px -10px var(--accent)}
+
+/* Sakura: petal silhouettes, rose-gold edges and soft rounded controls. */
+html[data-palette="sakura"]{--theme-motif:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='%23b9628b'%3E%3Cellipse cx='16' cy='9' rx='4.5' ry='7'/%3E%3Cellipse cx='16' cy='9' rx='4.5' ry='7' transform='rotate(72 16 16)'/%3E%3Cellipse cx='16' cy='9' rx='4.5' ry='7' transform='rotate(144 16 16)'/%3E%3Cellipse cx='16' cy='9' rx='4.5' ry='7' transform='rotate(216 16 16)'/%3E%3Cellipse cx='16' cy='9' rx='4.5' ry='7' transform='rotate(288 16 16)'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23ffe8f2'/%3E%3C/svg%3E")}
+html[data-palette="sakura"] .sidebar{background:radial-gradient(ellipse at 90% 0,#89506e55,transparent 55%),linear-gradient(180deg,#36273bf5,#50374cf5)}
+html[data-palette="sakura"] .nav{border-radius:15px 6px 15px 6px}
+html[data-palette="sakura"] .nav.active{background:linear-gradient(105deg,#9e62854f,#73445c75);box-shadow:inset 0 0 0 1px #e2aac344}
+html[data-palette="sakura"] :is(.primary,.secondary){border-radius:14px 7px 14px 7px}
+html[data-palette="sakura"] .primary{background:linear-gradient(115deg,#ae5179,#8e486e);color:#fff;box-shadow:inset 0 1px 0 #ffffff40,0 6px 18px -9px #a84d7480}
+html[data-palette="sakura"] .primary:hover:not(:disabled){background:linear-gradient(115deg,#bb5b85,#984b76);box-shadow:0 8px 22px -10px #a84d7499}
+html[data-palette="sakura"] :is(.panel,.mission-card,.mission-counts){border-radius:20px;border-color:#d9b5cc}
+html[data-palette="sakura"] .panel-head{background:linear-gradient(100deg,#f6e6efc9,#fff9fc80)}
+html[data-palette="sakura"] :is(.host-icon,.count-symbol,.settings-title-icon){border-radius:13px 6px 13px 6px}
+html[data-palette="sakura"] .settings-drawer-header{background:radial-gradient(ellipse at top right,#f0d9ec80,transparent 70%)}
+
+/* Neon: circuit geometry, luminous edge accents and a finite hover scan. */
+html[data-palette="neon"]{--theme-motif:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='none' stroke='%2379e6f1' stroke-width='1.6'%3E%3Cpath d='M2 7h10l5 5h13M2 25h10l5-5h13M8 7v18M23 12v8'/%3E%3Ccircle cx='8' cy='7' r='2.5' fill='%23111d33'/%3E%3Ccircle cx='23' cy='20' r='2.5' fill='%23111d33'/%3E%3C/svg%3E")}
+html[data-palette="neon"] .sidebar{background:repeating-linear-gradient(90deg,transparent 0 47px,#79e6f106 48px,transparent 49px),linear-gradient(180deg,#081123f5,#151a35f5)}
+html[data-palette="neon"] .nav{border-radius:4px 11px 4px 11px}
+html[data-palette="neon"] .nav.active{background:linear-gradient(100deg,#174459d9,#212d4de6);box-shadow:inset 2px 0 #79e6f1,inset -1px 0 #d7a1f16b,0 0 20px -12px #79e6f1}
+html[data-palette="neon"] :is(.primary,.secondary){border-radius:5px 10px 5px 10px}
+html[data-palette="neon"] .primary{background:linear-gradient(110deg,#79e6f1,#9cd4f0);color:#06252d;box-shadow:inset 0 1px 0 #e0fdff80,0 0 20px -12px #79e6f1}
+html[data-palette="neon"] .primary::after{content:'';position:absolute;inset:-50% auto -50% -60%;width:30%;transform:skewX(-25deg);background:linear-gradient(90deg,transparent,#fff6,transparent);pointer-events:none}
+html[data-palette="neon"] .primary:hover:not(:disabled)::after{animation:neon-control-scan .6s ease-out both}
+@keyframes neon-control-scan{to{left:140%}}
+html[data-palette="neon"] .panel-head{background:linear-gradient(90deg,#1c3546b3,#111d33);border-color:#79e6f130}
+html[data-palette="neon"] .panel{border-radius:8px 18px 8px 18px}
+html[data-palette="neon"] :is(.host-icon,.count-symbol,.settings-title-icon){border-radius:5px 9px 5px 9px;box-shadow:inset 0 0 0 1px #79e6f111}
+html[data-palette="neon"] .settings-drawer-header{background:linear-gradient(120deg,#15344880,transparent 75%)}
+
+/* Lunar: constellation engraving, indigo velvet and antique-gold highlights. */
+html[data-palette="lunar"]{--theme-motif:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='%23d9c391'%3E%3Cpath d='M21 3a13 13 0 1 0 8 20A12 12 0 0 1 21 3Z'/%3E%3Cpath d='m24 4 1.2 3.8L29 9l-3.8 1.2L24 14l-1.2-3.8L19 9l3.8-1.2Z'/%3E%3C/svg%3E")}
+html[data-palette="lunar"] .sidebar{background:radial-gradient(circle at 30% 22%,#d9c39113 0 1px,transparent 2px) 0 0/45px 63px,linear-gradient(180deg,#14182ef5,#252441f5)}
+html[data-palette="lunar"] .nav.active{background:linear-gradient(105deg,#574b5199,#36344a);box-shadow:inset 0 0 0 1px #d9c39150,inset 0 1px 0 #e5cf9d18}
+html[data-palette="lunar"] .primary{background:linear-gradient(120deg,#e4d1a5,#c7ad76);color:#28202e;box-shadow:inset 0 1px 0 #fff5d999,0 6px 20px -12px #d9c391aa;border-radius:11px}
+html[data-palette="lunar"] .secondary{border-radius:11px;background:linear-gradient(130deg,#2b324c,#252e4b)}
+html[data-palette="lunar"] .panel{border-color:#d9c39150;box-shadow:inset 0 1px 0 #d9c39112,var(--shadow-card)}
+html[data-palette="lunar"] .panel-head{background:linear-gradient(100deg,#3a365033,#1a223e);border-color:#d9c39130}
+html[data-palette="lunar"] :is(.host-icon,.count-symbol,.settings-title-icon){border-radius:50%;border-color:color-mix(in srgb,var(--accent) 30%,var(--line))}
+html[data-palette="lunar"] .settings-drawer-header{background:radial-gradient(ellipse at top right,#d9c39116,transparent 65%)}
+@media(max-width:760px){.brand-theme,.sidebar-ornament,html[data-palette] .nav>.nav-theme-emblem{display:none}.theme-emblem{width:16px;height:16px}}
+/* Small theme responses belong to the controls, never obstruct their labels. */
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .primary::before{content:'';position:absolute;right:5px;top:2px;width:30px;height:30px;background:var(--theme-motif) center/contain no-repeat;opacity:.12;pointer-events:none;transition:transform .4s var(--ease),opacity .3s}
+html[data-palette="sakura"] .primary::before{filter:brightness(0) invert(1);transform:rotate(-18deg)}
+html[data-palette="sakura"] .primary:hover:not(:disabled)::before{transform:rotate(28deg) scale(1.1);opacity:.24}
+html[data-palette="sakura"] .nav:hover .theme-emblem{transform:rotate(18deg);transition:transform .35s}
+html[data-palette="neon"] .primary::before{filter:brightness(.15)}
+html[data-palette="neon"] .primary:hover:not(:disabled)::before{transform:translateX(-5px);opacity:.22}
+html[data-palette="lunar"] .primary::before{filter:brightness(.25)}
+html[data-palette="lunar"] .primary:hover:not(:disabled)::before{transform:rotate(-14deg);opacity:.22}
+html[data-palette="lunar"] .nav.active>.theme-emblem{filter:drop-shadow(0 0 4px #d9c39140)}
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .traffic-summary-strip{background:var(--scene-glass);border-color:color-mix(in srgb,var(--accent) 25%,var(--line));backdrop-filter:blur(10px)}

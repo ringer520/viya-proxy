@@ -3,7 +3,7 @@
       (function () {
         try {
           var choice = localStorage.getItem("viya-theme") || "system";
-          var palettes = ["light", "dark", "aurora", "ember", "cyber"];
+          var palettes = ["light", "dark", "aurora", "ember", "cyber", "sakura", "neon", "lunar"];
           var systemDark = window.matchMedia("(prefers-color-scheme: dark)")
             .matches;
           var palette =
@@ -16,7 +16,8 @@
                 : "light";
           var root = document.documentElement;
           root.dataset.palette = palette;
-          root.dataset.theme = palette === "light" ? "light" : "dark";
+          root.dataset.theme = palette === "light" || palette === "sakura" ? "light" : "dark";
+          root.dataset.motion = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "reduced" : "full";
           root.dataset.density =
             localStorage.getItem("viya-compact-mode") === "true"
               ? "compact"

@@ -19,12 +19,23 @@ if [ "$(id -u)" -ne 0 ]; then
   # Re-fetch under sudo: this script may itself be arriving through a pipe,
   # whose stdin cannot safely be handed to a second shell after self-copying.
   exec sudo env VERSION="${VERSION:-}" VIYA_INSTALL_LISTEN="${VIYA_INSTALL_LISTEN:-}" \
-    sh -c 'curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh'
+    sh -c 'set -eu; task=$(mktemp -d); trap "rm -rf \"$task\"" EXIT; if command -v curl >/dev/null 2>&1; then curl -fL --retry 2 --connect-timeout 15 --max-time 120 https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh -o "$task/install.sh"; else wget -O "$task/install.sh" https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh; fi; sh "$task/install.sh"'
 fi
 
 if [ "$(uname -s)" != "Linux" ]; then
   echo "Error: Viya supports Linux only." >&2
   exit 1
+fi
+
+# OpenWrt uses procd and its persistent-storage installer.
+if [ -r /etc/openwrt_release ]; then
+  stage=$(mktemp -d /tmp/viya-bootstrap.XXXXXX)
+  trap 'rm -rf "$stage"' EXIT
+  if command -v curl >/dev/null 2>&1; then curl -fL --retry 2 --connect-timeout 15 --max-time 120 https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh -o "$stage/install.sh"
+  elif command -v wget >/dev/null 2>&1; then wget -O "$stage/install.sh" https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
+  else echo 'Install curl or wget first.' >&2; exit 1; fi
+  sh "$stage/install.sh"
+  exit $?
 fi
 
 # The bundled installer provisions a systemd unit. On procd (OpenWrt) or other
@@ -46,7 +57,7 @@ esac
 REPO="ringer520/viya-proxy"
 PKG="viya-linux-$ARCH"
 TARBALL="$PKG.tar.gz"
-# Allow pinning a version: VERSION=v1.2.3 curl ... | sudo sh
+# Pin a version with: curl ... | VERSION=v1.2.3 sh
 if [ -n "${VERSION:-}" ]; then
   RELEASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
 else
@@ -57,9 +68,9 @@ CHECKSUM_URL="${RELEASE_URL}/sha256sums.txt"
 
 download() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --progress-bar "$1" -o "$2"
+    curl -fL --retry 2 --connect-timeout 15 --max-time 600 --progress-bar "$1" -o "$2"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q "$1" -O "$2"
+    wget "$1" -O "$2"
   else
     echo "Error: neither curl nor wget is available. Install one and retry." >&2
     exit 1
@@ -124,19 +135,19 @@ have tar || { echo "Error: tar is required." >&2; exit 1; }
 have sha256sum || { echo "Error: sha256sum is required to verify the release archive." >&2; exit 1; }
 have python3 || { echo "Error: python3 is required for safe database backup and migration." >&2; exit 1; }
 
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+TASK_TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TASK_TMPDIR"' EXIT
 
 echo "==> Downloading Viya from ${BASE_URL}"
-download "$BASE_URL" "$TMPDIR/$TARBALL"
-download "$CHECKSUM_URL" "$TMPDIR/sha256sums.txt"
+download "$BASE_URL" "$TASK_TMPDIR/$TARBALL"
+download "$CHECKSUM_URL" "$TASK_TMPDIR/sha256sums.txt"
 
-EXPECTED=$(awk -v file="$TARBALL" '$2 == file { print $1; exit }' "$TMPDIR/sha256sums.txt")
+EXPECTED=$(awk -v file="$TARBALL" '$2 == file { print $1; exit }' "$TASK_TMPDIR/sha256sums.txt")
 if [ "${#EXPECTED}" -ne 64 ]; then
   echo "Error: no valid SHA-256 entry found for $TARBALL." >&2
   exit 1
 fi
-ACTUAL=$(sha256sum "$TMPDIR/$TARBALL" | awk '{print $1}')
+ACTUAL=$(sha256sum "$TASK_TMPDIR/$TARBALL" | awk '{print $1}')
 if [ "$ACTUAL" != "$EXPECTED" ]; then
   echo "Error: release archive checksum mismatch; refusing to install." >&2
   exit 1
@@ -144,14 +155,14 @@ fi
 echo "==> Release archive checksum verified."
 
 echo "==> Extracting $TARBALL"
-tar -xzf "$TMPDIR/$TARBALL" -C "$TMPDIR"
-if [ ! -f "$TMPDIR/$PKG/deploy/install-debian.sh" ] || [ ! -x "$TMPDIR/$PKG/bin/viya-linux-$ARCH" ] || [ ! -x "$TMPDIR/$PKG/bin/caddy-linux-$ARCH" ]; then
+tar -xzf "$TASK_TMPDIR/$TARBALL" -C "$TASK_TMPDIR"
+if [ ! -f "$TASK_TMPDIR/$PKG/deploy/install-debian.sh" ] || [ ! -x "$TASK_TMPDIR/$PKG/bin/viya-linux-$ARCH" ] || [ ! -x "$TASK_TMPDIR/$PKG/bin/caddy-linux-$ARCH" ]; then
   echo "Error: release archive is incomplete or does not match architecture $ARCH." >&2
   exit 1
 fi
 
 echo "==> Installing"
-sh "$TMPDIR/$PKG/deploy/install-debian.sh"
+sh "$TASK_TMPDIR/$PKG/deploy/install-debian.sh"
 
 echo
 echo "==> Viya installed successfully."

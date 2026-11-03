@@ -190,7 +190,7 @@ func validateBan(input *IPBan) error {
 }
 func (a *App) saveIPBan(w http.ResponseWriter, r *http.Request) {
 	var input IPBan
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&input) != nil {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&input) != nil {
 		fail(w, 400, errors.New("封禁表单格式无效"))
 		return
 	}
@@ -199,10 +199,20 @@ func (a *App) saveIPBan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var exists int
-	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM proxy_hosts WHERE domain=?`, input.Domain).Scan(&exists); err != nil || exists == 0 {
+	if a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM proxy_hosts WHERE domain=?`, input.Domain).Scan(&exists) != nil || exists == 0 {
 		fail(w, 400, errors.New("所选站点不存在"))
 		return
 	}
+	if a.pendingAccessConfirmation(r.Context()) != nil {
+		fail(w, 409, errors.New("请先确认或取消上一项面板访问限制"))
+		return
+	}
+	panel := a.panelDomain(r.Context(), input.Domain)
+	if (panel || banContainsIP(input, a.accessClientIP(r))) && !input.ConfirmRisk {
+		writeJSON(w, 409, map[string]any{"error": "此规则可能影响当前访问，请先预览并确认影响范围", "requires_preview": true})
+		return
+	}
+	var before *IPBan
 	id := int64(0)
 	if r.Method == http.MethodPut {
 		var err error
@@ -211,26 +221,46 @@ func (a *App) saveIPBan(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, errors.New("无效封禁编号"))
 			return
 		}
-		res, err := a.db.ExecContext(r.Context(), `UPDATE ip_bans SET domain=?,ip=?,reason=?,expires_at=?,source='manual' WHERE id=?`, input.Domain, input.IP, input.Reason, input.ExpiresAt, id)
+		before = &IPBan{}
+		err = a.db.QueryRowContext(r.Context(), `SELECT id,domain,ip,reason,expires_at,source FROM ip_bans WHERE id=?`, id).Scan(&before.ID, &before.Domain, &before.IP, &before.Reason, &before.ExpiresAt, &before.Source)
 		if err != nil {
-			fail(w, 409, errors.New("相同站点和 IP 的封禁已存在"))
+			fail(w, 404, errors.New("封禁记录不存在"))
 			return
 		}
-		n, _ := res.RowsAffected()
-		if n == 0 {
-			fail(w, 404, errors.New("封禁记录不存在或已到期"))
-			return
-		}
-	} else {
-		res, err := a.db.ExecContext(r.Context(), `INSERT INTO ip_bans(domain,ip,reason,expires_at,source) VALUES(?,?,?,?,'manual')`, input.Domain, input.IP, input.Reason, input.ExpiresAt)
-		if err != nil {
-			fail(w, 409, errors.New("相同站点和 IP 的封禁已存在，请编辑已有记录"))
-			return
-		}
-		id, _ = res.LastInsertId()
 	}
-	if err := a.apply(r.Context()); err != nil {
-		writeJSON(w, 502, map[string]any{"id": id, "error": "封禁已保存，但 Caddy 未应用，请重新应用配置"})
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	defer tx.Rollback()
+	if before != nil {
+		_, err = tx.ExecContext(r.Context(), `UPDATE ip_bans SET domain=?,ip=?,reason=?,expires_at=?,source='manual' WHERE id=?`, input.Domain, input.IP, input.Reason, input.ExpiresAt, id)
+	} else {
+		var result sqlResult
+		result, err = tx.ExecContext(r.Context(), `INSERT INTO ip_bans(domain,ip,reason,expires_at,source) VALUES(?,?,?,?,'manual')`, input.Domain, input.IP, input.Reason, input.ExpiresAt)
+		if err == nil {
+			id, _ = result.LastInsertId()
+		}
+	}
+	if err != nil {
+		fail(w, 409, errors.New("相同站点和 IP 的规则已存在，请编辑已有记录"))
+		return
+	}
+	if panel {
+		raw, _ := json.Marshal(before)
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO access_rule_guards(id,ban_id,before_json,deadline,domain) VALUES(1,?,?,?,?)`, id, string(raw), time.Now().Add(120*time.Second).Unix(), input.Domain)
+		if err != nil {
+			fail(w, 500, err)
+			return
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		fail(w, 500, err)
+		return
+	}
+	if err = a.apply(r.Context()); err != nil {
+		writeJSON(w, 502, map[string]any{"id": id, "error": "访问限制已保存但未生效，请重试应用或等待恢复", "saved": true, "applied": false})
 		return
 	}
 	input.ID = id

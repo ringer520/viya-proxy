@@ -1,15 +1,21 @@
 <script setup lang="ts">
+import {ref,watch} from "vue";
+import {apiFetch} from "../api";
+import {csrfToken} from "../composables/useState";
 import { t } from "../i18n";
 import {
   l4EditingID,
   l4Error,
   l4Form,
+  l4PartialSave,
   saveL4,
   showL4,
 } from "../composables/useNetwork";
 import { applyRetryVisible, saving } from "../composables/useState";
 
 import { retryApply } from "../composables/useApply";
+const checkBusy=ref(false),checkNote=ref('');watch(l4Form,()=>checkNote.value='',{deep:true});
+async function checkPort(){checkBusy.value=true;checkNote.value='';try{const r=await apiFetch('/api/v1/layer4-rules/check',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken.value},body:JSON.stringify({...l4Form.value,id:l4EditingID.value||0})});const d=await r.json();if(!r.ok)throw Error(d.error);checkNote.value=t(d.message)}catch(e){checkNote.value=e instanceof Error?t(e.message):t('检查失败')}finally{checkBusy.value=false}}
 </script>
 
 <template>
@@ -25,6 +31,7 @@ import { retryApply } from "../composables/useApply";
         <button
           type="button"
           class="icon-btn"
+          :disabled="saving"
           :aria-label="t('关闭')"
           @click="showL4 = false"
         >
@@ -76,7 +83,8 @@ import { retryApply } from "../composables/useApply";
           )
         }}
       </p>
-      <p v-if="l4Error" class="error">{{ l4Error }}</p>
+      <button type="button" class="secondary" :disabled="checkBusy||saving" @click="checkPort">{{checkBusy?t("正在检查…"):t("检查监听端口")}}</button><p v-if="checkNote" class="op-callout" role="status">{{checkNote}}</p>
+<p v-if="l4Error" class="error" role="alert">{{ l4Error }}</p>
       <button
         v-if="applyRetryVisible"
         type="button"
@@ -87,9 +95,9 @@ import { retryApply } from "../composables/useApply";
         {{ t("重新应用到 Caddy") }}
       </button>
       <div class="modal-actions">
-        <button type="button" class="secondary" @click="showL4 = false">
+        <button type="button" class="secondary" :disabled="saving" @click="showL4 = false">
           {{ t("取消") }}</button
-        ><button class="primary" :disabled="saving">
+        ><button class="primary" :disabled="saving || (l4PartialSave && l4EditingID === null)">
           {{ saving ? t("应用中…") : t("保存并应用") }}
         </button>
       </div>

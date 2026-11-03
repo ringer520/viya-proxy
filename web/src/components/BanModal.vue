@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { t } from "../i18n";
 import {
-  banError,
+  banError,banPreview,banRiskConfirmed,
   banForm,
   banKind,
   editingBanID,
@@ -75,7 +75,8 @@ import { retryApply } from "../composables/useApply";
           )
         }}
       </p>
-      <p v-if="banError" class="error">{{ banError }}</p>
+      <section v-if="banPreview" class="op-callout" :class="{warning:banPreview.panel_domain||banPreview.client_blocked}"><strong>{{t('影响预览')}} · {{banPreview.domain}}</strong><p>{{t('当前访问来源')}}：<code>{{banPreview.client_ip}}</code> · {{banPreview.client_blocked?t('会命中此规则'):t('未命中此规则')}}</p><p>{{t(banPreview.message)}}</p><p v-if="banPreview.panel_domain">{{t('此站点指向面板自身。保存后需在 120 秒内从该域名确认可访问，否则自动恢复原规则。可从局域网入口取消修改。')}}</p><label class="enabled-label"><input v-model="banRiskConfirmed" type="checkbox"/>{{t('我已核对访问来源和影响范围')}}</label></section>
+      <p v-if="banError" class="error" role="alert">{{ banError }}</p>
       <button
         v-if="applyRetryVisible"
         type="button"
@@ -88,7 +89,7 @@ import { retryApply } from "../composables/useApply";
         <button type="button" class="secondary" @click="showBan = false">
           {{ t("取消") }}</button
         ><button class="primary" :disabled="saving">
-          {{ saving ? t("应用中…") : t("保存并应用") }}
+          {{saving?t("处理中…"):!banPreview?t("预览影响"):t("保存并应用")}}
         </button>
       </div>
     </form>

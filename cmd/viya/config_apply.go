@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -11,16 +13,23 @@ import (
 )
 
 func (a *App) applyLocked(ctx context.Context) (result error) {
+	// Once a mutation is saved, finish or recover independently of the browser.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
+	defer cancel()
 	a.setApplyStage("compiling", "正在生成配置")
 	defer func() {
 		if result != nil {
-			a.setApplyStage("failed", "应用失败，当前引擎继续使用原配置；请查看配置历史")
+			a.setApplyStage("failed", "存在未生效的配置，请重试应用或在配置历史中恢复")
+			if body, err := a.compileConfig(ctx); err == nil {
+				a.journalApplication(body, false)
+			}
 		}
 	}()
 	body, err := a.compileConfig(ctx)
 	if err != nil {
 		return err
 	}
+	a.journalApplication(body, false)
 	a.setApplyStage("validating", "正在校验 Caddy 配置")
 	configFile, err := os.CreateTemp("", "viya-caddy-*.json")
 	if err != nil {
@@ -45,6 +54,20 @@ func (a *App) applyLocked(ctx context.Context) (result error) {
 		return cause
 	}
 	a.setApplyStage("applying", "正在平滑加载配置")
+	previous, err := a.livePolicyConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot snapshot running Caddy configuration; apply cancelled: %w", err)
+	}
+	loaded := false
+	defer func() {
+		if result != nil && !loaded {
+			recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 25*time.Second)
+			defer recoveryCancel()
+			if err := a.restoreLivePolicyConfig(recoveryCtx, previous); err != nil {
+				result = fmt.Errorf("application failed and runtime recovery could not be confirmed: %w", err)
+			}
+		}
+	}()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(a.adminURL, "/")+"/load", strings.NewReader(string(body)))
 	if err != nil {
 		return err
@@ -58,15 +81,24 @@ func (a *App) applyLocked(ctx context.Context) (result error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
+		// Drain bounded error output for connection reuse, without exposing secrets.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 		cause := fmt.Errorf("Caddy returned %s", resp.Status)
 		a.recordRevision(ctx, body, "failed", cause)
 		return cause
 	}
+	loaded = true
+	a.journalApplication(body, true)
+	if err := a.cleanupDeletedSites(ctx); err != nil {
+		slog.Warn("deferred static file cleanup failed; will retry after next apply", "error", err)
+	}
 	a.recordRevision(ctx, body, "applied", nil)
 	if err := a.saveCheckpoint(ctx, body); err != nil {
 		a.setApplyStage("applied-warning", "配置已生效，但恢复点保存失败")
+		a.journalApplication(body, true)
 		return nil
 	}
 	a.setApplyStage("applied", "配置已生效")
+	a.journalApplication(body, true)
 	return nil
 }

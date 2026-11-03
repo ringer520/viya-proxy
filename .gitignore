@@ -19,3 +19,14 @@ bootstrap-caddy.json
 docs/code-review*.md
 docs/source-review*.md
 docs/ui-usability-review*.md
+
+# Local verification and build artifacts
+/output/
+/.playwright-cli/
+/dist/
+__pycache__/
+*.pyc
+
+# Local implementation review notes
+docs/稳定精简改造.md
+docs/模块优化与验证.md

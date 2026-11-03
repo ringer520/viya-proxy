@@ -9,7 +9,6 @@ import { emptySecurityHeaders, type SitePolicy } from "../policy";
 import type { Host, SiteGroup, WebListener } from "../types";
 import { applyRetryVisible, confirmDeletion, csrfToken, deleteConfirmOptionResult, error, guardWrite, hosts, listSearch, matchesSearch, matchesStatus, saving } from "./useState";
 import { load, performDelete } from "./useRefresh";
-import { resolveSitePolicy } from "./useSecurity";
 import { ArrowRight, Folder, Globe2 } from "@lucide/vue";
 
 // The three site kinds, each with a stable theme-aware accent color so the
@@ -19,21 +18,21 @@ export const siteTypeOptions = [
     value: "proxy",
     label: t("反向代理"),
     desc: t("转发到后端服务"),
-    color: "#3b82f6",
+    color: "var(--accent)",
     icon: Globe2,
   },
   {
     value: "static",
     label: t("静态站点"),
     desc: t("托管静态文件"),
-    color: "#14b8a6",
+    color: "var(--accent-2)",
     icon: Folder,
   },
   {
     value: "redirect",
     label: t("URL 重定向"),
     desc: t("跳转到其他地址"),
-    color: "#f97316",
+    color: "var(--warning)",
     icon: ArrowRight,
   },
 ] as const;
@@ -41,6 +40,7 @@ export const siteTypeOptions = [
 // ---- enable/disable toggle ----
 export const hostToggling = ref<Record<number, boolean>>({});
 export async function toggleHost(host: Host) {
+  if (!guardWrite()) return;
   if (hostToggling.value[host.id]) return;
   hostToggling.value[host.id] = true;
   try {
@@ -466,8 +466,6 @@ export const form = ref({
   rate_limit_window: "1s",
   type: "proxy",
   root_path: "",
-  spa_fallback: false,
-  browse: false,
   redirect_target: "",
   redirect_status: 301,
   redirect_keep_path: true,
@@ -481,6 +479,9 @@ export const form = ref({
 // the whole access-control panel.
 export const advancedSummary = computed(() => {
   const parts: string[] = [];
+  if (form.value.security_headers.mode === 'follow' || form.value.security_headers.inherit) parts.push(t('跟随域名策略'));
+  else if (form.value.security_headers.mode === 'none') parts.push(t('不使用默认策略'));
+  else parts.push(t('独立配置'));
   if (form.value.security_headers.enabled) parts.push(t("安全响应头"));
   if (form.value.basic_auth_enabled) parts.push("Basic Auth");
   if (Object.keys(form.value.custom_headers || {}).length) parts.push(t("请求头"));
@@ -506,6 +507,7 @@ export const siteTypeHint = computed(() => {
 // the policy editor component expects.
 export const siteFormPolicy = computed<SitePolicy>({
   get: () => ({
+    mode: form.value.security_headers.mode,
     enabled: form.value.security_headers.enabled,
     inherit: form.value.security_headers.inherit,
     frame_options: form.value.security_headers.frame_options,
@@ -527,6 +529,7 @@ export const siteFormPolicy = computed<SitePolicy>({
   set: (value) => {
     form.value.security_headers = {
       ...form.value.security_headers,
+      mode: value.mode,
       enabled: value.enabled,
       inherit: value.inherit,
       frame_options: value.frame_options,
@@ -683,8 +686,6 @@ export function openCreate(parentDomain?: string) {
     rate_limit_window: "1s",
     type: "proxy",
     root_path: "",
-    spa_fallback: false,
-    browse: false,
     redirect_target: "",
     redirect_status: 301,
     redirect_keep_path: true,
@@ -693,47 +694,11 @@ export function openCreate(parentDomain?: string) {
     allowed_methods: [] as string[],
     hide_server: false,
   };
-  if (domainParent.value) {
-    const policy = resolveSitePolicy(domainParent.value);
-    if (policy.enabled) {
-      form.value.security_headers = {
-        enabled: true,
-        inherit: true,
-        frame_options: policy.frame_options,
-        nosniff: policy.nosniff,
-        hsts: policy.hsts,
-        referrer_policy: policy.referrer_policy,
-        csp: policy.csp,
-      };
-      if (policy.basic_auth_user) {
-        form.value.basic_auth_user = policy.basic_auth_user;
-      }
-      if (Object.keys(policy.custom_headers || {}).length) {
-        form.value.custom_headers = { ...policy.custom_headers };
-      }
-      if ((policy.ip_allowlist || []).length) {
-        form.value.ip_allowlist = [...policy.ip_allowlist];
-      }
-      if ((policy.ip_denylist || []).length) {
-        form.value.ip_denylist = [...policy.ip_denylist];
-      }
-      if (policy.rate_limit_requests) {
-        form.value.rate_limit_requests = policy.rate_limit_requests;
-        form.value.rate_limit_window = policy.rate_limit_window || "1s";
-      }
-      if (policy.max_body_bytes) {
-        form.value.max_body_bytes = policy.max_body_bytes;
-      }
-      if ((policy.allowed_methods || []).length) {
-        form.value.allowed_methods = [...policy.allowed_methods];
-      }
-      if (policy.hide_server) form.value.hide_server = true;
-    }
-  }
   error.value = "";
   show.value = true;
 }
 export function openEdit(host: Host) {
+  if (!guardWrite()) return;
   editingID.value = host.id;
   partialSave.value = false;
   advancedOpen.value =
@@ -770,14 +735,13 @@ export function openEdit(host: Host) {
     rate_limit_window: host.rate_limit_window || "1s",
     type: host.type || "proxy",
     root_path: host.root_path || "",
-    spa_fallback: !!host.spa_fallback,
-    browse: !!host.browse,
     redirect_target: host.redirect_target || "",
     redirect_status: host.redirect_status || 301,
     redirect_keep_path: host.redirect_keep_path !== false,
     security_headers: {
       ...emptySecurityHeaders(),
       ...(host.security_headers || {}),
+      mode: host.security_headers?.mode || (host.security_headers?.inherit ? "follow" : "custom"),
     },
     max_body_bytes: host.max_body_bytes || 0,
     allowed_methods: host.allowed_methods || [],
@@ -787,6 +751,7 @@ export function openEdit(host: Host) {
   show.value = true;
 }
 export function cloneHost(host: Host) {
+  if (!guardWrite()) return;
   const parent =
     siteRootDomains.value.find((domain) =>
       isWithinDomain(host.domain, domain),
@@ -831,14 +796,13 @@ export function cloneHost(host: Host) {
     rate_limit_window: host.rate_limit_window || "1s",
     type: host.type || "proxy",
     root_path: host.root_path || "",
-    spa_fallback: !!host.spa_fallback,
-    browse: !!host.browse,
     redirect_target: host.redirect_target || "",
     redirect_status: host.redirect_status || 301,
     redirect_keep_path: host.redirect_keep_path !== false,
     security_headers: {
       ...emptySecurityHeaders(),
       ...(host.security_headers || {}),
+      mode: host.security_headers?.mode || (host.security_headers?.inherit ? "follow" : "custom"),
     },
     max_body_bytes: host.max_body_bytes || 0,
     allowed_methods: host.allowed_methods || [],
@@ -894,8 +858,6 @@ export async function save() {
       domain: hostDomain,
       // These legacy fields remain in storage for import compatibility, but
       // the UI no longer exposes SPA fallback or public directory browsing.
-      spa_fallback: false,
-      browse: false,
       dns_provider_id:
         form.value.tls_mode === "dns-01" && form.value.dns_provider_id
           ? Number(form.value.dns_provider_id)
@@ -956,6 +918,7 @@ export async function save() {
   }
 }
 export async function remove(host: Host) {
+  if (!guardWrite()) return;
   const staticSite = host.type === "static";
   if (!(await confirmDeletion(
     tr`确认删除 Web 服务“${host.domain}”？`,

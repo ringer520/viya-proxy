@@ -10,9 +10,8 @@ import (
 )
 
 type siteMetadata struct {
-	Domain   string   `json:"domain"`
-	Favorite bool     `json:"favorite"`
-	Tags     []string `json:"tags"`
+	Domain string   `json:"domain"`
+	Tags   []string `json:"tags"`
 }
 
 func (a *App) attachSiteMetadata(ctx context.Context, hosts []Host) {
@@ -34,7 +33,6 @@ func (a *App) attachSiteMetadata(ctx context.Context, hosts []Host) {
 	for i := range hosts {
 		m := meta["site_meta:"+strconv.FormatInt(hosts[i].ID, 10)]
 		if m.Domain == hosts[i].Domain {
-			hosts[i].Favorite = m.Favorite
 			hosts[i].Tags = m.Tags
 		}
 	}

@@ -14,10 +14,19 @@ try {
     $tag = (git -C $repoRoot describe --tags --exact-match 2>$null)
     if ($tag) { $version = $tag.Trim() }
 } catch {}
-Write-Host "Building version: $version"
+$buildCommit = (git -C $repoRoot rev-parse HEAD).Trim()
+$buildTime = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+$sourceFiles = @((Get-ChildItem (Join-Path $repoRoot 'cmd'), (Join-Path $repoRoot 'internal/secretstore'), (Join-Path $repoRoot 'web/src'), (Join-Path $repoRoot 'web/public') -Recurse -File), (Get-Item (Join-Path $repoRoot 'go.mod')), (Get-Item (Join-Path $repoRoot 'web/pnpm-lock.yaml'))) | ForEach-Object { $_ } | Sort-Object FullName
+$sourceText = ($sourceFiles | ForEach-Object { $_.FullName.Substring($repoRoot.Length) + ':' + (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash }) -join "`n"
+$hasher = [System.Security.Cryptography.SHA256]::Create()
+$buildSource = [Convert]::ToHexString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($sourceText))).ToLowerInvariant()
+$hasher.Dispose()
+Write-Host "Building version: $version ($buildCommit, source $buildSource)"
 
 Push-Location $repoRoot
 try {
+    pnpm --dir web typecheck
+    if ($LASTEXITCODE -ne 0) { throw 'Vue typecheck failed.' }
     pnpm --dir web build
     if ($LASTEXITCODE -ne 0) { throw 'Vue production build failed.' }
 
@@ -27,7 +36,7 @@ try {
     try {
         $env:GOOS = 'linux'
         $env:GOARCH = 'amd64'
-        & $go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$version" -o (Join-Path $repoRoot 'bin/viya-linux-amd64') ./cmd/viya
+        & $go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$version -X main.buildCommit=$buildCommit -X main.buildTime=$buildTime -X main.buildSource=$buildSource" -o (Join-Path $repoRoot 'bin/viya-linux-amd64') ./cmd/viya
         if ($LASTEXITCODE -ne 0) { throw 'Linux Viya build failed.' }
 
         Push-Location (Join-Path $repoRoot 'build/caddy')

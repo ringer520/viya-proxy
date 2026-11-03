@@ -1410,10 +1410,10 @@ html[data-copy="compact"] .dependency-help > span {
 .advanced-chevron.expanded { transform:rotate(180deg); }
 .static-manage { width:100%;min-height:64px; }
 .group-security-btn { min-width:122px; }
-.add-subdomain-button { background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 4px 12px color-mix(in srgb,var(--accent) 23%,transparent); }
-.add-subdomain-button:hover { background:color-mix(in srgb,var(--accent) 88%,#000);color:#fff;transform:translateY(-1px); }
-html[data-palette] .secondary.add-subdomain-button { background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important;box-shadow:0 4px 12px color-mix(in srgb,var(--accent) 23%,transparent); }
-html[data-palette] .secondary.add-subdomain-button:hover:not(:disabled) { background:color-mix(in srgb,var(--accent) 88%,#000)!important;color:#fff!important; }
+.add-subdomain-button { background:var(--accent);color:var(--accent-contrast);border-color:var(--accent);box-shadow:0 4px 12px color-mix(in srgb,var(--accent) 23%,transparent); }
+.add-subdomain-button:hover { background:color-mix(in srgb,var(--accent) 88%,#000);color:var(--accent-contrast);transform:translateY(-1px); }
+html[data-palette] .secondary.add-subdomain-button { background:var(--accent)!important;color:var(--accent-contrast)!important;border-color:var(--accent)!important;box-shadow:0 4px 12px color-mix(in srgb,var(--accent) 23%,transparent); }
+html[data-palette] .secondary.add-subdomain-button:hover:not(:disabled) { background:color-mix(in srgb,var(--accent) 88%,#000)!important;color:var(--accent-contrast)!important; }
 .site-name-link { white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere; }
 .site-name-link strong { font-size:15px;font-weight:700;letter-spacing:-.01em;overflow-wrap:anywhere; }
 .recovery-backup-row{display:flex;align-items:center;gap:16px;padding:12px 20px;border-top:1px solid var(--line);font-size:12px}.recovery-backup-row time{color:var(--muted);flex:1}.recovery-backups{margin-bottom:18px}@media(max-width:760px){.recovery-backup-row{flex-wrap:wrap;gap:9px;padding:12px}.recovery-backup-row time{font-size:10px}}

@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { apiFetch as fetch } from "./api";
+import { useMotionPreferences } from "./composables/useMotion";
+
+useMotionPreferences();
 
 import { t, tr } from "./i18n";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import PanelSettingsDrawer from "./components/PanelSettingsDrawer.vue";
+import AnimeBackdrop from "./components/AnimeBackdrop.vue";
+import ThemeEmblem from "./components/ThemeEmblem.vue";
+import { animeThemes } from "./animeThemes";
 import SiteFilesDrawer from "./components/SiteFilesDrawer.vue";
 import LogWorkspace from "./components/LogWorkspace.vue";
 import LanguagePicker from "./components/LanguagePicker.vue";
@@ -20,9 +26,7 @@ import ProviderModal from "./components/ProviderModal.vue";
 import L4Modal from "./components/L4Modal.vue";
 import DDNSModal from "./components/DDNSModal.vue";
 import CertUploadModal from "./components/CertUploadModal.vue";
-import OverviewTopSection from "./components/OverviewTopSection.vue";
-import OverviewTrafficSection from "./components/OverviewTrafficSection.vue";
-import OverviewBottomSection from "./components/OverviewBottomSection.vue";
+import OverviewDashboard from "./components/OverviewDashboard.vue";
 import ProxySitesPage from "./components/ProxySitesPage.vue";
 import DnsProvidersPage from "./components/DnsProvidersPage.vue";
 import CertificatesPage from "./components/CertificatesPage.vue";
@@ -30,7 +34,7 @@ import Layer4Page from "./components/Layer4Page.vue";
 import Ddnspage from "./components/Ddnspage.vue";
 import ConfigHistoryPage from "./components/ConfigHistoryPage.vue";
 import IpBansPage from "./components/IpBansPage.vue";
-import { formatBytes } from "./format";
+import TrafficSummary from "./components/TrafficSummary.vue";
 import {
   Plus,
   Globe2,
@@ -44,23 +48,19 @@ import {
   Cable,
   LogOut,
   Settings,
-  Search,
 } from "@lucide/vue";
 
-import { authenticated, csrfToken, authChecked, setupRequired, panelUsername, panelRole, readOnly, error, saving, applyRetryVisible, hosts, online, refreshing, resolveDelete, listSearch, statusFilter, hasListFilter, clearListFilters } from "./composables/useState";
+import { authenticated, csrfToken, authChecked, setupRequired, panelUsername, panelRole, readOnly, error, saving, applyRetryVisible, hosts, online, refreshing, resolveDelete, listSearch, statusFilter } from "./composables/useState";
 import { load } from "./composables/useRefresh";
 import { retryApply } from "./composables/useApply";
-import { trafficTotals, refreshTraffic } from "./composables/useTraffic";
+import { trafficRange, refreshTraffic } from "./composables/useTraffic";
 import {
   managedCertificates,
   openManagedCert,
   refreshManagedCertificates,
   refreshCertificateInventory,
-  visibleCerts,
-  visibleManagedCerts,
 } from "./composables/useCertificates";
 import {
-  visibleHosts,
   viewingLogSite,
   siteFilesHost,
   loadSiteLogs,
@@ -75,12 +75,7 @@ import {
   openDDNS,
   refreshDDNS,
   openProvider,
-  visibleDDNS,
-  visibleL4,
-  visibleProviders,
-  visibleBans,
 } from "./composables/useNetwork";
-import { loadSecurityDefaults } from "./composables/useSecurity";
 import {
   autoRefresh,
   compactMode,
@@ -112,6 +107,7 @@ function resetPanelPreferences() {
   panelSettingsError.value = "";
   panelSettingsMessage.value = t("浏览器偏好已恢复默认。");
 }
+const activeAnimeTheme = computed(() => animeThemes.find(item => item.id === themeChoice.value));
 
 // ---- panel settings (account, port, sessions) ----
 const appVersion = ref("");
@@ -119,6 +115,7 @@ const showPanelSettings = ref(false);
 const panelListenPort = ref(Number(panelAccessPort) || 8181);
 const panelSettingsError = ref("");
 const panelSettingsMessage = ref("");
+const panelSettingsDrawer = ref<InstanceType<typeof PanelSettingsDrawer> | null>(null);
 const panelSettingsBusy = ref(false);
 const panelSettingsLoading = ref(false);
 const panelSessions = ref<number | null>(null);
@@ -159,7 +156,7 @@ function settingsShortcut(event: KeyboardEvent) {
   ) {
     event.preventDefault();
     if (showPanelSettings.value) {
-      if (!panelSettingsBusy.value) showPanelSettings.value = false;
+      if (!document.querySelector(".overlay")) panelSettingsDrawer.value?.requestClose();
     } else if (!document.querySelector(".overlay")) void openPanelSettings();
   }
 }
@@ -347,7 +344,7 @@ async function refreshSession() {
       if (d && typeof d.current === "string") appVersion.value = d.current;
     })
     .catch(() => {});
-  await Promise.all([load(), loadSecurityDefaults()]);
+  await load();
   syncActiveSection();
 }
 async function authenticate() {
@@ -494,33 +491,6 @@ const currentPage = computed(
     navigationItems[0]!,
 );
 
-// ---- search box UI ----
-const listSearchOpen = ref(false);
-const listSearchInput = ref<HTMLInputElement | null>(null);
-async function toggleListSearch() {
-  listSearchOpen.value = !listSearchOpen.value;
-  if (listSearchOpen.value) {
-    await nextTick();
-    listSearchInput.value?.focus();
-  } else listSearch.value = "";
-}
-const searchablePage = computed(() => activeSection.value === "ip-bans");
-const statusFilterAvailable = computed(() =>
-  ["proxy-sites", "ddns", "layer4"].includes(activeSection.value),
-);
-const filteredCount = computed(
-  () =>
-    ({
-      "proxy-sites": visibleHosts.value.length,
-      ddns: visibleDDNS.value.length,
-      layer4: visibleL4.value.length,
-      "dns-providers": visibleProviders.value.length,
-      certificates:
-        visibleCerts.value.length + visibleManagedCerts.value.length,
-      "ip-bans": visibleBans.value.length,
-    })[activeSection.value] || 0,
-);
-
 // ---- page instructions ----
 const pageInstructions: Record<string, string[]> = {
   overview: [
@@ -583,6 +553,7 @@ function syncActiveSection() {
       : "overview";
   if (section !== activeSection.value)
     history.replaceState(null, "", `#${activeSection.value}`);
+  if (activeSection.value !== 'overview' && trafficRange.value !== '24h') trafficRange.value = '24h';
   document.title = `${currentPage.value.label} · Viya`;
   window.scrollTo({ top: 0, behavior: "instant" });
 }
@@ -683,6 +654,7 @@ onBeforeUnmount(() => {
 
 
 <template>
+  <AnimeBackdrop />
   <div v-if="authChecked && !authenticated" class="auth-screen">
     <form class="modal auth-modal" @submit.prevent="authenticate()">
       <img
@@ -755,8 +727,10 @@ onBeforeUnmount(() => {
         />
         <div>
           <strong>Viya</strong><small>{{ t("反向代理控制台") }}</small>
+          <span v-if="activeAnimeTheme" class="brand-theme"><ThemeEmblem/>{{t(activeAnimeTheme.label)}}</span>
         </div>
       </div>
+      <ThemeEmblem v-if="activeAnimeTheme" class="sidebar-ornament"/>
       <nav class="nav-menu" :aria-label="t('主导航')">
         <div v-for="group in groupedNavigation" :key="group.group" class="nav-group">
           <div class="nav-label">{{ group.group }}</div>
@@ -772,7 +746,7 @@ onBeforeUnmount(() => {
             }}</span
             ><span v-if="item.id === 'proxy-sites'" class="count">{{
               hosts.length
-            }}</span></a
+            }}</span><ThemeEmblem v-if="activeAnimeTheme && activeSection===item.id" class="nav-theme-emblem"/></a
           >
         </div>
       </nav>
@@ -804,6 +778,7 @@ onBeforeUnmount(() => {
     </aside>
     <PanelSettingsDrawer
       v-if="showPanelSettings"
+      ref="panelSettingsDrawer"
       id="panel-settings-dialog"
       v-model:theme="themeChoice"
       v-model:compact="compactMode"
@@ -816,6 +791,7 @@ onBeforeUnmount(() => {
       v-model:landing="landingPage"
       v-model:port="panelListenPort"
       v-model:password="passwordForm"
+      :saved-port="storedPanelPort"
       :busy="panelSettingsBusy"
       :loading="panelSettingsLoading"
       :error="panelSettingsError"
@@ -848,7 +824,7 @@ onBeforeUnmount(() => {
       :csrf="csrfToken"
       @close="closeSiteFiles"
     />
-    <main id="main-content" tabindex="-1" :aria-busy="refreshing">
+    <main id="main-content" tabindex="-1" :aria-busy="refreshing" :class="{ 'overview-workspace': activeSection === 'overview' }">
       <div class="workspace-bar">
         <span
           >{{ t("Viya 控制台 /") }} {{ currentPage.group }} /
@@ -879,6 +855,7 @@ onBeforeUnmount(() => {
           <h1>{{ currentPage.label }}</h1>
           <p>{{ currentPage.description }}</p>
         </div>
+        <div class="page-header-tools">
         <details :key="activeSection" class="workspace-help">
           <summary :aria-label="t('如何使用')" :title="t('如何使用')">
             ?
@@ -913,6 +890,7 @@ onBeforeUnmount(() => {
             />
           </svg>
         </a>
+        </div>
       </header>
       <div class="workspace-toolbar">
         <button
@@ -925,28 +903,7 @@ onBeforeUnmount(() => {
           <Plus :size="17" />{{ currentPage.action }}
         </button>
         <div class="page-actions">
-          <div
-            v-if="activeSection === 'proxy-sites'"
-            class="web-total-stats"
-            :aria-label="t('全部站点近 24 小时统计')"
-            :title="
-              t('全部站点近 24 小时 · 错误 ') + trafficTotals.errors + t(' 次')
-            "
-          >
-            <span
-              ><small>{{ t("全部站点 · 24h") }}</small
-              ><b
-                >{{ trafficTotals.requests.toLocaleString() }}
-                <em>{{ t("次") }}</em></b
-              ></span
-            ><span
-              ><small>{{ t("↑ 上行") }}</small
-              ><b>{{ formatBytes(trafficTotals.upload) }}</b></span
-            ><span
-              ><small>{{ t("↓ 下行") }}</small
-              ><b>{{ formatBytes(trafficTotals.download) }}</b></span
-            >
-          </div>
+          <TrafficSummary v-if="activeSection==='proxy-sites'||activeSection==='layer4'" :kind="activeSection==='layer4'?'forward':'web'"/>
         </div>
       </div>
       <p v-if="authNotice" class="probe-ok">
@@ -954,51 +911,7 @@ onBeforeUnmount(() => {
         <button class="icon-btn" @click="authNotice = ''">×</button>
       </p>
 
-      <div v-if="searchablePage" class="list-toolbar">
-        <button
-          class="icon-btn list-search-toggle"
-          type="button"
-          :aria-expanded="listSearchOpen"
-          aria-controls="list-search-input"
-          :aria-label="t('搜索当前列表')"
-          :title="t('搜索当前列表')"
-          @click="toggleListSearch"
-        >
-          <Search :size="17" />
-        </button>
-        <input
-          v-if="listSearchOpen"
-          id="list-search-input"
-          ref="listSearchInput"
-          v-model="listSearch"
-          class="list-search-input"
-          type="search"
-          :placeholder="t('输入域名、名称或地址，支持多个关键词')"
-          :aria-label="t('搜索当前列表')"
-          @keydown.esc="toggleListSearch"
-        /><label v-if="statusFilterAvailable" class="list-status"
-          ><span>{{ t("状态") }}</span
-          ><select v-model="statusFilter">
-            <option value="all">{{ t("全部状态") }}</option>
-            <option value="enabled">
-              {{ activeSection === "ddns" ? t("自动更新开启") : t("已启用") }}
-            </option>
-            <option value="disabled">
-              {{ activeSection === "ddns" ? t("自动更新关闭") : t("已停用") }}
-            </option>
-          </select></label
-        ><span class="list-result-count" role="status"
-          >{{ filteredCount }} {{ t("项") }}</span
-        ><button
-          v-if="hasListFilter"
-          class="secondary"
-          @click="clearListFilters"
-        >
-          {{ t("清除筛选") }}
-        </button>
-      </div>
       <ConfigApplyBar />
-      <OverviewTopSection v-if="activeSection === 'overview'" />
       <p v-if="readOnly" class="readonly-banner" role="status">
         {{ t("当前账号为只读，可以查看全部配置，但不能保存任何修改。") }}
       </p>
@@ -1014,7 +927,9 @@ onBeforeUnmount(() => {
           {{ saving ? t("正在应用…") : t("重新应用到 Caddy") }}
         </button>
       </div>
-      <OverviewTrafficSection v-if="activeSection === 'overview'" />
+      <Transition name="workspace" mode="out-in">
+      <div :key="activeSection" class="workspace-view">
+      <OverviewDashboard v-if="activeSection === 'overview'" />
       <ProxySitesPage v-if="activeSection === 'proxy-sites'" />
       <DnsProvidersPage v-if="activeSection === 'dns-providers'" />
       <CertificatesPage v-if="activeSection === 'certificates'" />
@@ -1027,8 +942,9 @@ onBeforeUnmount(() => {
         :auto-refresh="autoRefresh && (!pauseHidden || !documentHidden)"
       />
       <IpBansPage v-if="activeSection === 'ip-bans'" />
+      </div>
+      </Transition>
 
-      <OverviewBottomSection v-if="activeSection === 'overview'" />
       <footer>Viya <span>·</span> {{ t("本地部署的 Caddy 管理工具") }}</footer>
     </main>
     <ListenerEditorModal />

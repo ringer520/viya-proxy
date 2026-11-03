@@ -16,11 +16,15 @@ import (
 )
 
 type ApplyState struct {
-	PortConfirmation *panelConfirmation `json:"port_confirmation,omitempty"`
-	Stage            string             `json:"stage"`
-	Message          string             `json:"message"`
-	Updated          string             `json:"updated"`
-	Recovery         bool               `json:"recovery"`
+	AccessConfirmation *accessConfirmation `json:"access_confirmation,omitempty"`
+	DesiredHash        string              `json:"desired_hash"`
+	AppliedHash        string              `json:"applied_hash"`
+	Pending            bool                `json:"pending"`
+	PortConfirmation   *panelConfirmation  `json:"port_confirmation,omitempty"`
+	Stage              string              `json:"stage"`
+	Message            string              `json:"message"`
+	Updated            string              `json:"updated"`
+	Recovery           bool                `json:"recovery"`
 }
 type checkpoint struct {
 	Hash    string        `json:"hash"`
@@ -35,7 +39,9 @@ type sealedCheckpoint struct {
 func (a *App) setApplyStage(stage, message string) {
 	a.applyStateMu.Lock()
 	defer a.applyStateMu.Unlock()
-	a.applyState = ApplyState{Stage: stage, Message: message, Updated: time.Now().UTC().Format(time.RFC3339)}
+	a.applyState.Stage = stage
+	a.applyState.Message = message
+	a.applyState.Updated = time.Now().UTC().Format(time.RFC3339)
 }
 func (a *App) checkpointPath(name string) string {
 	return filepath.Join(a.dataDir, "recovery", name+".json")
@@ -139,9 +145,14 @@ func (a *App) configurationStatus(w http.ResponseWriter, r *http.Request) {
 	_, e := os.Stat(a.checkpointPath(name))
 	state.Recovery = e == nil
 	state.PortConfirmation = a.pendingPanelConfirmation(r.Context())
+	state.AccessConfirmation = a.pendingAccessConfirmation(r.Context())
 	writeJSON(w, 200, state)
 }
 func (a *App) rollbackConfiguration(w http.ResponseWriter, r *http.Request) {
+	if a.pendingAccessConfirmation(r.Context()) != nil {
+		fail(w, 409, errors.New("请先确认或取消待生效的面板访问限制"))
+		return
+	}
 	var input struct {
 		Confirmed  bool   `json:"confirmed"`
 		Checkpoint string `json:"checkpoint"`
@@ -238,7 +249,7 @@ func (a *App) rollbackConfiguration(w http.ResponseWriter, r *http.Request) {
 
 // Preserve samples and logs for objects that still exist after recovery.
 func restoreRecoveryRuntime(ctx context.Context, tx *sql.Tx, tables []tableDump) error {
-	refs := map[string][2]string{"traffic_hours": {"site_id", "proxy_hosts"}, "site_access_events": {"site_id", "proxy_hosts"}, "ddns_runs": {"ddns_record_id", "ddns_records"}, "monitor_samples": {"monitor_id", "monitors"}}
+	refs := map[string][2]string{"traffic_hours": {"site_id", "proxy_hosts"}, "site_access_events": {"site_id", "proxy_hosts"}, "ddns_runs": {"ddns_record_id", "ddns_records"}}
 	filtered := make([]tableDump, 0, len(tables))
 	for _, table := range tables {
 		ref, has := refs[table.Name]

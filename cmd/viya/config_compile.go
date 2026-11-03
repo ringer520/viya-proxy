@@ -14,7 +14,7 @@ import (
 )
 
 func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
-	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,listener_id,upstream,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,spa_fallback,browse,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server FROM proxy_hosts WHERE enabled=1 ORDER BY domain`)
+	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,listener_id,upstream,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server FROM proxy_hosts WHERE enabled=1 ORDER BY domain`)
 	if err != nil {
 		return nil, err
 	}
@@ -23,16 +23,14 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		var h Host
 		var providerID sql.NullInt64
 		var certID sql.NullInt64
-		var spaFallback, browse, redirectKeepPath int
+		var redirectKeepPath int
 		var headers, allowJSON, denyJSON, securityJSON, methodsJSON string
 		var maxBody int64
 		var hideServer int
-		if err := rows.Scan(&h.ID, &h.Domain, &h.ListenerID, &h.Upstream, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headers, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &spaFallback, &browse, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer); err != nil {
+		if err := rows.Scan(&h.ID, &h.Domain, &h.ListenerID, &h.Upstream, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headers, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		h.SpaFallback = spaFallback == 1
-		h.Browse = browse == 1
 		h.RedirectKeepPath = redirectKeepPath == 1
 		if providerID.Valid {
 			h.DNSProviderID = &providerID.Int64
@@ -69,6 +67,10 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	rows.Close()
+	globalPolicy, domainPolicies := a.readSecurityGlobal(ctx), a.readSecurityDomains(ctx)
+	for i := range hosts {
+		effectiveHostPolicy(&hosts[i], globalPolicy, domainPolicies)
+	}
 	routesByListener := map[string][]any{}
 	policies, managedDomains, managedInternal, err := a.managedPolicies(ctx)
 	if err != nil {
@@ -83,18 +85,21 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 	if _, err := a.db.ExecContext(ctx, `DELETE FROM ip_bans WHERE expires_at>0 AND expires_at<=?`, now); err != nil {
 		return nil, err
 	}
-	banRows, err := a.db.QueryContext(ctx, `SELECT domain,ip FROM ip_bans WHERE expires_at=0 OR expires_at>? ORDER BY domain,ip`, now)
+	banRows, err := a.db.QueryContext(ctx, `SELECT id,domain,ip FROM ip_bans WHERE expires_at=0 OR expires_at>? ORDER BY domain,ip`, now)
 	if err != nil {
 		return nil, err
 	}
 	bansByDomain := map[string][]string{}
+	banIDs := map[string]int64{}
 	for banRows.Next() {
 		var d, ip string
-		if err := banRows.Scan(&d, &ip); err != nil {
+		var id int64
+		if err := banRows.Scan(&id, &d, &ip); err != nil {
 			banRows.Close()
 			return nil, err
 		}
 		bansByDomain[d] = append(bansByDomain[d], ip)
+		banIDs[d+"|"+ip] = id
 	}
 	banRows.Close()
 	if err := banRows.Err(); err != nil {
@@ -117,7 +122,7 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 			ranges := []string{}
 			for _, ip := range active {
 				if ip == "foreign" {
-					hostRoutes = append(hostRoutes, map[string]any{"match": []any{map[string]any{"host": []string{host.Domain}, "not": []any{map[string]any{"remote_ip": map[string]any{"ranges": chinaAndPrivateRanges()}}}}}, "handle": []any{map[string]any{"handler": "static_response", "status_code": 403, "body": "Region access denied"}}})
+					hostRoutes = append(hostRoutes, map[string]any{"match": []any{map[string]any{"host": []string{host.Domain}, "not": []any{map[string]any{"remote_ip": map[string]any{"ranges": chinaAndPrivateRanges()}}}}}, "handle": []any{map[string]any{"handler": "static_response", "status_code": 403, "body": "Region access denied", "headers": map[string][]string{"X-Viya-Access-Rule": {strconv.FormatInt(banIDs[host.Domain+"|foreign"], 10)}}}}})
 				} else {
 					ranges = append(ranges, ip)
 				}

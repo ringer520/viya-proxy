@@ -31,6 +31,7 @@ import { applyRetryVisible, certificates, error, providers, saving } from "../co
 
 import { retryApply } from "../composables/useApply";
 import SitePolicyFields from "./SitePolicyFields.vue";
+import SiteSecurityPolicy from "./SiteSecurityPolicy.vue";
 import { ref, watch } from "vue";
 const iconPickerOpen = ref(false);
 watch(show, (open) => {
@@ -244,6 +245,7 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
             >{{ upstreamCheck.message }}</span
           >
         </div>
+        <details class="site-upstream-options"><summary>{{t('上游请求头')}}</summary><SitePolicyFields v-model="siteFormPolicy" variant="upstream"/></details>
       </template>
       <template v-else-if="form.type === 'static'">
         <button
@@ -417,10 +419,11 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
         <ChevronDown class="advanced-chevron" :class="{ expanded: advancedOpen }" :size="18" aria-hidden="true" />
       </button>
       <div v-if="advancedOpen" class="advanced-fields">
+        <SiteSecurityPolicy v-model="siteFormPolicy" :domain="composedDomain"/>
         <SitePolicyFields
           v-model="siteFormPolicy"
           v-model:password="form.basic_auth_password"
-          variant="site"
+          variant="local"
           :editing="editingID !== null"
         />
       </div>

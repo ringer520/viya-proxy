@@ -56,6 +56,8 @@ func TestTrafficPersistsAndFollowsRotation(t *testing.T) {
 	z.Close()
 	archive.Close()
 	second := []byte(`{"ts":1793318401,"status":500,"bytes_read":12,"size":34,"request":{"host":"app.test","uri":"/second"}}` + "\n")
+	// The error logger repeats the access event for the same failed request.
+	second = append(second, []byte(`{"logger":"http.log.error.viya_access_test","ts":1793318401,"status":500,"bytes_read":12,"size":34,"request":{"host":"app.test","uri":"/second"}}`+"\n")...)
 	if err = os.WriteFile(path, second, 0600); err != nil {
 		t.Fatal(err)
 	}

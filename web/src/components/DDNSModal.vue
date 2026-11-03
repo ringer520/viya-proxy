@@ -153,21 +153,20 @@ import { networkInterfaces, providers, saving } from "../composables/useState";
         ><label
           >{{ t("要发布的") }}
           {{ ddnsForm.record_type === "A" ? "IPv4" : "IPv6" }} {{ t("地址")
-          }}<select v-model="ddnsForm.interface_ip" required>
-            <option value="" disabled>
-              {{ t("选择这条 DNS 记录使用的 IP") }}
-            </option>
+          }}<select v-model="ddnsForm.interface_ip">
+<option value="">{{t("自动选择稳定地址（跟随网卡变化）")}}</option>
+<option v-if="ddnsForm.interface_ip&&!selectedInterfaceAddresses.some(a=>a.ip===ddnsForm.interface_ip)" :value="ddnsForm.interface_ip" disabled>{{ddnsForm.interface_ip}} · {{t('原地址已失效，请重新选择')}}</option>
             <option
               v-for="address in selectedInterfaceAddresses"
               :key="address.ip"
-              :value="address.ip"
+              :value="address.ip" :disabled="address.deprecated||address.tentative"
             >
               {{ address.ip }} · {{ address.scope
-              }}{{ address.temporary ? t(" · 临时隐私地址") : "" }}
+              }}{{address.deprecated?t(" · 已弃用"):address.tentative?t(" · 尚未就绪"):address.temporary?t(" · 临时隐私地址"):t(" · 稳定地址")}}
             </option></select
           ><small>{{
             t(
-              "有多个 IPv6 时请选公网全局地址，并优先选择长期稳定、不会定期变化的地址。系统会固定使用此地址；若网卡上不再存在会报错，不会自动改用另一个。",
+              "有多个 IPv6 时请选公网全局地址，并优先选择长期稳定、不会定期变化的地址。固定地址失效时会提示；选择自动模式可跟随网卡地址变化，并优先使用稳定公网地址。",
             )
           }}</small></label
         >
@@ -187,7 +186,7 @@ import { networkInterfaces, providers, saving } from "../composables/useState";
               >{{ address.ip }}
               <small
                 >{{ address.scope
-                }}{{ address.temporary ? t(" · 临时隐私地址") : "" }}</small
+                }}{{address.deprecated?t(" · 已弃用"):address.tentative?t(" · 尚未就绪"):address.temporary?t(" · 临时隐私地址"):t(" · 稳定地址")}}</small
               ></code
             >
           </div>
@@ -233,7 +232,7 @@ import { networkInterfaces, providers, saving } from "../composables/useState";
                 "CNAME 任务会定时把记录指向上方目标域名；CNAME 记录不能与同名的 A/AAAA 等记录同时存在。",
               )
             : t(
-                "网卡方式会在每次更新时精确使用选择的 IP 地址；建议选网卡上用于公网解析的长期稳定地址。若网卡地址是内网地址，公网域名建议使用公网接口查询。",
+                "自动模式跟随网卡变化，优先选择稳定公网地址；固定地址失效时会报错。网卡仅有内网地址时，公网域名建议使用公网接口查询。",
               )
         }}
       </p>

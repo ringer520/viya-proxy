@@ -1,10 +1,11 @@
 import { apiFetch as fetch } from "../api";
 import { t,tr } from "../i18n";
-import { applyRetryVisible,authenticated,csrfToken,error,deleteBusy,ddnsRefreshSequence,refreshing,hosts,revisions,providers,l4Rules,ddnsRecords,certificates,ipBans,certExpiring,upstreamHealth,online,lastRefreshedAt } from "./useState";
+import { refreshErrors,applyRetryVisible,authenticated,csrfToken,error,deleteBusy,ddnsRefreshSequence,refreshing,hosts,revisions,providers,l4Rules,ddnsRecords,certificates,ipBans,certExpiring,upstreamHealth,online,lastRefreshedAt } from "./useState";
 // ---- request sequencing (cross-domain) ----
 const domainRefreshers=new Map<string,()=>Promise<unknown>>();
 export function registerRefreshTask(name:string,refresh:()=>Promise<unknown>){domainRefreshers.set(name,refresh)}
 export let loadRequestSequence = 0;
+const refreshLabels:Record<string,string>={'/api/v1/proxy-hosts':'Web 服务','/api/v1/health':'引擎状态','/api/v1/config/revisions':'配置历史','/api/v1/dns-providers':'DNS 凭据','/api/v1/layer4-rules':'端口转发','/api/v1/ddns-records':'动态 DNS','/api/v1/custom-certificates':'SSL 证书','/api/v1/ip-bans':'IP 封禁','/api/v1/certificates/expiring?days=30':'证书到期状态','/api/v1/proxy-hosts/health':'上游状态'};
 
 
 export async function load() {
@@ -26,37 +27,42 @@ export async function load() {
       "/api/v1/certificates/expiring?days=30",
       "/api/v1/proxy-hosts/health",
     ];
-    const responses = await Promise.all(urls.map((url) => fetch(url)));
-    if (requestSequence !== loadRequestSequence) return;
-    if (responses.some((r) => r.status === 401)) {
-      authenticated.value = false;
-      csrfToken.value = "";
-      return;
+    const setters: ((data:any)=>void)[] = [
+      data=>{hosts.value=data},
+      data=>{online.value=!!(data.ok&&data.caddy_ready)},
+      data=>{revisions.value=data.slice(0,10)},
+      data=>{providers.value=data},
+      data=>{l4Rules.value=data},
+      data=>{if(ddnsSequence===ddnsRefreshSequence.value)ddnsRecords.value=data},
+      data=>{certificates.value=data},
+      data=>{ipBans.value=data},
+      data=>{certExpiring.value=Array.isArray(data?.certificates)?data.certificates:[]},
+      data=>{upstreamHealth.value=data&&typeof data==='object'?data:{}},
+    ];
+    const results=await Promise.allSettled(urls.map(async url=>{
+      const response=await fetch(url);
+      if(response.status===401)throw Error('unauthorized');
+      if(!response.ok)throw Error(String(response.status));
+      return response.json();
+    }));
+    if(requestSequence!==loadRequestSequence)return;
+    if(results.some(result=>result.status==='rejected'&&result.reason?.message==='unauthorized')){
+      authenticated.value=false;csrfToken.value='';return;
     }
-    if (responses.some((r) => !r.ok)) throw Error(t("后端暂不可用"));
-    const [h, health, history, dns, l4, ddns, certs, bans, expiring, upstream] =
-      await Promise.all(responses.map((r) => r.json()));
-    if (requestSequence !== loadRequestSequence) return;
-    hosts.value = h;
-    revisions.value = history.slice(0, 10);
-    providers.value = dns;
-    l4Rules.value = l4;
-    if (ddnsSequence === ddnsRefreshSequence.value) ddnsRecords.value = ddns;
-    certificates.value = certs;
-    ipBans.value = bans;
-    certExpiring.value = Array.isArray(expiring?.certificates)
-      ? expiring.certificates
-      : [];
-    upstreamHealth.value =
-      upstream && typeof upstream === "object" ? upstream : {};
-    online.value = health.ok && health.caddy_ready;
-    // These four used to run one after another, adding their latencies to every
-    // refresh. They are independent reads, so fan them out instead.
-    await Promise.all([...domainRefreshers.values()].map(refresh=>refresh()));
-    succeeded = true;
+    const failures:string[]=[];
+    results.forEach((result,index)=>{
+      const name=urls[index]!;
+      if(result.status==='fulfilled'){setters[index]!(result.value);delete refreshErrors.value[name]}
+      else{refreshErrors.value[name]=t('读取失败，请重试');failures.push(name);if(index===1)online.value=false}
+    });
+    const tasks=[...domainRefreshers.entries()];
+    const taskResults=await Promise.allSettled(tasks.map(([,refresh])=>refresh()));
+    if(requestSequence!==loadRequestSequence)return;
+    taskResults.forEach((result,index)=>{const name=tasks[index]![0];if(result.status==='rejected'){refreshErrors.value[name]=t('读取失败，请重试');failures.push(name)}else delete refreshErrors.value[name]});
+    if(failures.length)error.value=t('部分数据刷新失败，已保留上次结果')+'：'+failures.map(name=>t(refreshLabels[name]||name)).join('、');
+    succeeded = failures.length===0;
   } catch (e) {
     if (requestSequence === loadRequestSequence) {
-      online.value = false;
       error.value =
         e instanceof Error
           ? tr`刷新失败：${e.message}`

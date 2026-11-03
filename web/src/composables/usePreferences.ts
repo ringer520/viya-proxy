@@ -9,6 +9,9 @@ export const paletteChoices: Palette[] = [
   "aurora",
   "ember",
   "cyber",
+  "sakura",
+  "neon",
+  "lunar",
 ];
 const savedTheme = localStorage.getItem("viya-theme");
 export const themeChoice = ref<ThemeChoice>(
@@ -51,7 +54,7 @@ export function applyPanelSettings() {
   const root = document.documentElement;
   // data-theme keeps the legacy light/dark rules alive; data-palette drives the
   // new token layer, so every palette is a real theme instead of a tint.
-  root.dataset.theme = palette === "light" ? "light" : "dark";
+  root.dataset.theme = palette === "light" || palette === "sakura" ? "light" : "dark";
   root.dataset.palette = palette;
   root.dataset.density = compactMode.value ? "compact" : "comfortable";
   root.dataset.copy = simpleDisplay.value ? "compact" : "full";
