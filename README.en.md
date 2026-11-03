@@ -182,7 +182,7 @@ The entry script detects OpenWrt. The dedicated installer is `deploy/install-ope
 
 New installations listen on `0.0.0.0:8181`: open `http://router-LAN-IP:8181`. Persistent data: `/opt/viya/data`; master key: `/etc/viya/secrets/master.key`. Use persistent storage for `/opt`; allow space for binaries, data and upgrade backups, and roughly 128 MiB free in `/tmp` for download/extraction. Requirements include curl/wget, tar, sha256sum, netstat, UCI and HTTPS CA certificates. The installer does not open WAN firewall rules.
 
-New services use UCI: `uci set viya.main.listen='0.0.0.0:8182'; uci commit viya; /etc/init.d/viya restart`. Existing custom init scripts and data paths are preserved. Upgrade copies are stored under `/opt/viya/backups/install-*`. Installation control flow is checked in isolation; actual firmware and device behavior still require hardware validation.
+New services use UCI: `uci set viya.main.listen='0.0.0.0:8182'; uci commit viya; /etc/init.d/viya restart`. Existing custom init scripts and data paths are preserved. Upgrade copies are stored under `/opt/viya/backups/install-*`. Linux/systemd installation control flow is checked in isolation. OpenWrt scripts pass POSIX shell syntax checks; real OpenWrt installation and device compatibility have not yet been validated on hardware.
 
 ## Build from source
 
