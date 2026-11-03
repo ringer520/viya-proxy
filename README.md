@@ -91,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 
 启用了系统防火墙时，请允许局域网访问面板 TCP 端口，以及所用 Web 服务端口（通常为 80/443）。
 
-固定安装版本可使用 `curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.3.0 sh`。环境变量应放在管道右侧。
+固定安装版本可使用 `curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.3.1 sh`。环境变量应放在管道右侧。
 
 ### 服务管理与更新
 
@@ -195,7 +195,7 @@ wget -qO- https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.3.0 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.3.1 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 安装器验证 SHA-256，检查空间和端口，创建 procd 服务并启用开机自启。新安装默认局域网访问 **`http://路由器IP:8181`**，数据位于 `/opt/viya/data`，主密钥位于 `/etc/viya/secrets/master.key`。`/opt` 必须是持久化目录或已挂载的外部存储；请为程序、数据和升级备份保留充足空间，下载与解压还需要 `/tmp` 至少约 128 MiB 可用空间。小内存路由器建议使用外部存储或在独立 Linux 主机部署。

@@ -178,7 +178,7 @@ For procd-based OpenWrt on amd64, arm64 or armv7 (MIPS is not supported), run as
 wget -qO- https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
 ```
 
-The entry script detects OpenWrt. The dedicated installer is `deploy/install-openwrt.sh`; download it to `/tmp/viya-install.sh` and run `VERSION=v0.3.0 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh` to pin a release and initial port. It verifies SHA-256, checks free space and port conflicts, enables procd startup, and checks readiness.
+The entry script detects OpenWrt. The dedicated installer is `deploy/install-openwrt.sh`; download it to `/tmp/viya-install.sh` and run `VERSION=v0.3.1 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh` to pin a release and initial port. It verifies SHA-256, checks free space and port conflicts, enables procd startup, and checks readiness.
 
 New installations listen on `0.0.0.0:8181`: open `http://router-LAN-IP:8181`. Persistent data: `/opt/viya/data`; master key: `/etc/viya/secrets/master.key`. Use persistent storage for `/opt`; allow space for binaries, data and upgrade backups, and roughly 128 MiB free in `/tmp` for download/extraction. Requirements include curl/wget, tar, sha256sum, netstat, UCI and HTTPS CA certificates. The installer does not open WAN firewall rules.
 
