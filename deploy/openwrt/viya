@@ -32,12 +32,14 @@ start_service() {
 
 	procd_open_instance
 	procd_set_param command "$PROG"
-	procd_set_param env VIYA_LISTEN="$LISTEN"
-	procd_set_param env VIYA_DATA_DIR="$DATA_DIR"
-	procd_set_param env VIYA_MASTER_KEY_FILE="$MASTER_KEY"
-	procd_set_param env VIYA_CADDY_BIN="$CADDY"
-	procd_set_param env VIYA_CADDY_ADMIN=http://127.0.0.1:2019
-	procd_set_param env HOME="$DATA_DIR"
+	# procd_set_param replaces the env array; supply every variable in one call.
+	procd_set_param env \
+		VIYA_LISTEN="$LISTEN" \
+		VIYA_DATA_DIR="$DATA_DIR" \
+		VIYA_MASTER_KEY_FILE="$MASTER_KEY" \
+		VIYA_CADDY_BIN="$CADDY" \
+		VIYA_CADDY_ADMIN=http://127.0.0.1:2019 \
+		HOME="$DATA_DIR"
 	procd_set_param respawn
 	procd_set_param stdout 1
 	procd_set_param stderr 1
