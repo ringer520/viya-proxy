@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Network, Pencil, RefreshCw, Trash2, Search } from "@lucide/vue";
 import { t } from "../i18n";
+import type { DDNSRecord } from "../types";
 import { clearListFilters, hasListFilter, listSearch, readOnly, statusFilter } from "../composables/useState";
 import { nextTick, ref } from "vue";
 
@@ -11,6 +12,39 @@ async function toggleSearch() {
   searchOpen.value = !searchOpen.value;
   if (searchOpen.value) { await nextTick(); searchInput.value?.focus(); }
   else listSearch.value = "";
+}
+
+const STAGE_TEXT: Record<string, string> = {
+  address: "获取地址",
+  credentials: "读取凭据",
+  compare: "比较 DNS",
+  update: "提交修改",
+  verify: "验证服务商结果",
+};
+const RESULT_TEXT: Record<string, string> = {
+  updated: "已更新并验证",
+  unchanged: "地址未变化",
+  unverified: "已提交 · 验证待完成",
+  failed: "更新失败",
+};
+function recordHost(record: DDNSRecord) {
+  return record.record_name === "@"
+    ? record.zone
+    : `${record.record_name}.${record.zone}`;
+}
+function sourceText(record: DDNSRecord) {
+  if (record.record_type === "CNAME")
+    return t("别名 → ") + (record.cname_target || t("未设置目标"));
+  return record.ip_source === "interface"
+    ? t("网卡 · ") + record.interface_name
+    : t("公网 IP 查询");
+}
+function stageText(record: DDNSRecord) {
+  return t(STAGE_TEXT[record.last_stage || ""] || "未知");
+}
+function resultText(record: DDNSRecord) {
+  if (record.running) return t("正在更新") + " · " + stageText(record);
+  return t(RESULT_TEXT[record.last_status || ""] || "等待首次执行");
 }
 </script>
 
@@ -45,36 +79,30 @@ async function toggleSearch() {
           >
             <div class="host-icon ddns-record-icon"><Network :size="19" /></div>
             <div class="host-main">
-              <strong
-                >{{
-                  record.record_name === "@"
-                    ? record.zone
-                    : `${record.record_name}.${record.zone}`
-                }}
-                · {{ record.record_type }}</strong
-              ><span
-                >{{ record.name }} ·
-                {{
-                  record.record_type === "CNAME"
-                    ? t("别名 → ") + (record.cname_target || t("未设置目标"))
-                    : record.ip_source === "interface"
-                      ? t("网卡 · ") + record.interface_name
-                      : t("公网 IP 查询")
-                }}
-                {{ t("· 每") }} {{ record.interval_minutes }}
+              <strong>{{ recordHost(record) }} · {{ record.record_type }}</strong>
+              <span
+                >{{ record.name }} · {{ sourceText(record) }} ·
+                {{ t("每") }} {{ record.interval_minutes }}
                 {{ t("分钟") }}</span
-              ><span v-if="record.record_type !== 'CNAME'" class="ddns-address"
+              ><span
+                v-if="record.record_type !== 'CNAME'"
+                class="ddns-address"
                 ><b>{{ t("当前解析") }}</b
                 ><code>{{ record.last_ip || t("尚未更新") }}</code></span
-              ><small
-                v-if="record.last_error"
-                class="ddns-error"
-                role="status"
-                >{{ record.last_error }}</small
-              ><small>{{ t("备注：") }}{{ record.comment || "viya" }}</small
-              ><small class="op-status" :class="{bad:!!record.last_error}">{{record.running?t('正在更新')+' · '+t(({address:'获取地址',credentials:'读取凭据',compare:'比较 DNS',update:'提交修改',verify:'验证服务商结果'} as Record<string,string>)[record.last_stage||'address']):t(({updated:'已更新并验证',unchanged:'地址未变化',unverified:'已提交 · 验证待完成',failed:'更新失败'} as Record<string,string>)[record.last_status||'']||'等待首次执行')}}<template v-if="record.last_error"> · {{t('失败阶段')}}：{{t(({address:'获取地址',credentials:'读取凭据',compare:'比较 DNS',update:'提交修改',verify:'验证服务商结果'} as Record<string,string>)[record.last_stage||'']||'未知')}}</template></small><small>{{t('上次实际修改')}}：{{record.last_changed_at?formatDDNSTime(record.last_changed_at):t('暂无记录')}}</small><small class="ddns-last-run"
-                >{{ t("上次检查：")
-                }}{{ formatDDNSTime(record.last_run_at) }}</small
+              ><small v-if="record.last_error" class="ddns-error"
+                >{{ t("更新失败") }}：{{ record.last_error
+                }}<template v-if="record.last_stage">
+                  · {{ t("阶段") }} {{ stageText(record) }}</template
+                >
+                · {{ t("上次检查") }}
+                {{ formatDDNSTime(record.last_run_at) }}</small
+              ><small v-else class="op-status ddns-last-run"
+                >{{ resultText(record) }} · {{ t("上次检查") }}
+                {{ formatDDNSTime(record.last_run_at)
+                }}<template v-if="record.last_changed_at">
+                  · {{ t("上次修改") }}
+                  {{ formatDDNSTime(record.last_changed_at) }}</template
+                ></small
               >
             </div>
             <div class="switch-with-label">
