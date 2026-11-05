@@ -28,6 +28,8 @@
 .panel-settings .settings-row input.settings-switch:checked{background:var(--accent)}
 .panel-settings .settings-row input.settings-switch:checked:before{transform:translateX(15px)}
 .panel-settings select,.panel-settings .drawer-input-label input,.panel-settings .settings-port-input{border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:var(--surface-2);color:var(--text);font-size:12px;min-width:0;box-sizing:border-box}
+.panel-settings .drawer-input-label textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:var(--surface-2);color:var(--text);font-size:12px;line-height:1.6;font-family:ui-monospace,Consolas,monospace;resize:vertical;min-width:0;box-sizing:border-box}
+.panel-settings .drawer-input-label small{font-size:11px;line-height:1.6;color:var(--muted)}
 .panel-settings .settings-port-input{width:100px;text-align:right}
 .settings-group{padding:18px 0;border-bottom:1px solid var(--line);margin:0}
 .settings-group>h4{font-size:12px;font-weight:600;margin:0 0 12px}

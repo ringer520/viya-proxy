@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -148,6 +149,14 @@ type App struct {
 	healthMu       sync.RWMutex
 	health         map[int64]upstreamHealth
 	banPolicyCache atomic.Value
+	// panelAccessCache holds panelAccessRules; read on every panel request so
+	// the guard never touches SQLite on the hot path.
+	panelAccessCache atomic.Value
+	// Local interface addresses, refreshed lazily, let the guard recognise a
+	// request that originated on this host (SSH tunnel recovery path).
+	localAddrsMu   sync.Mutex
+	localAddrs     map[netip.Addr]bool
+	localAddrsAt   time.Time
 	autoBanApplyAt atomic.Int64
 }
 
@@ -327,6 +336,8 @@ func main() {
 	mux.Handle("GET /api/v1/auth/me", app.requireAuth(http.HandlerFunc(app.me)))
 	mux.Handle("GET /api/v1/auth/audit", app.requireAuth(http.HandlerFunc(app.listLoginAudit)))
 	mux.Handle("GET /api/v1/panel/settings", app.requireAuth(http.HandlerFunc(app.getPanelSettings)))
+	mux.Handle("GET /api/v1/panel/access", app.requireAuth(http.HandlerFunc(app.getPanelAccess)))
+	mux.Handle("PUT /api/v1/panel/access", app.requireAuth(http.HandlerFunc(app.putPanelAccess)))
 	mux.Handle("PUT /api/v1/panel/settings/port", app.requireAuth(http.HandlerFunc(app.updatePanelPort)))
 	mux.Handle("POST /api/v1/auth/sessions/revoke-others", app.requireAuth(http.HandlerFunc(app.revokeOtherSessions)))
 	mux.Handle("POST /api/v1/auth/password", app.requireAuth(http.HandlerFunc(app.changeAdminPassword)))
@@ -415,7 +426,7 @@ func main() {
 	// WriteTimeout must stay above the slowest business operation (DDNS run 35s,
 	// configuration import 90s); otherwise Go truncates a response after the
 	// work already succeeded and operators retry the same import twice.
-	server := &http.Server{Handler: securityHeaders(logRequests(recoverPanic(mux))), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	server := &http.Server{Handler: securityHeaders(logRequests(recoverPanic(app.panelAccessGuard(mux)))), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
 	select {

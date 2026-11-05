@@ -40,14 +40,17 @@ const userBusy=ref(false),userError=ref(''),userNote=ref(''),usersReady=ref(fals
 const alertForm=ref({enabled:false,webhook_url:'',notify_recovery:false}),alertSaved=ref(''),alertReady=ref(false)
 const alertBusy=ref(false),alertError=ref(''),alertNote=ref('')
 const alertDirty=computed(()=>alertReady.value && JSON.stringify(alertForm.value)!==alertSaved.value)
+const accessForm=ref({hosts:'',ips:'',https_only:false}),accessSaved=ref(''),accessReady=ref(false),accessCurrent=ref({host:'',ip:''})
+const accessBusy=ref(false),accessError=ref(''),accessNote=ref('')
+const accessDirty=computed(()=>accessReady.value && JSON.stringify(accessForm.value)!==accessSaved.value)
 const edited=ref({port:false,username:false,password:false,user:false})
 function markEdited(kind:keyof typeof edited.value,event:Event){
  const form=event.currentTarget as HTMLElement
  if(form.contains(document.activeElement))edited.value[kind]=true
 }
 const portDirty=computed(()=>edited.value.port&&!props.loading&&Number(port.value)!==Number(props.savedPort))
-const dirty=computed(()=>storageDirty.value||portDirty.value || (edited.value.password&&!!(password.value.current||password.value.next||password.value.confirm)) || (edited.value.username&&(usernameForm.value.username!==props.username||!!usernameForm.value.password)) || (edited.value.user&&!!(userForm.value.username||userForm.value.password||userForm.value.role!=='viewer')) || alertDirty.value)
-const locked=computed(()=>storageBusy.value||props.busy||userBusy.value||alertBusy.value||versionBusy.value||!!deletePrompt.value)
+const dirty=computed(()=>storageDirty.value||portDirty.value || (edited.value.password&&!!(password.value.current||password.value.next||password.value.confirm)) || (edited.value.username&&(usernameForm.value.username!==props.username||!!usernameForm.value.password)) || (edited.value.user&&!!(userForm.value.username||userForm.value.password||userForm.value.role!=='viewer')) || alertDirty.value || accessDirty.value)
+const locked=computed(()=>storageBusy.value||props.busy||userBusy.value||alertBusy.value||accessBusy.value||versionBusy.value||!!deletePrompt.value)
 const showFeedback=computed(()=>feedbackScope.value==='general'||feedbackScope.value===tab.value)
 const reads=new AbortController()
 let mounted=true
@@ -101,6 +104,24 @@ async function testAlerts(){
  catch(e){alertError.value=e instanceof Error?t(e.message):t('发送失败')}
  finally{alertBusy.value=false}
 }
+function splitRules(raw:string){return raw.split(/[\n,]/).map(item=>item.trim()).filter(Boolean)}
+async function loadAccess(){
+ if(!admin.value)return
+ try{const response=await apiFetch('/api/v1/panel/access',{signal:reads.signal});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||t('读取访问规则失败'));if(!mounted)return
+  const next={hosts:(data.hosts||[]).join('\n'),ips:(data.ips||[]).join('\n'),https_only:!!data.https_only}
+  accessForm.value=next;accessSaved.value=JSON.stringify(next);accessCurrent.value={host:data.current_host||'',ip:data.current_ip||''};accessReady.value=true}
+ catch(e){if(mounted&&(e as Error).name!=='AbortError')accessError.value=e instanceof Error?t(e.message):t('读取访问规则失败')}
+}
+async function saveAccess(){
+ if(!admin.value||locked.value||!accessReady.value||!accessDirty.value)return
+ accessBusy.value=true;accessError.value='';accessNote.value=''
+ try{const response=await apiFetch('/api/v1/panel/access',{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify({hosts:splitRules(accessForm.value.hosts),ips:splitRules(accessForm.value.ips),https_only:accessForm.value.https_only})})
+  const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||t('保存失败'))
+  const next={hosts:(data.hosts||[]).join('\n'),ips:(data.ips||[]).join('\n'),https_only:!!data.https_only}
+  accessForm.value=next;accessSaved.value=JSON.stringify(next);accessNote.value=t('面板访问规则已保存')}
+ catch(e){accessError.value=e instanceof Error?t(e.message):t('保存失败')}
+ finally{accessBusy.value=false}
+}
 function submitPort(){if(admin.value&&!locked.value&&portDirty.value&&restartConfirmed.value){feedbackScope.value='access';emit('savePort')}}
 function submitUsername(){if(admin.value&&!locked.value){feedbackScope.value='account';emit('changeUsername',usernameForm.value.username,usernameForm.value.password)}}
 function submitPassword(){if(!locked.value){feedbackScope.value='account';emit('changePassword')}}
@@ -132,7 +153,7 @@ watch(port,()=>{restartConfirmed.value=false})
 watch(()=>props.username,value=>{usernameForm.value={username:value,password:''}})
 watch(()=>[props.error,props.message],async values=>{if(values.some(Boolean)){await nextTick();body.value?.scrollTo({top:0})}})
 let previousFocus:HTMLElement|null=null,previousOverflow=''
-onMounted(()=>{previousFocus=document.activeElement as HTMLElement;previousOverflow=document.body.style.overflow;document.body.style.overflow='hidden';root.value?.focus();window.addEventListener('beforeunload',beforeUnload);void loadUsers();void loadAlerts()})
+onMounted(()=>{previousFocus=document.activeElement as HTMLElement;previousOverflow=document.body.style.overflow;document.body.style.overflow='hidden';root.value?.focus();window.addEventListener('beforeunload',beforeUnload);void loadUsers();void loadAlerts();void loadAccess()})
 onBeforeUnmount(()=>{mounted=false;reads.abort();window.removeEventListener('beforeunload',beforeUnload);document.body.style.overflow=previousOverflow;if(previousFocus?.isConnected)previousFocus.focus()})
 const themeOptions=[
  {id:'system',label:t('跟随系统'),hint:t('随系统深浅切换'),base:'linear-gradient(135deg,#f4f6f9 0 50%,#10151e 50% 100%)',accent:'#91b4fb'},
@@ -183,6 +204,24 @@ const themeOptions=[
           <div class="settings-section-heading"><h3>{{t('访问与安全')}}</h3><span>{{t('服务器设置 · 保存后生效')}}</span></div>
           <div class="settings-group"><h4>{{t('当前访问地址')}}</h4><div class="settings-address"><code>{{accessAddress}}</code><button type="button" class="icon-btn" :aria-label="t('复制面板地址')" @click="copyAddress"><Copy :size="15"/></button></div><p class="drawer-field-help">{{t('浏览器访问端口：')}}{{accessPort}}</p></div>
           <form v-if="admin" class="settings-group" @input.capture="markEdited('port',$event)" @change.capture="markEdited('port',$event)" autocomplete="off" @submit.prevent="submitPort"><h4>{{t('面板监听端口')}}</h4><label class="settings-row"><span><strong>{{t('服务器端口')}}</strong><small>{{t('管理入口与 Web 反代监听分别配置。')}}</small></span><input v-model.number="port" class="settings-port-input" type="number" min="1024" max="65535" required :disabled="locked||loading"/></label><label class="settings-confirm-line"><input v-model="restartConfirmed" type="checkbox" :disabled="locked||!portDirty"/><span>{{t('修改后服务会重启；通过域名访问时，请同步调整反代上游端口。')}}</span></label><button class="primary" :disabled="locked||loading||!portDirty||!restartConfirmed">{{busy?t('正在处理…'):t('保存端口并重启')}}</button></form>
+          <form v-if="admin" class="settings-group" @submit.prevent="saveAccess" autocomplete="off"><h4>{{t('面板访问白名单')}}</h4>
+            <p v-if="accessError" class="settings-alert" role="alert">{{accessError}}</p>
+            <p v-if="accessNote" class="settings-notice success" role="status">{{accessNote}}</p>
+            <button v-if="!accessReady&&accessError" class="secondary" type="button" @click="loadAccess">{{t('重试')}}</button>
+            <template v-else>
+              <label class="drawer-input-label">{{t('允许的域名')}}
+                <textarea v-model="accessForm.hosts" rows="2" placeholder="viya.example.com" autocapitalize="none" spellcheck="false" :disabled="locked||!accessReady"></textarea>
+                <small>{{t('每行一个，或用逗号分隔；支持 *.example.com。不在列表内的 Host 一律返回 403。')}}</small>
+              </label>
+              <label class="drawer-input-label">{{t('允许的来源网段')}}
+                <textarea v-model="accessForm.ips" rows="2" placeholder="203.0.113.0/24" autocapitalize="none" spellcheck="false" :disabled="locked||!accessReady"></textarea>
+                <small>{{t('留空表示不限制来源。本机发起的连接（回环地址或本机网卡地址）始终放行，可用 SSH 隧道恢复。')}}</small>
+              </label>
+              <label class="settings-row"><span><strong>{{t('强制 HTTPS')}}</strong><small>{{t('通过 HTTP 打开面板时自动跳转到 HTTPS')}}</small></span><input v-model="accessForm.https_only" class="settings-switch" type="checkbox" role="switch" :disabled="locked||!accessReady"/></label>
+              <p class="drawer-field-help">{{t('当前访问：')}}{{accessCurrent.host||'—'}} · {{accessCurrent.ip||'—'}}</p>
+              <div class="settings-form-actions"><button class="primary" :disabled="locked||!accessReady||!accessDirty">{{accessBusy?t('正在处理…'):t('保存访问规则')}}</button></div>
+            </template>
+          </form>
           <div v-if="admin" class="settings-row settings-policy-entry"><span><strong>{{t('全局默认策略')}}</strong><small>{{t('域名和独立站点可覆盖全局策略')}}</small></span><button type="button" class="secondary" :disabled="locked" @click="openSecurityDefaults()">{{t('配置策略')}}<ChevronRight :size="14"/></button></div>
           <p v-else class="settings-notice">{{t('只读账号不能修改面板端口和全局安全策略。')}}</p>
         </section>
