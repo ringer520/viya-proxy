@@ -1,7 +1,7 @@
 /* Refinement layer: layout polish added on top of the compact base sheets.
    Kept separate so the minified originals stay untouched and reversible. */
 
-/* ---- 顶部工作区栏：面包屑 / 引擎状态 / 唯一刷新入口 ---- */
+/* ---- 顶部工作区栏：面包屑 / 引擎状态 / GitHub 入口 ---- */
 .workspace-bar {
   display: flex;
   align-items: center;
@@ -15,32 +15,8 @@
   gap: 8px;
   margin-left: auto;
 }
-.refresh-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--muted);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition:
-    color 0.16s ease,
-    border-color 0.16s ease,
-    background 0.16s ease;
-}
-.refresh-btn:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
-}
-.refresh-btn:disabled {
-  cursor: progress;
-  opacity: 0.8;
-}
-.refresh-btn .spinning {
-  animation: viya-spin 0.9s linear infinite;
+.workspace-bar-actions .github-link {
+  margin-left: 2px;
 }
 
 /* ---- 工具栏：添加按钮靠左，帮助问号靠右 ---- */
@@ -556,17 +532,21 @@
   cursor: pointer;
 }
 
-/* ---- 概览：KPI 卡片 / 快捷入口 / GitHub 链接 ---- */
+/* ---- 顶部栏 GitHub 链接 ---- */
 .github-link {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border-radius: 9px;
   color: var(--muted);
   border: 1px solid var(--line);
   background: var(--surface);
   flex: none;
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease;
 }
 .github-link:hover {
   color: var(--text);

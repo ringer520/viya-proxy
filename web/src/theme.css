@@ -686,10 +686,7 @@ html[data-palette] .dot {
     gap: 6px;
     box-shadow: none;
   }
-  /* 窄屏不再显示右侧刷新：空间让给面包屑，数据由自动刷新与各页面自身入口负责 */
-  html[data-palette] .workspace-bar .refresh-btn {
-    display: none;
-  }
+  /* 窄屏不再隐藏任何顶栏控件：面包屑自行省略，引擎状态与 GitHub 入口保留 */
 }
 
 /* ---- 登录 / 初始化页：旧样式表写死了浅色文字色，这里统一到 token ---- */
@@ -875,7 +872,6 @@ html[data-palette] .page-header { display:grid; grid-template-columns:minmax(0,1
 .page-header-tools { display:flex; align-items:center; justify-content:flex-end; gap:9px; margin-left:auto; flex:none; align-self:flex-start; }
 html[data-palette] .page-header .page-header-title { min-width:0; padding-right:0; }
 html[data-palette] .page-header-tools .workspace-help { position:relative; inset:auto; margin:0; align-self:center; }
-html[data-palette] .page-header-tools .github-link { margin:0; }
 html[data-palette] .page-header-tools .workspace-help > div { max-width:calc(100vw - 40px); }
 
 /* ==========================================================================
