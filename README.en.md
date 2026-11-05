@@ -93,7 +93,7 @@ sudo systemctl restart viya
 | TCP / UDP forwarding | Single- or dual-protocol rules with 30-day connection and traffic stats, counted separately from web traffic |
 | Access control | IP/CIDR bans, access rules, login throttling, automatic banning, security headers |
 | Operations | Resource monitoring, access and program logs, traffic trends, configuration history, backup and restore |
-| Accounts and UI | Administrator and read-only accounts, Chinese/English, five base themes plus three anime themes |
+| Accounts and UI | Administrator and read-only accounts, Chinese/English, six base themes plus three anime themes |
 | Files | Per-site file management (upload, edit, rename, delete); a read-only server file service, hidden by default |
 
 ## Screenshots
