@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -18,14 +19,16 @@ import (
 // the login form: a scanner on a VPS with every port open cannot probe for
 // accounts or version strings, only a bare 403.
 //
-// The rules are intentionally two-dimensional. Host matching stops access by
-// raw IP and DNS rebinding even when the port is reachable, while the address
-// list keeps the port closed to everyone outside an operator's networks. Either
-// dimension alone leaves a hole, so both are optional and combine with AND.
+// BlockPublicIPHost is the one-switch mode and the only setting most operators
+// need: a fresh install is reachable by IP so it can be set up, and once HTTPS
+// works the switch refuses IP-literal hosts from outside the LAN while keeping
+// the LAN address and any hostname usable. Hosts, IPs and HTTPSOnly stay as
+// optional refinements for operators who want an exact list.
 type panelAccessRules struct {
-	Hosts     []string `json:"hosts"`
-	IPs       []string `json:"ips"`
-	HTTPSOnly bool     `json:"https_only"`
+	BlockPublicIPHost bool     `json:"block_public_ip_host"`
+	Hosts             []string `json:"hosts"`
+	IPs               []string `json:"ips"`
+	HTTPSOnly         bool     `json:"https_only"`
 }
 
 const (
@@ -35,7 +38,7 @@ const (
 )
 
 func (rules panelAccessRules) empty() bool {
-	return len(rules.Hosts) == 0 && len(rules.IPs) == 0 && !rules.HTTPSOnly
+	return !rules.BlockPublicIPHost && len(rules.Hosts) == 0 && len(rules.IPs) == 0 && !rules.HTTPSOnly
 }
 
 // loadPanelAccess returns the cached rules, reading them from the database on
@@ -139,6 +142,24 @@ func (a *App) panelAccessGuard(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// One-switch mode: only the hostnames that actually reverse-proxy to this
+		// panel may open it, plus IP access from the LAN. Addresses reached from
+		// the internet by IP are refused, which is the whole point of turning
+		// HTTPS on.
+		if rules.BlockPublicIPHost {
+			host := normalizePanelHost(r.Host)
+			if isIPLiteralHost(r.Host) {
+				if !isPrivateAddress(client) {
+					slog.Debug("panel access refused: public IP host", "host", r.Host, "client", client)
+					fail(w, http.StatusForbidden, errors.New("已禁止通过公网 IP 打开面板，请改用域名访问；局域网内仍可用 IP"))
+					return
+				}
+			} else if !a.panelDomainAllowed(host, rules.Hosts) {
+				slog.Debug("panel access refused: unknown hostname", "host", r.Host, "client", client)
+				fail(w, http.StatusForbidden, errors.New("该域名不是面板的访问入口，请使用配置好的域名；局域网内仍可用 IP 打开"))
+				return
+			}
+		}
 		if len(rules.Hosts) > 0 && !panelHostAllowed(rules.Hosts, r.Host) {
 			slog.Debug("panel access refused: host not allowed", "host", r.Host, "client", client)
 			fail(w, http.StatusForbidden, errors.New("该地址不在面板允许访问的域名列表内，请使用配置好的域名打开面板"))
@@ -191,6 +212,28 @@ func isLoopbackAddress(raw string) bool {
 	return addr.Unmap().IsLoopback()
 }
 
+// isIPLiteralHost reports whether the request was addressed by address rather
+// than by name: the only reliable signal for "this was opened by IP".
+func isIPLiteralHost(hostport string) bool {
+	host := strings.Trim(normalizePanelHost(hostport), "[]")
+	if host == "" {
+		return false
+	}
+	_, err := netip.ParseAddr(host)
+	return err == nil
+}
+
+// isPrivateAddress matches what a LAN client looks like: loopback, RFC1918,
+// IPv6 ULA and link-local. Everything else counts as the public internet.
+func isPrivateAddress(raw string) bool {
+	addr, err := netip.ParseAddr(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsUnspecified()
+}
+
 // panelAccessAllowsRequest replays the guard for a request, used to refuse a
 // save that would immediately cut the operator off.
 func (a *App) panelAccessAllowsRequest(rules panelAccessRules, r *http.Request) bool {
@@ -198,6 +241,15 @@ func (a *App) panelAccessAllowsRequest(rules panelAccessRules, r *http.Request) 
 	client := a.accessClientIP(r)
 	if a.panelAccessLocalBypass(peer, client) {
 		return true
+	}
+	if rules.BlockPublicIPHost {
+		if isIPLiteralHost(r.Host) {
+			if !isPrivateAddress(client) {
+				return false
+			}
+		} else if !a.panelDomainAllowed(normalizePanelHost(r.Host), rules.Hosts) {
+			return false
+		}
 	}
 	if len(rules.Hosts) > 0 && !panelHostAllowed(rules.Hosts, r.Host) {
 		return false
@@ -209,6 +261,93 @@ func (a *App) panelAccessAllowsRequest(rules panelAccessRules, r *http.Request) 
 		return false
 	}
 	return true
+}
+
+// panelDomainAllowed accepts any hostname that currently reverse-proxies to
+// this panel, plus any extra hostnames the operator typed by hand.
+func (a *App) panelDomainAllowed(host string, extra []string) bool {
+	if host == "" {
+		return false
+	}
+	if a.panelDomains()[host] {
+		return true
+	}
+	return panelHostAllowed(extra, host)
+}
+
+// panelDomains discovers which hostnames point at the panel from the site
+// table, instead of asking the operator to retype them. Cached for a few
+// seconds so adding a site takes effect without a restart.
+func (a *App) panelDomains() map[string]bool {
+	a.panelDomainsMu.Lock()
+	defer a.panelDomainsMu.Unlock()
+	if time.Since(a.panelDomainsAt) < 10*time.Second {
+		return a.panelDomainsCache
+	}
+	if a.db == nil {
+		// Early startup or a unit test without a database: no known domains.
+		return a.panelDomainsCache
+	}
+	domains := map[string]bool{}
+	rows, err := a.db.Query(`SELECT domain, COALESCE(upstream,'') FROM proxy_hosts WHERE enabled=1`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var domain, upstream string
+			if rows.Scan(&domain, &upstream) != nil {
+				continue
+			}
+			if upstreamTargetsPanel(upstream, a.panelListen) {
+				domains[normalizePanelHost(domain)] = true
+			}
+		}
+	}
+	a.panelDomainsCache = domains
+	a.panelDomainsAt = time.Now()
+	return domains
+}
+
+// upstreamTargetsPanel reports whether a site forwards to the panel itself.
+// Loopback and the bound address are treated as the same target, so binding the
+// panel to 127.0.0.1 later does not silently empty the allowed domain list.
+func upstreamTargetsPanel(upstream, panelListen string) bool {
+	panelHost, panelPort, err := net.SplitHostPort(panelListen)
+	if err != nil {
+		return false
+	}
+	raw := strings.TrimSpace(upstream)
+	if raw == "" {
+		return false
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	if port != panelPort {
+		return false
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, panelHost) {
+		return true
+	}
+	// A panel bound to all interfaces is reachable through any local address.
+	if ip := net.ParseIP(panelHost); ip != nil && ip.IsUnspecified() {
+		return true
+	}
+	// A loopback address on either side still means "this host", so switching
+	// the bind between 127.0.0.1 and the LAN address must not empty the list.
+	return isLoopbackAddress(host) || isLoopbackAddress(panelHost)
 }
 
 // panelHostAllowed matches the request Host (port stripped) against the list.
@@ -270,7 +409,7 @@ func normalizePanelHost(raw string) string {
 // validatePanelAccess normalizes input and rejects entries that could never
 // match, so a typo fails at save time instead of locking the operator out.
 func validatePanelAccess(input panelAccessRules) (panelAccessRules, error) {
-	rules := panelAccessRules{HTTPSOnly: input.HTTPSOnly, Hosts: []string{}, IPs: []string{}}
+	rules := panelAccessRules{BlockPublicIPHost: input.BlockPublicIPHost, HTTPSOnly: input.HTTPSOnly, Hosts: []string{}, IPs: []string{}}
 	if len(input.Hosts) > panelAccessMaxHosts || len(input.IPs) > panelAccessMaxIPs {
 		return panelAccessRules{}, fmt.Errorf("域名与网段各最多 %d 条", panelAccessMaxHosts)
 	}
@@ -348,11 +487,12 @@ func validPanelHostname(host string) error {
 func (a *App) getPanelAccess(w http.ResponseWriter, r *http.Request) {
 	rules := a.loadPanelAccess()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"hosts":        rules.Hosts,
-		"ips":          rules.IPs,
-		"https_only":   rules.HTTPSOnly,
-		"current_host": r.Host,
-		"current_ip":   a.accessClientIP(r),
+		"hosts":                rules.Hosts,
+		"ips":                  rules.IPs,
+		"https_only":           rules.HTTPSOnly,
+		"block_public_ip_host": rules.BlockPublicIPHost,
+		"current_host":         r.Host,
+		"current_ip":           a.accessClientIP(r),
 	})
 }
 
@@ -388,5 +528,5 @@ func (a *App) putPanelAccess(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.panelAccessCache.Store(rules)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "hosts": rules.Hosts, "ips": rules.IPs, "https_only": rules.HTTPSOnly})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "hosts": rules.Hosts, "ips": rules.IPs, "https_only": rules.HTTPSOnly, "block_public_ip_host": rules.BlockPublicIPHost})
 }

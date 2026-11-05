@@ -22,7 +22,7 @@
 - DNS credentials support read-only checks, credential replacement and dependency checks. Successful reads do not verify DNS write permission.
 - Access rules are grouped into manual, region and automatic bans. Panel-domain restrictions require confirmation through the affected domain within 120 seconds or the original rule is restored; LAN access can cancel.
 - Logs support server-side filters over at most the last 2 MiB of the current file. Configuration history keeps the latest 10 operation summaries and actors.
-- A panel access allowlist restricts entry by hostname and source network; a request that does not match is refused with 403 before the login form. Connections made on the host itself always pass, so a wrong rule can be undone over an SSH tunnel.
+- Panel access is a single switch: turn it on after HTTPS works and the panel stops answering on public IPs, while the hostnames that reverse-proxy to it and LAN addresses keep working. A mismatch is refused with 403 before the login form; finer hostname and source-network rules live under Advanced.
 
 Region rules use the source connecting to Caddy, which may be a CDN or proxy address. Upgrades do not automatically remove existing restrictions.
 

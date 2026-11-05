@@ -154,10 +154,15 @@ type App struct {
 	panelAccessCache atomic.Value
 	// Local interface addresses, refreshed lazily, let the guard recognise a
 	// request that originated on this host (SSH tunnel recovery path).
-	localAddrsMu   sync.Mutex
-	localAddrs     map[netip.Addr]bool
-	localAddrsAt   time.Time
-	autoBanApplyAt atomic.Int64
+	localAddrsMu sync.Mutex
+	localAddrs   map[netip.Addr]bool
+	localAddrsAt time.Time
+	// Hostnames currently reverse-proxying to the panel, discovered from the
+	// site table so the one-switch mode needs no manual list.
+	panelDomainsMu    sync.Mutex
+	panelDomainsCache map[string]bool
+	panelDomainsAt    time.Time
+	autoBanApplyAt    atomic.Int64
 }
 
 var domainRE = regexp.MustCompile(`(?i)^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)

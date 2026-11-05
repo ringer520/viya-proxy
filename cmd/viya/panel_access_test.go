@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 func mustPrefix(t *testing.T, raw string) *net.IPNet {
@@ -21,6 +22,10 @@ func guardApp(t *testing.T, rules panelAccessRules) *App {
 	t.Helper()
 	a := &App{trustedProxies: []*net.IPNet{mustPrefix(t, "127.0.0.1/32"), mustPrefix(t, "::1/128")}}
 	a.panelAccessCache.Store(rules)
+	// Pretend one site reverse-proxies to the panel; the guard derives this set
+	// from the database in production, which tests do not have.
+	a.panelDomainsCache = map[string]bool{"viya.example.com": true}
+	a.panelDomainsAt = time.Now()
 	return a
 }
 
@@ -205,5 +210,103 @@ func TestIsLocalAddressOnlyMatchesThisHost(t *testing.T) {
 	}
 	if !a.isLocalAddress(netip.MustParseAddr("127.0.0.1")) {
 		t.Fatal("loopback not recognised as a local interface address")
+	}
+}
+
+func TestIsIPLiteralHost(t *testing.T) {
+	cases := map[string]bool{
+		"192.168.1.16:8181":    true,
+		"203.0.113.9":          true,
+		"[2001:db8::1]:8181":   true,
+		"viya.example.com":     false,
+		"viya.example.com:443": false,
+		"localhost:8181":       false,
+	}
+	for host, want := range cases {
+		if got := isIPLiteralHost(host); got != want {
+			t.Errorf("isIPLiteralHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
+func TestIsPrivateAddress(t *testing.T) {
+	cases := map[string]bool{
+		"127.0.0.1":      true,
+		"192.168.1.16":   true,
+		"10.20.30.40":    true,
+		"172.16.5.4":     true,
+		"fd00::1":        true,
+		"169.254.1.1":    true,
+		"203.0.113.9":    false,
+		"2409:8a1e::1":   false,
+		"not-an-address": false,
+	}
+	for ip, want := range cases {
+		if got := isPrivateAddress(ip); got != want {
+			t.Errorf("isPrivateAddress(%q) = %v, want %v", ip, got, want)
+		}
+	}
+}
+
+// A single switch is all most operators need: a public visitor reaching the
+// panel by address is refused, while the same panel stays usable by hostname
+// and from inside the LAN.
+func TestPanelAccessGuardBlocksPublicIPHost(t *testing.T) {
+	a := guardApp(t, panelAccessRules{BlockPublicIPHost: true})
+
+	blocked := httptest.NewRequest("GET", "http://203.0.113.9:8181/", nil)
+	blocked.Header.Set("X-Forwarded-For", "203.0.113.9")
+	blocked.RemoteAddr = "127.0.0.1:40000"
+	if rec := runGuard(a, blocked); rec.Code != http.StatusForbidden {
+		t.Fatalf("public client reached the panel by IP: %d", rec.Code)
+	}
+
+	// Same request, reached by hostname: the domain entry point keeps working.
+	byName := httptest.NewRequest("GET", "http://viya.example.com/", nil)
+	byName.Header.Set("X-Forwarded-For", "203.0.113.9")
+	byName.RemoteAddr = "127.0.0.1:40000"
+	if rec := runGuard(a, byName); rec.Code != http.StatusOK {
+		t.Fatalf("hostname access broke: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Same IP-literal host from the LAN: allowed, that is the recovery path.
+	byLAN := httptest.NewRequest("GET", "http://192.168.1.16:8181/", nil)
+	byLAN.Header.Set("X-Forwarded-For", "10.20.30.40")
+	byLAN.RemoteAddr = "127.0.0.1:40000"
+	if rec := runGuard(a, byLAN); rec.Code != http.StatusOK {
+		t.Fatalf("LAN IP access broke: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpstreamTargetsPanel(t *testing.T) {
+	cases := []struct {
+		upstream string
+		listen   string
+		want     bool
+	}{
+		{"http://192.168.1.16:8181", "192.168.1.16:8181", true},
+		{"http://127.0.0.1:8181", "192.168.1.16:8181", true},
+		{"127.0.0.1:8181", "127.0.0.1:8181", true},
+		{"http://192.168.1.16:8181/", "192.168.1.16:8181", true},
+		{"http://192.168.1.16:8080", "192.168.1.16:8181", false},
+		{"http://192.168.1.10:8181", "192.168.1.16:8181", false},
+		{"", "192.168.1.16:8181", false},
+	}
+	for _, c := range cases {
+		if got := upstreamTargetsPanel(c.upstream, c.listen); got != c.want {
+			t.Errorf("upstreamTargetsPanel(%q, %q) = %v, want %v", c.upstream, c.listen, got, c.want)
+		}
+	}
+}
+
+// In one-switch mode a hostname that does not proxy to the panel is refused,
+// which closes the "attacker points their DNS at my IP" path.
+func TestPanelAccessGuardRejectsUnknownHostname(t *testing.T) {
+	a := guardApp(t, panelAccessRules{BlockPublicIPHost: true})
+	r := httptest.NewRequest("GET", "http://evil.example.com/", nil)
+	r.Header.Set("X-Forwarded-For", "203.0.113.9")
+	r.RemoteAddr = "127.0.0.1:40000"
+	if rec := runGuard(a, r); rec.Code != http.StatusForbidden {
+		t.Fatalf("unknown hostname accepted: %d", rec.Code)
 	}
 }
