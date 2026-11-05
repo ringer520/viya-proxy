@@ -1,46 +1,17 @@
 <script setup lang="ts">
 import { apiFetch as fetch } from "../api";
-
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { t, tr } from "../i18n";
 import { formatBytes } from "../format";
-import {
-  FolderUp,
-  X,
-  FolderPlus,
-  Upload,
-  ArrowUp,
-  Download,
-  Trash2,
-  File,
-  Folder,
-  FolderOpen,
-  AlertTriangle,
-  Loader2,
-  ExternalLink,
-} from "@lucide/vue";
+import { FolderUp, X, FolderPlus, Upload, ArrowUp, Download, Trash2, File, Folder, FolderOpen, AlertTriangle, Loader2, ExternalLink } from "@lucide/vue";
+import FilePreviewPane from "./site-files/FilePreviewPane.vue";
+import { fileApi, fileHeaders } from "./site-files/client";
+import type { Entry } from "./site-files/types";
+import { useFileUpload } from "../composables/useFileUpload";
 
-// Static-site file manager, a right-side drawer. Browse, upload (files, whole
-// folders, or a zip that auto-expands), create folders and delete. Directory
-// uploads preserve their structure; uploads show live progress and confirm
-// before overwriting existing files.
-
-type Entry = {
-  name: string;
-  path: string;
-  is_dir: boolean;
-  size: number;
-  modified: string;
-};
-type UploadItem = { file: File; rel: string };
-type UploadResult = {
-  ok: boolean;
-  status: number;
-  error?: string;
-  stored?: number;
-  extracted?: number;
-  skipped?: number;
-};
+// Static-site file drawer: browse, upload (files, folders or a zip that
+// auto-expands, with progress and overwrite confirmation), mkdir and delete.
+// Preview/editing lives in FilePreviewPane, the upload pipeline in useFileUpload.
 
 const props = defineProps<{
   host: {
@@ -53,6 +24,15 @@ const props = defineProps<{
   csrf: string;
 }>();
 const emit = defineEmits<{ (e: "close"): void }>();
+
+// Handle exposed by FilePreviewPane so this drawer keeps owning Escape,
+// unmount and beforeunload behaviour.
+type PreviewPaneHandle = {
+  open: (entry: Entry) => Promise<void>;
+  requestClose: () => boolean;
+  isOpen: () => boolean;
+  isDirty: () => boolean;
+};
 
 const entries = ref<Entry[]>([]);
 const path = ref("");
@@ -70,63 +50,39 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const dirInput = ref<HTMLInputElement | null>(null);
 const drawer = ref<HTMLElement | null>(null);
 const mkdirInput = ref<HTMLInputElement | null>(null);
-const uploadProgress = ref<number | null>(null);
-const conflictPrompt = ref<{ items: UploadItem[]; conflicts: string[] } | null>(
-  null,
-);
-
+const previewPane = ref<PreviewPaneHandle | null>(null);
+const previewLocked = ref(false);
 const search = ref("");
+
 const visibleEntries = computed(() => entries.value.filter(e => e.name.toLowerCase().includes(search.value.toLowerCase())).sort((a,b) => Number(b.is_dir)-Number(a.is_dir) || a.name.localeCompare(b.name)));
-const preview = ref<{entry:Entry;content:string;original:string;version:string;editable:boolean;image?:string}|null>(null);
-const previewError=ref(""); const textBusy=ref(false); const textLoading=ref(false);
-const textDirty=computed(()=>!!preview.value && preview.value.content!==preview.value.original);
-function closePreview() {
- if(textBusy.value || textLoading.value || (textDirty.value && !window.confirm(t("放弃文件的未保存修改？")))) return false;
- if(preview.value?.image)URL.revokeObjectURL(preview.value.image);
- preview.value=null; return true;
-}
-function closeDrawer(){if(closePreview()) emit("close");}
-async function previewFile(entry:Entry){
- if(!closePreview())return;
- preview.value={entry,content:"",original:"",version:"",editable:false};textLoading.value=true;previewError.value="";
- try{
- if(/\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(entry.name)){
-   if(entry.size>10*1024*1024)throw Error(t("图片预览最大支持 10 MiB"));
-   const r=await fetch(api(`/download?path=${encodeURIComponent(entry.path)}`));
-   if(!r.ok)throw Error(t("读取文件失败"));
-   const blob=await r.blob();
-   if(blob.size>10*1024*1024 || !/^image\/(png|jpeg|gif|webp|avif|bmp)$/i.test(blob.type))throw Error(t("不支持的图片格式，请下载后查看"));
-   preview.value.image=URL.createObjectURL(blob);return;
- }
- const r=await fetch(api(`/text?path=${encodeURIComponent(entry.path)}`));const b=await r.json();if(!r.ok)throw Error(t(b.error)||t("读取文件失败"));preview.value={entry,content:b.content,original:b.content,version:b.version,editable:b.editable};}
- catch(e){previewError.value=e instanceof Error?e.message:t("读取文件失败");}finally{textLoading.value=false;}
-}
-async function saveText(){
- const d=preview.value;if(!d?.editable||textBusy.value)return;textBusy.value=true;previewError.value="";
- try{const r=await fetch(api(`/text?path=${encodeURIComponent(d.entry.path)}`),{method:"PUT",headers:headers(true),body:JSON.stringify({content:d.content,version:d.version})});const b=await r.json();if(!r.ok)throw Error(t(b.error)||t("保存失败"));d.original=d.content;d.version=b.version;note.value=t("文件已保存");await load();}
- catch(e){previewError.value=e instanceof Error?e.message:t("保存失败");}finally{textBusy.value=false;}
-}
 
 const crumbs = computed(() => {
   const parts = path.value ? path.value.split("/").filter(Boolean) : [];
-  return parts.map((name, index) => ({
-    name,
-    path: parts.slice(0, index + 1).join("/"),
-  }));
+  return parts.map((name, index) => ({ name, path: parts.slice(0, index + 1).join("/") }));
 });
 
-function api(query = "") {
-  return `/api/v1/proxy-hosts/${props.host.id}/files${query}`;
-}
+const api = (query = "") => fileApi(props.host.id, query);
+const headers = (json = false) => fileHeaders(props.csrf, json);
 const siteURL = computed(() => {
   const scheme = props.host.tls_mode === "none" ? "http" : "https";
   return `${scheme}://${props.host.domain}`;
 });
-function headers(json = false) {
-  const h: Record<string, string> = { "X-CSRF-Token": props.csrf };
-  if (json) h["Content-Type"] = "application/json";
-  return h;
-}
+
+const upload = useFileUpload({
+  api: (query) => api(query),
+  getCsrf: () => props.csrf,
+  getPath: () => path.value,
+  getEntryPaths: () => entries.value.map((e) => e.path),
+  reload: () => load(),
+  setBusy: (value) => (busy.value = value),
+  setError: (value) => (error.value = value),
+  setNote: (value) => (note.value = value),
+  resetInputs: () => {
+    if (fileInput.value) fileInput.value.value = "";
+    if (dirInput.value) dirInput.value.value = "";
+  },
+});
+const { uploadProgress, conflictPrompt, handleFiles, cancelConflict, confirmConflict, dropTransfer } = upload;
 
 async function load() {
   loading.value = true;
@@ -150,7 +106,7 @@ async function load() {
 }
 
 function enter(entry: Entry) {
-  if (!entry.is_dir) { void previewFile(entry); return; }
+  if (!entry.is_dir) { void previewPane.value?.open(entry); return; }
   path.value = entry.path;
   void load();
 }
@@ -165,182 +121,11 @@ function goTo(crumb: { path: string }) {
   void load();
 }
 
-// --- Upload helpers ---------------------------------------------------------
-
-// A folder upload reports paths like "dist/assets/app.js"; drop the top-level
-// folder name so the contents land in the current directory, not a new one.
-function relPathFor(file: File): string {
-  const rp = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-  if (rp) {
-    const parts = rp.split("/").filter(Boolean);
-    if (parts.length > 1) return parts.slice(1).join("/");
-  }
-  return file.name;
-}
-
-function readAllEntries(
-  reader: FileSystemDirectoryReader,
-): Promise<FileSystemEntry[]> {
-  return new Promise((resolve, reject) => {
-    const out: FileSystemEntry[] = [];
-    const next = () =>
-      reader.readEntries((batch) => {
-        if (!batch.length) return resolve(out);
-        out.push(...batch);
-        next();
-      }, reject);
-    next();
-  });
-}
-
-async function walkEntry(
-  entry: FileSystemEntry,
-  base: string,
-  out: UploadItem[],
-  isTop: boolean,
-): Promise<void> {
-  if (entry.isFile) {
-    const file = await new Promise<File>((resolve, reject) =>
-      (entry as FileSystemFileEntry).file(resolve, reject),
-    );
-    out.push({ file, rel: base ? `${base}/${entry.name}` : entry.name });
-    return;
-  }
-  if (entry.isDirectory) {
-    const reader = (entry as FileSystemDirectoryEntry).createReader();
-    const children = await readAllEntries(reader);
-    const childBase = isTop
-      ? base
-      : base
-        ? `${base}/${entry.name}`
-        : entry.name;
-    for (const child of children) await walkEntry(child, childBase, out, false);
-  }
-}
-
-async function collectFromItems(items: DataTransferItemList): Promise<UploadItem[]> {
-  const out: UploadItem[] = [];
-  for (const item of Array.from(items)) {
-    const getEntry = (item as DataTransferItem & {
-      webkitGetAsEntry?: () => FileSystemEntry | null;
-    }).webkitGetAsEntry;
-    const entry = getEntry?.();
-    if (entry) {
-      await walkEntry(entry, "", out, true);
-    } else {
-      const file = item.getAsFile();
-      if (file) out.push({ file, rel: file.name });
-    }
-  }
-  return out;
-}
-
-function conflictsFor(items: UploadItem[]): string[] {
-  const existing = new Set(entries.value.map((e) => e.path));
-  return items.map((i) => i.rel).filter((rel) => existing.has(rel));
-}
-
-function beginUpload(items: UploadItem[]) {
-  if (!items.length) return;
-  const conflicts = conflictsFor(items);
-  if (conflicts.length) {
-    conflictPrompt.value = { items, conflicts };
-    return;
-  }
-  void doUpload(items, true);
-}
-
-function cancelConflict() {
-  conflictPrompt.value = null;
-}
-function confirmConflict(overwrite: boolean) {
-  const items = conflictPrompt.value?.items || [];
-  conflictPrompt.value = null;
-  if (items.length) void doUpload(items, overwrite);
-}
-
-async function doUpload(items: UploadItem[], overwrite: boolean) {
-  busy.value = true;
-  error.value = "";
-  note.value = "";
-  uploadProgress.value = 0;
-  try {
-    const body = await uploadWithXHR(
-      items,
-      overwrite,
-      (p) => (uploadProgress.value = p),
-    );
-    if (!body.ok && t(body.error)) throw Error(t(body.error) || t("上传失败"));
-    const stored = body.stored || 0;
-    const extracted = body.extracted || 0;
-    const skipped = body.skipped || 0;
-    const parts: string[] = [];
-    if (stored) parts.push(t("已上传 ") + stored + t(" 个文件"));
-    if (extracted) parts.push(t("解压 ") + extracted + t(" 个文件"));
-    if (skipped) parts.push(t("跳过 ") + skipped + t(" 个已存在文件"));
-    note.value = parts.length
-      ? parts.join("，") + " · " + t("内容已由 Caddy 实时对外服务")
-      : t("没有文件被上传");
-    await load();
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : t("上传失败");
-  } finally {
-    busy.value = false;
-    uploadProgress.value = null;
-    if (fileInput.value) fileInput.value.value = "";
-    if (dirInput.value) dirInput.value.value = "";
-  }
-}
-
-function uploadWithXHR(
-  items: UploadItem[],
-  overwrite: boolean,
-  onProgress: (p: number) => void,
-): Promise<UploadResult> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open(
-      "POST",
-      api(
-        `/upload?path=${encodeURIComponent(path.value)}&overwrite=${overwrite ? "1" : "0"}`,
-      ),
-    );
-    xhr.setRequestHeader("X-CSRF-Token", props.csrf);
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
-    };
-    xhr.onload = () => {
-      try {
-        resolve({ ...JSON.parse(xhr.responseText), ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status });
-      } catch {
-        resolve({ ok: false, status: xhr.status, error: "invalid response" });
-      }
-    };
-    xhr.onerror = () => reject(new Error(t("网络错误，上传中断")));
-    const data = new FormData();
-    for (const item of items) {
-      // File names are sent separately from their relative path because the
-      // multipart layer strips directory components from a file's name.
-      data.append("files", item.file, item.file.name);
-      data.append("paths", item.rel);
-    }
-    xhr.send(data);
-  });
-}
-
-function handleFiles(files: FileList | File[] | null) {
-  if (!files || !files.length) return;
-  beginUpload(Array.from(files).map((f) => ({ file: f, rel: relPathFor(f) })));
-}
+function closeDrawer() { if (previewPane.value?.requestClose() ?? true) emit("close"); }
 
 async function onDrop(event: DragEvent) {
   dragOver.value = false;
-  if (event.dataTransfer?.items?.length) {
-    const items = await collectFromItems(event.dataTransfer.items);
-    if (items.length) beginUpload(items);
-    return;
-  }
-  handleFiles(event.dataTransfer?.files || null);
+  await dropTransfer(event.dataTransfer);
 }
 
 // --- mkdir / delete / download ---------------------------------------------
@@ -357,54 +142,35 @@ function cancelMkdir() {
 async function confirmMkdir() {
   const name = mkdirName.value.trim();
   if (!name) return;
-  busy.value = true;
-  error.value = "";
-  note.value = "";
+  busy.value = true; error.value = ""; note.value = "";
   try {
     const target = path.value ? `${path.value}/${name}` : name;
-    const r = await fetch(api("/mkdir"), {
-      method: "POST",
-      headers: headers(true),
-      body: JSON.stringify({ path: target }),
-      credentials: "same-origin",
-    });
+    const r = await fetch(api("/mkdir"), { method: "POST", headers: headers(true), body: JSON.stringify({ path: target }), credentials: "same-origin" });
     const body = await r.json();
     if (!r.ok) throw Error(t(body.error) || t("创建文件夹失败"));
-    mkdirOpen.value = false;
-    mkdirName.value = "";
+    mkdirOpen.value = false; mkdirName.value = "";
     await load();
   } catch (e) {
     error.value = e instanceof Error ? t(e.message) : t("创建文件夹失败");
-  } finally {
-    busy.value = false;
-  }
+  } finally { busy.value = false; }
 }
 
 async function remove(entry: Entry) {
-  busy.value = true;
-  error.value = "";
-  note.value = "";
+  busy.value = true; error.value = ""; note.value = "";
   try {
     const recursive = entry.is_dir ? "&recursive=1" : "";
-    const r = await fetch(
-      api(`?path=${encodeURIComponent(entry.path)}${recursive}`),
-      { method: "DELETE", headers: headers(), credentials: "same-origin" },
-    );
+    const r = await fetch(api(`?path=${encodeURIComponent(entry.path)}${recursive}`), { method: "DELETE", headers: headers(), credentials: "same-origin" });
     const body = await r.json();
     if (!r.ok) throw Error(t(body.error) || t("删除失败"));
     pendingDelete.value = null;
     await load();
   } catch (e) {
     error.value = e instanceof Error ? t(e.message) : t("删除失败");
-  } finally {
-    busy.value = false;
-  }
+  } finally { busy.value = false; }
 }
 
 function download(entry: Entry) {
-  window.open(
-    `/api/v1/proxy-hosts/${props.host.id}/files/download?path=${encodeURIComponent(entry.path)}`,
-  );
+  window.open(api(`/download?path=${encodeURIComponent(entry.path)}`));
 }
 
 function modifiedLabel(value: string) {
@@ -413,30 +179,25 @@ function modifiedLabel(value: string) {
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key !== "Escape") return;
-  if(preview.value){event.stopImmediatePropagation();closePreview();return;}
-  if (conflictPrompt.value) {
-    conflictPrompt.value = null;
-    return;
-  }
-  if (pendingDelete.value) {
-    pendingDelete.value = null;
-    return;
-  }
-  if (mkdirOpen.value) {
-    cancelMkdir();
-    return;
-  }
+  const pane = previewPane.value;
+  if (pane?.isOpen()) { event.stopImmediatePropagation(); pane.requestClose(); return; }
+  if (conflictPrompt.value) { conflictPrompt.value = null; return; }
+  if (pendingDelete.value) { pendingDelete.value = null; return; }
+  if (mkdirOpen.value) { cancelMkdir(); return; }
   closeDrawer();
 }
 
-function protectUnload(event: BeforeUnloadEvent) { if(textDirty.value){event.preventDefault();event.returnValue="";} }
+function protectUnload(event: BeforeUnloadEvent) { if (previewPane.value?.isDirty()) { event.preventDefault(); event.returnValue = ""; } }
 onMounted(() => {
-  window.addEventListener("beforeunload",protectUnload);
+  window.addEventListener("beforeunload", protectUnload);
   document.addEventListener("keydown", onKeydown);
   requestAnimationFrame(() => drawer.value?.focus());
   void load();
 });
-onBeforeUnmount(() => {document.removeEventListener("keydown", onKeydown);window.removeEventListener("beforeunload",protectUnload);if(preview.value?.image)URL.revokeObjectURL(preview.value.image);});
+onBeforeUnmount(() => {
+  document.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("beforeunload", protectUnload);
+});
 </script>
 
 <template>
@@ -467,7 +228,7 @@ onBeforeUnmount(() => {document.removeEventListener("keydown", onKeydown);window
         <button
           type="button"
           class="icon-btn"
-          :disabled="busy || textBusy || textLoading"
+          :disabled="busy || previewLocked"
           :aria-label="t('关闭')"
           @click="closeDrawer"
         >
@@ -654,15 +415,14 @@ onBeforeUnmount(() => {document.removeEventListener("keydown", onKeydown);window
         </div>
       </div>
 
-      <section v-if="preview" class="sfd-preview" :aria-label="t('文件预览与编辑')">
-        <header><strong>{{preview.entry.name}}</strong><small>{{preview.image?t('图片预览'):t('UTF-8 文本 · 最大 1 MiB')}}</small>
-          <button v-if="preview.editable" class="primary" :disabled="!textDirty || textBusy" @click="saveText">{{textBusy?t('正在保存…'):t('保存文件')}}</button>
-          <button class="secondary" :disabled="textBusy || textLoading" @click="closePreview">{{t('关闭预览')}}</button></header>
-        <p v-if="previewError" class="sfd-error" role="alert">{{previewError}}</p>
-        <p v-else-if="textLoading">{{t('加载中…')}}</p>
-        <img v-else-if="preview.image" :src="preview.image" :alt="preview.entry.name" class="sfd-image-preview" />
-        <textarea v-else v-model="preview.content" :readonly="!preview.editable || textBusy" spellcheck="false" :aria-label="t('文件内容')" />
-      </section>
+      <FilePreviewPane
+        ref="previewPane"
+        :host="host"
+        :csrf="csrf"
+        :reload="load"
+        @note="note = $event"
+        @busy="previewLocked = $event"
+      />
       <footer class="sfd-footer">
         <p v-if="error" class="sfd-error" role="alert">
           <AlertTriangle :size="14" />{{ error }}
@@ -1257,9 +1017,4 @@ onBeforeUnmount(() => {document.removeEventListener("keydown", onKeydown);window
   }
 }
 .sfd-search { min-width:140px; flex:1; }
-.sfd-preview { padding:16px; border-top:1px solid var(--line); flex:0 1 55vh; min-height:150px; overflow:auto; }
-.sfd-preview header { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px; }
-.sfd-preview header strong { flex:1; overflow-wrap:anywhere; }
-.sfd-preview textarea { width:100%; min-height:320px; max-height:55vh; resize:vertical; font:13px/1.7 ui-monospace,monospace; tab-size:2; white-space:pre; }
-.sfd-image-preview {display:block; max-width:100%; max-height:50vh; object-fit:contain; margin:auto;}
 </style>
