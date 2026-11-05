@@ -8,7 +8,8 @@ import { Cpu, MemoryStick, HardDrive, RefreshCw, Activity } from '@lucide/vue'
 
 const props = defineProps<{ autoRefresh: boolean; compact?: boolean }>()
 type Usage = { percent: number; used: number; total: number; path?: string }
-type Metrics = { cpu_percent?: number; cores: number; platform: string; uptime?: number; memory?: Usage; disk?: Usage; sampled_at: number; errors: string[] }
+type HostInfo = { hostname?: string; platform?: string; platform_version?: string; kernel?: string; arch?: string }
+type Metrics = { cpu_percent?: number; cores: number; platform: string; host?: HostInfo; uptime?: number; memory?: Usage; disk?: Usage; sampled_at: number; errors: string[] }
 
 const data = ref<Metrics | null>(null)
 const error = ref('')
@@ -57,6 +58,43 @@ const uptime = computed(() => {
   const s = data.value?.uptime
   if (s === undefined) return '—'
   return Math.floor(s / 86400) + 'd ' + Math.floor((s % 86400) / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm'
+})
+// gopsutil reports distro ids in lower case ("debian", "rockylinux"); map the
+// common ones to their real spelling and capitalise anything else.
+const PLATFORM_LABELS: Record<string, string> = {
+  debian: 'Debian',
+  ubuntu: 'Ubuntu',
+  centos: 'CentOS',
+  almalinux: 'AlmaLinux',
+  rockylinux: 'Rocky Linux',
+  fedora: 'Fedora',
+  arch: 'Arch Linux',
+  alpine: 'Alpine',
+  opensuse: 'openSUSE',
+  openwrt: 'OpenWrt',
+  raspbian: 'Raspbian',
+  linuxmint: 'Linux Mint',
+}
+function prettyPlatform(name?: string) {
+  if (!name) return ''
+  const key = name.toLowerCase().replace(/\s+/g, '')
+  return PLATFORM_LABELS[key] || name.charAt(0).toUpperCase() + name.slice(1)
+}
+const osLabel = computed(() => {
+  const host = data.value?.host
+  if (!host) return '—'
+  const name = prettyPlatform(host.platform) || data.value?.platform || ''
+  return [name, host.platform_version].filter(Boolean).join(' ') || '—'
+})
+const osDetail = computed(() => {
+  const host = data.value?.host
+  if (!host) return ''
+  return [
+    osLabel.value,
+    host.kernel,
+    host.arch,
+    host.hostname,
+  ].filter(Boolean).join(' · ')
 })
 const R = 52
 const CIRC = 2 * Math.PI * R
@@ -110,6 +148,7 @@ onBeforeUnmount(() => clearInterval(timer))
       </div>
       <div class="telemetry-meta">
         <span class="live-pill"><i />{{ autoRefresh ? t('实时采样') : t('已暂停') }}</span>
+        <span class="meta-item meta-os" :title="osDetail || undefined"><small>{{ t('系统') }}</small><strong>{{ osLabel }}</strong></span>
         <span class="meta-item"><small>{{ t('运行时长') }}</small><strong>{{ uptime }}</strong></span>
         <span v-if="!compact" class="meta-item meta-disk"><small>{{ t('数据目录所在磁盘') }}</small><strong>{{ data?.disk?.path || '—' }}</strong></span>
         <button class="icon-btn telemetry-refresh" :disabled="busy" :title="t('刷新')" :aria-label="t('刷新')" @click="load">
@@ -193,6 +232,7 @@ onBeforeUnmount(() => clearInterval(timer))
 .meta-item { display: flex; flex-direction: column; gap: 2px; }
 .meta-item small { color: var(--muted); font-size: 10px; }
 .meta-item strong { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text); }
+.meta-os strong { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
 .meta-disk strong { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
 .live-pill {
   display: inline-flex; align-items: center; gap: 7px;
