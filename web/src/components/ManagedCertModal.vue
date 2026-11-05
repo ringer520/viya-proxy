@@ -2,15 +2,30 @@
 import { t } from "../i18n";
 import {
   editingManagedID,
+  loadManagedCertZones,
   managedCertBusy,
   managedCertError,
   managedCertForm,
+  managedCertZone,
+  managedCertZoneLoading,
+  managedCertZoneMessage,
+  managedCertZones,
+  pickManagedCertZone,
   requestCertificate,
   showManagedCert,
 } from "../composables/useCertificates";
 import { openProvider } from "../composables/useNetwork";
 import { providers } from "../composables/useState";
 
+function onZoneChange(event: Event) {
+  pickManagedCertZone((event.target as HTMLSelectElement).value);
+}
+
+// 从 HTTP-01 切回 DNS-01 时，如果凭据已经选好，顺手把 Zone 也读出来。
+function onMethodChange() {
+  if (managedCertForm.value.method !== "dns-01") return;
+  if (managedCertForm.value.dns_provider_id) void loadManagedCertZones();
+}
 </script>
 
 <template>
@@ -38,16 +53,8 @@ import { providers } from "../composables/useState";
           required
           :placeholder="t('我的站点证书')" /></label
       ><label
-        >{{ t("证书域名")
-        }}<input
-          v-model="managedCertForm.domain"
-          :readonly="!!editingManagedID"
-          required
-          :placeholder="t('app.example.com 或 *.example.com')"
-          autocapitalize="none" /></label
-      ><label
         >{{ t("验证方式")
-        }}<select v-model="managedCertForm.method">
+        }}<select v-model="managedCertForm.method" @change="onMethodChange">
           <option value="dns-01">{{ t("DNS-01（支持泛域名）") }}</option>
           <option value="http-01">HTTP-01</option>
           <option value="internal">{{ t("内部 CA（内网使用）") }}</option>
@@ -66,15 +73,13 @@ import { providers } from "../composables/useState";
                 )
         }}
       </p>
-      <label v-if="managedCertForm.method !== 'internal'"
-        >{{ t("联系邮箱（可选）")
-        }}<input
-          v-model="managedCertForm.email"
-          type="email"
-          placeholder="admin@example.com" /></label
-      ><label v-if="managedCertForm.method === 'dns-01'"
+      <label v-if="managedCertForm.method === 'dns-01'"
         >{{ t("DNS 凭据")
-        }}<select v-model="managedCertForm.dns_provider_id" required>
+        }}<select
+          v-model="managedCertForm.dns_provider_id"
+          required
+          @change="loadManagedCertZones(true)"
+        >
           <option value="" disabled>{{ t("选择服务商凭据") }}</option>
           <option
             v-for="provider in providers"
@@ -94,6 +99,44 @@ import { providers } from "../composables/useState";
           {{ t("添加 DNS 凭据") }}
         </button>
       </div>
+      <label v-if="managedCertForm.method === 'dns-01' && managedCertZones.length > 1"
+        >{{ t("根域名（Zone）")
+        }}<select :value="managedCertZone" @change="onZoneChange">
+          <option value="" disabled>{{ t("从 Zone 列表选择") }}</option>
+          <option v-for="zone in managedCertZones" :key="zone.name" :value="zone.name">
+            {{ zone.name }}
+          </option>
+        </select></label
+      >
+      <p
+        v-if="managedCertForm.method === 'dns-01' && (managedCertZoneLoading || managedCertZoneMessage)"
+        class="inline-help"
+      >
+        {{ managedCertZoneLoading ? t("正在读取服务商 Zone…") : managedCertZoneMessage }}
+      </p>
+      <label
+        >{{ t("证书域名")
+        }}<input
+          v-model="managedCertForm.domain"
+          :readonly="!!editingManagedID"
+          required
+          :placeholder="t('app.example.com 或 *.example.com')"
+          autocapitalize="none" /></label
+      >
+      <p class="inline-help">
+        {{
+          t(
+            "泛域名不包含根域名本身：*.example.com 不覆盖 example.com，需要时另建一张证书。",
+          )
+        }}
+      </p>
+      <label v-if="managedCertForm.method !== 'internal'"
+        >{{ t("联系邮箱（可选）")
+        }}<input
+          v-model="managedCertForm.email"
+          type="email"
+          placeholder="admin@example.com" /></label
+      >
       <p class="auth-hint">
         {{
           t(

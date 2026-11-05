@@ -27,6 +27,111 @@ export const managedCertForm = ref({
 });
 export const editingManagedID = ref<number | null>(null);
 
+// 证书域名多数情况下就是某个 Zone 的泛域名，而 DNS 凭据本身已经能列出 Zone。
+// 选完凭据后直接读出来，省掉一次手打，但最终值仍由用户决定。
+export const managedCertZones = ref<{ name: string }[]>([]);
+export const managedCertZoneLoading = ref(false);
+export const managedCertZoneMessage = ref("");
+export const managedCertZone = ref("");
+export const managedCertManualZone = ref(false);
+// 上一次自动填入的值。只有域名仍等于它（或为空）时才允许覆盖，
+// 避免把用户手改过的域名冲掉。
+const managedCertAutoDomain = ref("");
+let certZoneSequence = 0;
+
+function certZoneForDomain(domain: string): string {
+  const plain = domain.replace(/^\*\./, "").toLowerCase();
+  if (!plain) return "";
+  const hit = managedCertZones.value.find(
+    (zone) => plain === zone.name || plain.endsWith("." + zone.name),
+  );
+  return hit?.name || "";
+}
+
+function fillManagedCertDomain(zone: string) {
+  if (editingManagedID.value !== null) return;
+  const domain = managedCertForm.value.domain.trim();
+  if (domain && domain !== managedCertAutoDomain.value) return;
+  const wildcard = `*.${zone}`;
+  managedCertForm.value.domain = wildcard;
+  managedCertAutoDomain.value = wildcard;
+  if (!managedCertForm.value.name.trim()) managedCertForm.value.name = zone;
+}
+
+export async function loadManagedCertZones(reset = false) {
+  const sequence = ++certZoneSequence;
+  managedCertZones.value = [];
+  managedCertZoneMessage.value = "";
+  managedCertManualZone.value = false;
+  if (reset) {
+    managedCertZone.value = "";
+    if (managedCertForm.value.domain === managedCertAutoDomain.value) {
+      managedCertForm.value.domain = "";
+    }
+    managedCertAutoDomain.value = "";
+  }
+  const providerID =
+    managedCertForm.value.method === "dns-01"
+      ? managedCertForm.value.dns_provider_id
+      : "";
+  if (!providerID) {
+    managedCertManualZone.value = true;
+    managedCertZoneLoading.value = false;
+    return;
+  }
+  managedCertZoneLoading.value = true;
+  try {
+    const response = await fetch(`/api/v1/dns-providers/${providerID}/zones`);
+    const data = await response.json();
+    if (sequence !== certZoneSequence) return;
+    if (!response.ok) throw Error(t(data.error) || t("读取 Zone 失败，可手动输入。"));
+    if (!data.supported) {
+      managedCertManualZone.value = true;
+      managedCertZoneMessage.value =
+        t(data.message) || t("此服务商暂不支持自动列出 Zone，请手动输入。");
+      return;
+    }
+    managedCertZones.value = data.zones || [];
+    if (!managedCertZones.value.length) {
+      managedCertManualZone.value = true;
+      managedCertZoneMessage.value =
+        t(data.message) || t("此服务商暂不支持自动列出 Zone，请手动输入。");
+      return;
+    }
+    const existing = certZoneForDomain(managedCertForm.value.domain);
+    if (existing) {
+      managedCertZone.value = existing;
+      managedCertZoneMessage.value = tr`已读取 ${managedCertZones.value.length} 个可管理 Zone。`;
+    } else if (managedCertZones.value.length === 1) {
+      managedCertZone.value = managedCertZones.value[0].name;
+      managedCertZoneMessage.value = tr`已读取 ${managedCertZones.value.length} 个可管理 Zone。`;
+      fillManagedCertDomain(managedCertZone.value);
+    } else {
+      managedCertZoneMessage.value = tr`已读取 ${managedCertZones.value.length} 个可管理 Zone。`;
+    }
+  } catch (e) {
+    if (sequence === certZoneSequence) {
+      managedCertManualZone.value = true;
+      managedCertZoneMessage.value =
+        e instanceof Error ? t(e.message) : t("读取 Zone 失败，可手动输入。");
+    }
+  } finally {
+    if (sequence === certZoneSequence) managedCertZoneLoading.value = false;
+  }
+}
+
+// 用户从下拉里明确选了一个 Zone，此时覆盖域名是预期的。
+export function pickManagedCertZone(zone: string) {
+  managedCertZone.value = zone;
+  if (!zone) return;
+  const domain = managedCertForm.value.domain.trim();
+  if (editingManagedID.value === null && (!domain || domain === managedCertAutoDomain.value)) {
+    managedCertForm.value.domain = `*.${zone}`;
+    managedCertAutoDomain.value = `*.${zone}`;
+  }
+  if (!managedCertForm.value.name.trim()) managedCertForm.value.name = zone;
+}
+
 export function openManagedCert(cert?: ManagedCertificate, clone = false) {
   if (!guardWrite()) return;
   editingManagedID.value = cert && !clone ? cert.id : null;
@@ -48,7 +153,15 @@ export function openManagedCert(cert?: ManagedCertificate, clone = false) {
         dns_provider_id: "",
       };
   managedCertError.value = "";
+  managedCertAutoDomain.value = "";
+  managedCertZones.value = [];
+  managedCertZone.value = "";
+  managedCertZoneMessage.value = "";
+  managedCertManualZone.value = false;
   showManagedCert.value = true;
+  if (managedCertForm.value.method === "dns-01" && managedCertForm.value.dns_provider_id) {
+    void loadManagedCertZones();
+  }
 }
 export async function refreshManagedCertificates() {
   try {

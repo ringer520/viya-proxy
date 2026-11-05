@@ -1626,5 +1626,7 @@
   "配好 HTTPS 后建议开启；域名访问和局域网 IP 都不受影响，本机连接始终可用。": "Turn this on once HTTPS works. Hostname access and LAN IPs are unaffected, and connections from this host always pass.",
   "留空表示不限制域名。填写后只有列表内的 Host 能打开面板，可防域名被指向本机后绕过限制。": "Leave empty for no hostname restriction. Once filled, only the listed hosts reach the panel, which also blocks a hostile domain pointed at this server.",
   "留空表示不限制来源。适合只允许固定出口 IP 的场景。": "Leave empty for no source restriction. Useful when only a fixed egress IP should connect.",
-  "高级：指定域名与来源网段": "Advanced: hostnames and source networks"
+  "高级：指定域名与来源网段": "Advanced: hostnames and source networks",
+  "根域名（Zone）": "Zone",
+  "泛域名不包含根域名本身：*.example.com 不覆盖 example.com，需要时另建一张证书。": "A wildcard does not cover the apex: *.example.com does not include example.com, so request a second certificate when you need it."
 }
