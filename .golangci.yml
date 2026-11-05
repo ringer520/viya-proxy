@@ -1,0 +1,52 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - misspell
+    - unconvert
+    - whitespace
+
+  settings:
+    errcheck:
+      # HTTP 处理器里写响应的返回值无法再补救，属于惯用忽略
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+        - (*encoding/json.Encoder).Encode
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+    staticcheck:
+      checks:
+        - all
+        # 面向用户的中文/英文错误文案不适用 Go 错误字符串小写约定
+        - -ST1005
+        # QF* 属于编辑器 quickfix 建议，不作为质量门禁
+        - -QF1001
+        - -QF1003
+        - -QF1008
+
+  exclusions:
+    generated: lax
+    rules:
+      # 清理路径上的 Close / Rollback / Remove 都是 defer 用法，
+      # 错误无处上报，忽略属于 Go 惯例；其它未处理错误仍会被 errcheck 捕获。
+      - text: "Error return value of .*(Close|Rollback|Remove|RemoveAll).* is not checked"
+        linters:
+          - errcheck
+      - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

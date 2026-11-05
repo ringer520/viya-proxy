@@ -22,11 +22,17 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - name: Frontend types and production build
+      - name: Frontend lint, types and production build
         run: |
           pnpm --dir web install --frozen-lockfile
+          pnpm --dir web lint
           pnpm --dir web typecheck
           pnpm --dir web build
+      - name: Backend lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.15
+
       - name: Backend checks
         run: |
           go vet ./...

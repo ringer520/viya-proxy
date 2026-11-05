@@ -1,0 +1,11 @@
+node_modules/
+dist/
+pnpm-lock.yaml
+*.min.js
+
+# Prettier 的 Vue 解析器无法处理这几个文件的密集内联写法
+# （嵌套 <template v-if> 位于文本节点、自闭合 <i/>），
+# Vue 编译器可正常编译，因此不纳入自动格式化。
+src/components/Ddnspage.vue
+src/components/Layer4Page.vue
+src/components/SiteDetailsDrawer.vue

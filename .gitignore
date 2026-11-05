@@ -1,7 +1,10 @@
 /data/
 /web/node_modules/
 /web/dist/
+# 前端产物由构建生成，不再入库（go:embed 目标，见 Makefile）
+/internal/web/dist/
 /bin/
+/build/bin/
 /release/
 *.exe
 *.db
