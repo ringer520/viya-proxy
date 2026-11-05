@@ -12,6 +12,8 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
 
+<p align="center"><a href="https://viya.861010.xyz">官网 · viya.861010.xyz</a></p>
+
 **目录**：[快速开始](#快速开始) · [安全提示](#安全提示) · [功能概览](#功能概览) · [界面预览](#界面预览) · [安装](#安装) · [备份与恢复](#备份与恢复) · [从源码构建](#从源码构建) · [卸载](#卸载) · [文件服务权限](docs/文件服务权限.md)
 
 ## 快速开始
