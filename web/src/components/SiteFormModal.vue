@@ -63,6 +63,18 @@ function onPathModeChange(event: Event) {
   }
 }
 
+// 「剥离前缀」依赖访问路径：路径被清空后该选项会从列表里消失，
+// 这里同步回退到「保持原样」，避免下拉停在一个不存在的选项上。
+watch(
+  () => form.value.path,
+  (value) => {
+    if (!String(value ?? "").trim() && pathMode.value === "strip") {
+      pathMode.value = "keep";
+      form.value.strip_prefix = false;
+    }
+  },
+);
+
 // File services have their own page; the type picker is replaced by a locked chip.
 const isFileService = computed(() => form.value.type === "files");
 watch(show, (open) => {
@@ -481,7 +493,7 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
         >{{ t("上游路径处理")
         }}<select :value="pathMode" @change="onPathModeChange">
           <option value="keep">{{ t("保持原样转发") }}</option>
-          <option value="strip" :disabled="!form.path">
+          <option v-if="form.path" value="strip">
             {{ t("剥离访问路径前缀") }}
           </option>
           <option value="rewrite">{{ t("重写到固定路径") }}</option>
