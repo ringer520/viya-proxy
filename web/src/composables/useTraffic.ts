@@ -258,4 +258,4 @@ export async function refreshTraffic() {
   }
 }
 
-registerRefreshTask("traffic",refreshTraffic);
+registerRefreshTask("traffic",refreshTraffic,"sites");

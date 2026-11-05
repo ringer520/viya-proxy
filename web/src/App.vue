@@ -59,7 +59,7 @@ import {
 } from "@lucide/vue";
 
 import { authenticated, csrfToken, authChecked, setupRequired, panelUsername, panelRole, readOnly, error, saving, applyRetryVisible, online, refreshing, resolveDelete, listSearch, statusFilter } from "./composables/useState";
-import { load } from "./composables/useRefresh";
+import { loadSection } from "./composables/useRefresh";
 import { retryApply } from "./composables/useApply";
 import { trafficRange, refreshTraffic } from "./composables/useTraffic";
 import {
@@ -356,8 +356,8 @@ async function refreshSession() {
       if (d && typeof d.current === "string") appVersion.value = d.current;
     })
     .catch(() => {});
-  await load();
   syncActiveSection();
+  await loadSection(activeSection.value);
 }
 async function authenticate() {
   authBusy.value = true;
@@ -588,6 +588,8 @@ function syncActiveSection() {
   if (activeSection.value !== 'overview' && trafficRange.value !== '24h') trafficRange.value = '24h';
   document.title = `${currentPage.value.label} · Viya`;
   window.scrollTo({ top: 0, behavior: "instant" });
+  // Visiting a page for the first time loads only the data groups it renders.
+  if (authenticated.value) void loadSection(activeSection.value);
 }
 
 // ---- re-apply after a partial save ----
@@ -607,7 +609,9 @@ function restartTrafficTimer() {
   if (trafficTimer) clearInterval(trafficTimer);
   trafficTimer = setInterval(() => {
     if (!canAutoRefresh()) return;
-    void refreshTraffic();
+    // Traffic charts only exist on these pages; polling them elsewhere was a
+    // steady stream of requests nobody was looking at.
+    if (["overview", "proxy-sites", "layer4"].includes(activeSection.value)) void refreshTraffic();
     if (viewingLogSite.value) void loadSiteLogs(viewingLogSite.value, true);
   }, refreshInterval.value * 1000);
 }

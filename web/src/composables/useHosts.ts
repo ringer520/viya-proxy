@@ -773,4 +773,4 @@ export async function toggleWebSearch() {
   } else listSearch.value = "";
 }
 
-registerRefreshTask("hosts",async()=>{await loadWebListeners();void refreshStaticSiteStats()});
+registerRefreshTask("hosts",async()=>{await loadWebListeners();void refreshStaticSiteStats()},"sites");

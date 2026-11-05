@@ -83,4 +83,4 @@ export async function saveSecurityDefaults(){
 }
 export function closeSecurityDialog(){if(securitySaving.value)return;securityDialog.value.open=false;securityError.value="";securityNotice.value=""}
 
-registerRefreshTask("security-defaults",loadSecurityDefaults);
+registerRefreshTask("security-defaults",loadSecurityDefaults,"bans");

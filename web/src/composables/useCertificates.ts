@@ -174,4 +174,4 @@ export const visibleManagedCerts = computed(() =>
   ),
 );
 
-registerRefreshTask("certificates",async()=>Promise.all([refreshManagedCertificates(),refreshCertificateInventory()]));
+registerRefreshTask("certificates",async()=>Promise.all([refreshManagedCertificates(),refreshCertificateInventory()]),"certs");
