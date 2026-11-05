@@ -122,7 +122,7 @@ function toggleMethod(method: string, checked: boolean) {
         >
       </div>
       <label
-        >{{ t("Content-Security-Policy（选填）")
+        >{{ t("Content-Security-Policy")
         }}<input
           :value="modelValue.csp"
           placeholder="default-src 'self'"

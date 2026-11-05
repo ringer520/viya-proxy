@@ -1069,12 +1069,6 @@ html[data-palette] .secondary.add-subdomain-button:hover:not(:disabled) { backgr
   border-color: color-mix(in srgb, var(--warning) 55%, var(--line));
   background: color-mix(in srgb, var(--warning) 12%, transparent);
 }
-.modal .drawer-check-line.files-write-toggle.is-muted {
-  opacity: 0.55;
-}
-.modal .drawer-check-line.files-write-toggle.is-muted span {
-  cursor: not-allowed;
-}
 .files-write-warning {
   display: flex;
   align-items: flex-start;
@@ -1091,5 +1085,24 @@ html[data-palette] .secondary.add-subdomain-button:hover:not(:disabled) { backgr
 .files-write-warning svg {
   flex: none;
   margin-top: 2px;
+}
+/* 必填标记：只标必填，选填字段不再逐个写「（选填）」。 */
+.field-req {
+  color: #dc2626;
+  font-weight: 700;
+  margin-left: 2px;
+}
+/* 保存前摘要：域名一行，类型/目标一行，避免挤在一行。 */
+.site-save-summary {
+  display: grid;
+  gap: 2px;
+  margin: 10px 0 0;
+}
+.site-save-summary strong {
+  font-size: 12px;
+}
+.site-save-summary small {
+  color: var(--muted);
+  font-size: 11px;
 }
 /* List row: capability chips + the copy-address action. */
