@@ -73,8 +73,6 @@ c.commit()"
 sudo systemctl restart viya
 ```
 
-本机发起连接的判定要求「连接方」和「解析后的真实客户端」同时是本机。只信任连接方会让 Caddy 反代后的所有请求都被当成来自 `127.0.0.1`，规则形同失效；`X-Forwarded-For` 仅在来源属于 `VIYA_TRUSTED_PROXIES` 时采信。
-
 </details>
 
 ### 始终要做的
@@ -90,28 +88,13 @@ sudo systemctl restart viya
 | --- | --- |
 | Web 服务 | 反向代理、静态站点、URL 重定向；按 HTTP/HTTPS 监听管理，支持路径匹配、上游调优、克隆与启停 |
 | TLS 证书 | 申请与自动续期、进度查看、自定义上传；站点可复用匹配的泛域名证书 |
-| 动态 DNS | A / AAAA / CNAME；跟随网卡或固定地址，定时与手动更新 |
+| 动态 DNS | A / AAAA / CNAME；跟随网卡或固定地址，定时与手动更新，固定地址失效会报错而非静默替换 |
 | DNS 凭据 | Cloudflare、DNSPod、阿里云等；凭据用独立主密钥加密存储 |
 | TCP / UDP 转发 | 单协议或双协议规则，与 Web 服务分别统计近 30 天连接与流量 |
 | 访问安全 | IP/CIDR 封禁、访问控制、登录限流、自动封禁、安全响应头 |
 | 运行维护 | 资源监控、访问日志、程序日志、流量趋势、配置历史、备份与恢复 |
 | 账户与界面 | 管理员与只读账号、中英文、五套基础主题与三套二次元主题 |
 | 文件 | 站点文件管理（上传、编辑、重命名、删除）；服务器文件服务默认隐藏且只读 |
-
-<details>
-<summary>操作状态的含义</summary>
-
-界面会把「配置成功」和「实际生效」分开显示，避免把保存成功当成服务可用。
-
-- 端口转发分别展示配置启停与实际监听核实结果；监听正常不等于上游业务正常。
-- DDNS 分阶段展示获取地址、比较、提交与服务商回读，分别记录检查时间和实际修改时间。IPv6 可选跟随网卡或固定地址；固定地址失效不会被静默替换。
-- SSL 证书关联使用情况显示在每项信息末行；站点诊断可检查完整访问链路。
-- DNS 凭据的只读验证通过，不代表具有写入权限。
-- IP 规则分手动、地区与自动封禁，可查询某地址命中的规则。修改面板自身的限制需在 120 秒内通过对应域名确认，否则自动恢复原规则；局域网入口可以取消。
-- 日志支持站点、关键词、时间与状态筛选，查询范围为当前文件尾部最多 2 MiB；配置历史保留最近 10 条操作摘要与操作者。
-- 地区限制按连接到 Caddy 的来源地址判断。使用 CDN 或其他代理时，代理出口可能被地区规则拦截。
-
-</details>
 
 ## 界面预览
 
@@ -164,7 +147,7 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 固定版本安装：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.4.0 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.5.1 sh
 ```
 
 环境变量必须放在管道右侧。
@@ -252,15 +235,7 @@ uci commit uhttpd && /etc/init.d/uhttpd restart
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.4.0 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
-```
-
-修改服务监听地址：
-
-```sh
-uci set viya.main.listen='0.0.0.0:8182'
-uci commit viya && /etc/init.d/viya restart
-logread -e viya
+VERSION=v0.5.1 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 需要 `curl` 或 `wget`、`tar`、`sha256sum`、`netstat`、UCI 与 HTTPS CA 证书（opkg 系安装 `ca-bundle`，apk 系安装 `ca-certificates`）。`/opt` 必须是持久化目录或已挂载的外部存储，下载解压还需 `/tmp` 约 128 MiB 可用空间。安装器不会自动开放 WAN 端口。小内存路由器建议挂外部存储或改用独立 Linux 主机。
@@ -305,10 +280,6 @@ VIYA_RESTORE_KEY=1 sh /opt/viya/scripts/restore-linux.sh /path/to/viya-backup.ta
 
 恢复会先备份当前数据，验证后替换，并检查 Viya 与 Caddy 就绪状态；启动失败会回退数据和密钥。目标机应先安装 Viya 并使用相同数据目录，可用 `VIYA_DATA_DIR`、`VIYA_MASTER_KEY_FILE`、`VIYA_BACKUP_DIR` 指定路径。
 
-面板中的加密配置导出不含账户、密码、会话与网站文件，但含业务凭据与证书，不应公开分享。Docker 用户应停止容器后备份整个映射目录。
-
-在「面板设置 → 存储」可查看占用并设置统计保留策略，日志轮转在「日志」中配置。手动清理只处理过期统计、近期访问记录与过期会话，不删除网站、证书和恢复点；SQLite 空闲页会复用，不承诺文件立即缩小。
-
 </details>
 
 ## 从源码构建
@@ -323,17 +294,7 @@ go build ./cmd/viya
 
 前端产物输出到 `internal/web/dist/`，该目录由构建生成、不入库。请务必先执行 `pnpm --dir web build`，否则 `go build` 会因 `go:embed` 找不到文件而失败。
 
-<details>
-<summary>Windows 打包与发布流程</summary>
-
-```powershell
-./scripts/build-linux.ps1
-./scripts/package-linux.ps1
-```
-
-推送 `v*` 标签触发 GitHub Actions，构建 amd64、arm64、armv7 安装包与 SHA-256 文件，同时发布多架构 Docker 镜像。版本说明位于 `docs/releases/`，也是 GitHub Release 正文。
-
-</details>
+推送 `v*` 标签会触发 GitHub Actions，构建 amd64 / arm64 / armv7 安装包、SHA-256 文件与多架构 Docker 镜像；版本说明取自 `docs/releases/<tag>.md`。
 
 ## 卸载
 

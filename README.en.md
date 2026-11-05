@@ -73,8 +73,6 @@ c.commit()"
 sudo systemctl restart viya
 ```
 
-The local bypass requires both the peer and the resolved client to be local. Trusting the peer alone would treat every proxied request as coming from `127.0.0.1` and disable the rules entirely; `X-Forwarded-For` is only read when the peer is in `VIYA_TRUSTED_PROXIES`.
-
 </details>
 
 ### Always
@@ -90,28 +88,13 @@ The local bypass requires both the peer and the resolved client to be local. Tru
 | --- | --- |
 | Web services | Reverse proxy, static site and URL redirect; managed per HTTP/HTTPS listener with path matching, upstream tuning, cloning and enable/disable |
 | TLS certificates | Issuance and auto-renewal, progress, custom upload; sites can reuse a matching wildcard certificate |
-| Dynamic DNS | A / AAAA / CNAME; follow the interface or pin an address, scheduled and manual updates |
+| Dynamic DNS | A / AAAA / CNAME; follow the interface or pin an address, scheduled and manual updates; a pinned address that disappears is reported, not silently replaced |
 | DNS credentials | Cloudflare, DNSPod, Alibaba Cloud and others; encrypted at rest with a separate master key |
 | TCP / UDP forwarding | Single- or dual-protocol rules with 30-day connection and traffic stats, counted separately from web traffic |
 | Access control | IP/CIDR bans, access rules, login throttling, automatic banning, security headers |
 | Operations | Resource monitoring, access and program logs, traffic trends, configuration history, backup and restore |
 | Accounts and UI | Administrator and read-only accounts, Chinese/English, five base themes plus three anime themes |
 | Files | Per-site file management (upload, edit, rename, delete); a read-only server file service, hidden by default |
-
-<details>
-<summary>What the status indicators mean</summary>
-
-The UI separates "configuration saved" from "actually serving", so a successful save is never mistaken for a working service.
-
-- Port forwarding shows the configured state and the verified listener separately; a listening port does not mean the upstream works.
-- DDNS reports each stage (address lookup, comparison, submission, provider read-back) and records inspection time apart from actual change time. IPv6 can follow the interface or pin an address; a pinned address that disappears is reported, not silently replaced.
-- Certificate usage is listed on the last line of each entry; site diagnostics check the whole request path.
-- A passing read-only credential check does not prove write permission.
-- Bans are manual, region-based or automatic, and you can query which rule matches an address. Changing the panel's own restriction must be confirmed through the matching hostname within 120 seconds, otherwise the previous rule is restored; the LAN entry can be cancelled.
-- Log filtering covers site, keyword, time and status over at most the last 2 MiB of the current file; configuration history keeps the latest 10 operation summaries and actors.
-- Region rules match the address that connects to Caddy. Behind a CDN or another proxy, the proxy egress may be blocked by your own region rules.
-
-</details>
 
 ## Screenshots
 
@@ -164,7 +147,7 @@ With a host firewall enabled, allow the panel TCP port from your LAN as well as 
 Pin a release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.4.0 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.5.1 sh
 ```
 
 Environment variables must stay on the right side of the pipe.
@@ -252,15 +235,7 @@ Pin a version and port:
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.4.0 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
-```
-
-Change the service listener:
-
-```sh
-uci set viya.main.listen='0.0.0.0:8182'
-uci commit viya && /etc/init.d/viya restart
-logread -e viya
+VERSION=v0.5.1 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 Requires `curl` or `wget`, `tar`, `sha256sum`, `netstat`, UCI and HTTPS CA certificates (`ca-bundle` on opkg systems, `ca-certificates` on apk systems). `/opt` must be persistent or an attached external volume, and downloads need roughly 128 MiB free in `/tmp`. The installer never opens WAN ports on its own. On low-memory routers, prefer external storage or a separate Linux host.
@@ -305,10 +280,6 @@ VIYA_RESTORE_KEY=1 sh /opt/viya/scripts/restore-linux.sh /path/to/viya-backup.ta
 
 Restore backs up the current data first, verifies, then swaps it in and checks that Viya and Caddy come up; a failed start rolls the data and key back. The target must already have Viya installed with the same data directory; `VIYA_DATA_DIR`, `VIYA_MASTER_KEY_FILE` and `VIYA_BACKUP_DIR` override the paths.
 
-The encrypted configuration export in the panel excludes accounts, passwords, sessions and site files, but includes live credentials and certificates — do not publish it. Docker users should stop the container and back up the whole mapped directory.
-
-Panel settings → Storage shows usage and the retention policy; log rotation is configured under Logs. Manual cleanup only removes expired statistics, recent access records and expired sessions — never sites, certificates or restore points. SQLite reuses free pages, so the file does not necessarily shrink immediately.
-
 </details>
 
 ## Build from source
@@ -323,17 +294,7 @@ go build ./cmd/viya
 
 The frontend is written to `internal/web/dist/`, which is generated and not committed. Always run `pnpm --dir web build` first, otherwise `go build` fails because `go:embed` cannot find the files.
 
-<details>
-<summary>Windows packaging and the release pipeline</summary>
-
-```powershell
-./scripts/build-linux.ps1
-./scripts/package-linux.ps1
-```
-
-Pushing a `v*` tag triggers GitHub Actions, which builds amd64, arm64 and armv7 packages with SHA-256 files and publishes multi-arch Docker images. Release notes live in `docs/releases/` and become the GitHub Release body.
-
-</details>
+Pushing a `v*` tag triggers GitHub Actions, which builds amd64 / arm64 / armv7 packages with SHA-256 files plus multi-arch Docker images; release notes come from `docs/releases/<tag>.md`.
 
 ## Uninstall
 
