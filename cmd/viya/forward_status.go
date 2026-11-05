@@ -18,6 +18,11 @@ type forwardRuntime struct {
 }
 
 func (a *App) forwardRuntimeStates(ctx context.Context, rules []Layer4Rule) {
+	// Nothing to annotate: enumerating every socket on the host is expensive
+	// (seconds on Windows) and would stall the whole panel refresh.
+	if len(rules) == 0 {
+		return
+	}
 	body, err := a.livePolicyConfig(ctx)
 	var config struct {
 		Apps struct {
@@ -31,9 +36,12 @@ func (a *App) forwardRuntimeStates(ctx context.Context, rules []Layer4Rule) {
 	}
 	var sockets []gnet.ConnectionStat
 	var socketErr error
+	// Bound the socket lookup so a busy host cannot hold the rule list open.
+	socketCtx, cancelSockets := context.WithTimeout(ctx, 3*time.Second)
+	defer cancelSockets()
 	pid := int32(a.caddyPID.Load())
 	if pid > 0 {
-		sockets, socketErr = gnet.ConnectionsPidWithContext(ctx, "all", pid)
+		sockets, socketErr = gnet.ConnectionsPidWithContext(socketCtx, "all", pid)
 	} else {
 		socketErr = fmt.Errorf("engine PID unavailable")
 	}

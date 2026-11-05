@@ -189,7 +189,7 @@ func (a *App) ingestTrafficFile(path string) error {
 	}
 	reader := bufio.NewReaderSize(source, 64*1024)
 	first, err := reader.ReadBytes('\n')
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		return nil
 	}
 	if err != nil {
@@ -200,7 +200,7 @@ func (a *App) ingestTrafficFile(path string) error {
 	var offset int64
 	var complete int
 	err = a.db.QueryRowContext(a.ctx, `SELECT offset,complete FROM traffic_cursors WHERE generation=?`, generation).Scan(&offset, &complete)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if complete != 0 {

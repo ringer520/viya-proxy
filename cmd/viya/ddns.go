@@ -734,7 +734,6 @@ func (a *App) executeDDNSRecord(ctx context.Context, id int64, manual bool) (str
 								status = "unverified"
 								message = err.Error()
 							}
-
 						}
 					}
 				}

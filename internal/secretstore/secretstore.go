@@ -1,3 +1,4 @@
+// Package secretstore 提供基于 AES-GCM 的字段级加密，用于保护 DNS 凭据等敏感数据。
 package secretstore
 
 import (

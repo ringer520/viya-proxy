@@ -6,15 +6,37 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net"
 	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
+// maintenancePage renders the 503 body shown while a site is paused. The
+// operator's message is HTML-escaped so a typo cannot inject markup.
+func maintenancePage(h Host) string {
+	message := strings.TrimSpace(h.MaintenanceMessage)
+	if message == "" {
+		message = "服务正在维护，请稍后访问。"
+	}
+	return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">" +
+		"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+		"<title>维护中</title><style>" +
+		"html,body{height:100%;margin:0}" +
+		"body{display:grid;place-items:center;background:#0f172a;color:#e2e8f0;" +
+		"font:15px/1.7 system-ui,-apple-system,'Segoe UI',sans-serif}" +
+		"main{max-width:32rem;padding:2.5rem;text-align:center}" +
+		"h1{font-size:3.25rem;margin:0 0 .5rem;letter-spacing:-.03em;color:#60a5fa}" +
+		"p{margin:0;color:#94a3b8}" +
+		"</style></head><body><main><h1>503</h1><p>" + html.EscapeString(message) +
+		"</p></main></body></html>"
+}
+
 func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
-	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,listener_id,upstream,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server FROM proxy_hosts WHERE enabled=1 ORDER BY domain`)
+	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,listener_id,upstream,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server,strip_prefix,rewrite_to,streaming,dial_timeout,response_header_timeout,maintenance,maintenance_message,spa_fallback,browse,webdav,webdav_write FROM proxy_hosts WHERE enabled=1 ORDER BY domain`)
 	if err != nil {
 		return nil, err
 	}
@@ -26,12 +48,19 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		var redirectKeepPath int
 		var headers, allowJSON, denyJSON, securityJSON, methodsJSON string
 		var maxBody int64
-		var hideServer int
-		if err := rows.Scan(&h.ID, &h.Domain, &h.ListenerID, &h.Upstream, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headers, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer); err != nil {
+		var hideServer, stripPrefix, streaming, maintenance, spaFallback, browse, webdav, webdavWrite int
+		if err := rows.Scan(&h.ID, &h.Domain, &h.ListenerID, &h.Upstream, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headers, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer, &stripPrefix, &h.RewriteTo, &streaming, &h.DialTimeout, &h.ResponseHeaderTimeout, &maintenance, &h.MaintenanceMessage, &spaFallback, &browse, &webdav, &webdavWrite); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		h.RedirectKeepPath = redirectKeepPath == 1
+		h.StripPrefix = stripPrefix == 1
+		h.Streaming = streaming == 1
+		h.Maintenance = maintenance == 1
+		h.SpaFallback = spaFallback == 1
+		h.Browse = browse == 1
+		h.WebDAV = webdav == 1
+		h.WebDAVWrite = webdavWrite == 1
 		if providerID.Valid {
 			h.DNSProviderID = &providerID.Int64
 		}
@@ -183,28 +212,133 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 				"handle": []any{map[string]any{"handler": "static_response", "status_code": 405, "body": "Method Not Allowed"}},
 			})
 		}
-		switch host.Type {
-		case "static":
-			// The configured root is stored in request variables for file_server.
-			rootMatcher := map[string]any{"host": []string{host.Domain}}
-			if host.Path != "" {
-				rootMatcher["path"] = []string{host.Path, host.Path + "/*"}
+		// Path rewriting runs before the terminal handler; both options apply to
+		// every site type. Maintenance mode skips them because it never forwards.
+		// Caddy has no standalone "uri" handler: the Caddyfile `uri strip_prefix`
+		// directive compiles to a rewrite handler using strip_path_prefix.
+		if !host.Maintenance {
+			if host.StripPrefix && host.Path != "" {
+				handlers = append(handlers, map[string]any{"handler": "rewrite", "strip_path_prefix": host.Path})
 			}
-			hostRoutes = append(hostRoutes, map[string]any{"match": []any{rootMatcher}, "handle": []any{map[string]any{"handler": "vars", "root": host.RootPath}}})
-			fileServer := map[string]any{"handler": "file_server", "root": host.RootPath}
-			handlers = append(handlers, fileServer)
-		case "redirect":
-			location := host.RedirectTarget
-			if host.RedirectKeepPath {
-				location += "{http.request.uri}"
+			if host.RewriteTo != "" {
+				handlers = append(handlers, map[string]any{"handler": "rewrite", "uri": host.RewriteTo})
 			}
-			handlers = append(handlers, map[string]any{"handler": "static_response", "status_code": host.RedirectStatus, "headers": map[string]any{"Location": []string{location}}})
-		default:
-			proxy := map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": upstreamDial(host.Upstream)}}}
-			if upstream, parseErr := url.Parse(host.Upstream); parseErr == nil && upstream.Scheme == "https" {
-				proxy["transport"] = map[string]any{"protocol": "http", "tls": map[string]any{"server_name": upstream.Hostname()}}
+		}
+		if host.Maintenance {
+			// The security middleware above (auth, rate limit, headers) stays in
+			// effect; only the terminal handler is replaced by a 503 page.
+			handlers = append(handlers, map[string]any{
+				"handler":     "static_response",
+				"status_code": 503,
+				"body":        maintenancePage(host),
+				"headers": map[string][]string{
+					"Content-Type":  {"text/html; charset=utf-8"},
+					"Retry-After":   {"3600"},
+					"Cache-Control": {"no-store"},
+				},
+			})
+		} else {
+			// Snapshot the middleware chain built so far. Site types that need
+			// more than one terminal route (file services) reuse it so auth,
+			// headers and rate limits apply to every entry point equally.
+			securityChain := append([]any{}, handlers...)
+			switch host.Type {
+			case "static":
+				// The configured root is stored in request variables for file_server.
+				rootMatcher := map[string]any{"host": []string{host.Domain}}
+				if host.Path != "" {
+					rootMatcher["path"] = []string{host.Path, host.Path + "/*"}
+				}
+				hostRoutes = append(hostRoutes, map[string]any{"match": []any{rootMatcher}, "handle": []any{map[string]any{"handler": "vars", "root": host.RootPath}}})
+				fileServer := map[string]any{"handler": "file_server", "root": host.RootPath}
+				if host.Browse {
+					// Empty object = default directory listing template.
+					fileServer["browse"] = map[string]any{}
+				}
+				handlers = append(handlers, fileServer)
+			case "files":
+				// One shared directory, up to two entry points. WebDAV verbs are
+				// matched on the method so they never reach file_server, and the
+				// browser keeps a normal directory listing.
+				pathMatch := []string(nil)
+				if host.Path != "" {
+					pathMatch = []string{host.Path, host.Path + "/*"}
+				}
+				writeMethods := []string{"PUT", "DELETE", "MKCOL", "COPY", "MOVE", "PROPPATCH", "LOCK", "UNLOCK"}
+				if host.WebDAV {
+					readMethods := []string{"PROPFIND", "OPTIONS"}
+					davMethods := readMethods
+					if host.WebDAVWrite {
+						davMethods = append(append([]string{}, readMethods...), writeMethods...)
+					} else {
+						// Reject write verbs explicitly; a bare 405 from file_server
+						// would not tell the client that write access is disabled.
+						blockMatcher := map[string]any{"host": []string{host.Domain}, "method": writeMethods}
+						if pathMatch != nil {
+							blockMatcher["path"] = pathMatch
+						}
+						hostRoutes = append(hostRoutes, map[string]any{
+							"match": []any{blockMatcher},
+							"handle": append(append([]any{}, securityChain...), map[string]any{
+								"handler":     "static_response",
+								"status_code": 405,
+								"body":        "WebDAV write access is disabled for this share.",
+								"headers":     map[string][]string{"Content-Type": {"text/plain; charset=utf-8"}, "Allow": {"PROPFIND, OPTIONS, GET, HEAD"}},
+							}),
+						})
+					}
+					davMatcher := map[string]any{"host": []string{host.Domain}, "method": davMethods}
+					if pathMatch != nil {
+						davMatcher["path"] = pathMatch
+					}
+					hostRoutes = append(hostRoutes, map[string]any{
+						"match": []any{davMatcher},
+						"handle": append(append([]any{}, securityChain...), map[string]any{
+							"handler": "webdav",
+							"root":    host.RootPath,
+						}),
+					})
+				}
+				fileServer := map[string]any{"handler": "file_server", "root": host.RootPath}
+				if host.Browse {
+					fileServer["browse"] = map[string]any{}
+				}
+				handlers = append(handlers, fileServer)
+			case "redirect":
+				location := host.RedirectTarget
+				if host.RedirectKeepPath {
+					location += "{http.request.uri}"
+				}
+				handlers = append(handlers, map[string]any{"handler": "static_response", "status_code": host.RedirectStatus, "headers": map[string]any{"Location": []string{location}}})
+			default:
+				proxy := map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": upstreamDial(host.Upstream)}}}
+				// -1 disables response buffering so SSE and token-by-token output
+				// reach the browser as soon as the upstream writes it.
+				if host.Streaming {
+					proxy["flush_interval"] = -1
+				}
+				transport := map[string]any{}
+				usesTLS := false
+				if upstream, parseErr := url.Parse(host.Upstream); parseErr == nil && upstream.Scheme == "https" {
+					usesTLS = true
+					transport["tls"] = map[string]any{"server_name": upstream.Hostname()}
+				}
+				// Caddy decodes the transport by its "protocol" module name, so
+				// any non-empty transport must carry it, not just the TLS case.
+				if usesTLS || host.DialTimeout != "" || host.ResponseHeaderTimeout != "" {
+					transport["protocol"] = "http"
+				}
+				if host.DialTimeout != "" {
+					transport["dial_timeout"] = host.DialTimeout
+				}
+				if host.ResponseHeaderTimeout != "" {
+					transport["response_header_timeout"] = host.ResponseHeaderTimeout
+				}
+				if len(transport) > 0 {
+					proxy["transport"] = transport
+				}
+				handlers = append(handlers, proxy)
 			}
-			handlers = append(handlers, proxy)
 		}
 		hostRoutes = append(hostRoutes, map[string]any{"match": []any{hostMatcher}, "handle": handlers})
 		routesByListener[host.ListenerID] = append(routesByListener[host.ListenerID], hostRoutes...)

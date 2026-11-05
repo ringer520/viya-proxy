@@ -71,14 +71,35 @@ type Host struct {
 	RateLimitWindow     string             `json:"rate_limit_window,omitempty"`
 	Type                string             `json:"type"`
 	RootPath            string             `json:"root_path,omitempty"`
-	RedirectTarget      string             `json:"redirect_target,omitempty"`
-	RedirectStatus      int                `json:"redirect_status,omitempty"`
-	RedirectKeepPath    bool               `json:"redirect_keep_path"`
-	SecurityHeaders     SecurityHeaders    `json:"security_headers"`
-	MaxBodyBytes        int64              `json:"max_body_bytes"`
-	AllowedMethods      []string           `json:"allowed_methods"`
-	HideServer          bool               `json:"hide_server"`
-	Version             int64              `json:"version"`
+	// Static sites: fall back to index.html for client-side routing, and let
+	// visitors browse the directory listing. File-service sites use Browse as
+	// their web directory listing switch.
+	SpaFallback bool `json:"spa_fallback"`
+	Browse      bool `json:"browse"`
+	// File-service sites: expose the same share over WebDAV, optionally writable.
+	WebDAV           bool            `json:"webdav"`
+	WebDAVWrite      bool            `json:"webdav_write"`
+	RedirectTarget   string          `json:"redirect_target,omitempty"`
+	RedirectStatus   int             `json:"redirect_status,omitempty"`
+	RedirectKeepPath bool            `json:"redirect_keep_path"`
+	SecurityHeaders  SecurityHeaders `json:"security_headers"`
+	MaxBodyBytes     int64           `json:"max_body_bytes"`
+	AllowedMethods   []string        `json:"allowed_methods"`
+	HideServer       bool            `json:"hide_server"`
+	// Path rewriting: strip the matched Path prefix before forwarding, and/or
+	// rewrite the request path to a fixed target. Both apply to every site type.
+	StripPrefix bool   `json:"strip_prefix"`
+	RewriteTo   string `json:"rewrite_to,omitempty"`
+	// Upstream connection tuning (proxy sites only). Streaming disables response
+	// buffering so SSE / token-by-token output reaches the browser immediately.
+	Streaming             bool   `json:"streaming"`
+	DialTimeout           string `json:"dial_timeout,omitempty"`
+	ResponseHeaderTimeout string `json:"response_header_timeout,omitempty"`
+	// Maintenance short-circuits the final handler with a 503 page while keeping
+	// the security middleware chain (headers, rate limit) active.
+	Maintenance        bool   `json:"maintenance"`
+	MaintenanceMessage string `json:"maintenance_message,omitempty"`
+	Version            int64  `json:"version"`
 }
 
 type Layer4Rule struct {
@@ -116,6 +137,8 @@ type App struct {
 	certProgressMu sync.RWMutex
 	certProgress   map[string]certificateProgress
 	dataDir        string
+	filesRoot      string
+	filesReadOnly  bool
 	failCounts     map[string][]time.Time
 	applyKick      chan struct{}
 	ddnsRunning    map[int64]bool
@@ -194,7 +217,7 @@ func main() {
 		slog.Error("invalid Caddy HTTP listener", "error", err)
 		os.Exit(1)
 	}
-	app := &App{db: db, adminURL: adminURL, adminListen: adminListen, httpListen: httpListen, caddyBin: env("VIYA_CADDY_BIN", filepath.Join("bin", "caddy")), secureCookies: secureCookies, trustedProxies: trustedProxies, ctx: runCtx, masterKey: masterKey, dataDir: dataDir, failCounts: make(map[string][]time.Time), certProgress: make(map[string]certificateProgress), applyKick: make(chan struct{}, 1), ddnsRunning: make(map[int64]bool)}
+	app := &App{db: db, adminURL: adminURL, adminListen: adminListen, httpListen: httpListen, caddyBin: env("VIYA_CADDY_BIN", filepath.Join("bin", "caddy")), secureCookies: secureCookies, trustedProxies: trustedProxies, ctx: runCtx, masterKey: masterKey, dataDir: dataDir, filesRoot: env("VIYA_FILES_ROOT", "/"), filesReadOnly: env("VIYA_FILES_READONLY", "1") != "0", failCounts: make(map[string][]time.Time), certProgress: make(map[string]certificateProgress), applyKick: make(chan struct{}, 1), ddnsRunning: make(map[int64]bool)}
 	app.configureProgramLogging()
 	app.loadApplicationJournal()
 	if err := app.initListenerSites(); err != nil {
@@ -254,11 +277,27 @@ func main() {
 	// Static-site file management (list/upload/download/delete/mkdir). Writes
 	// are limited to the managed sites tree and stay admin-only via requireAuth.
 	mux.Handle("GET /api/v1/proxy-hosts/{id}/files", app.requireAuth(http.HandlerFunc(app.listSiteFiles)))
+	mux.Handle("GET /api/v1/proxy-hosts/{id}/files/text", app.requireAuth(http.HandlerFunc(app.siteFileText)))
+	mux.Handle("PUT /api/v1/proxy-hosts/{id}/files/text", app.requireAuth(http.HandlerFunc(app.siteFileText)))
 	mux.Handle("GET /api/v1/proxy-hosts/{id}/files/stat", app.requireAuth(http.HandlerFunc(app.siteFileStats)))
 	mux.Handle("GET /api/v1/proxy-hosts/{id}/files/download", app.requireAuth(http.HandlerFunc(app.downloadSiteFile)))
 	mux.Handle("POST /api/v1/proxy-hosts/{id}/files/upload", app.requireAuth(http.HandlerFunc(app.uploadSiteFiles)))
 	mux.Handle("POST /api/v1/proxy-hosts/{id}/files/mkdir", app.requireAuth(http.HandlerFunc(app.mkdirSiteFile)))
 	mux.Handle("DELETE /api/v1/proxy-hosts/{id}/files", app.requireAuth(http.HandlerFunc(app.deleteSiteFile)))
+	// Server-wide file manager (rooted at VIYA_FILES_ROOT, default "/").
+	mux.Handle("GET /api/v1/files/browse", app.requireAuth(http.HandlerFunc(app.listServerFiles)))
+	mux.Handle("GET /api/v1/files/tree", app.requireAuth(http.HandlerFunc(app.serverFileTree)))
+	mux.Handle("POST /api/v1/files/mkdir", app.requireAuth(http.HandlerFunc(app.mkdirServerFile)))
+	mux.Handle("POST /api/v1/files/create", app.requireAuth(http.HandlerFunc(app.touchServerFile)))
+	mux.Handle("POST /api/v1/files/upload", app.requireAuth(http.HandlerFunc(app.uploadServerFiles)))
+	mux.Handle("GET /api/v1/files/content", app.requireAuth(http.HandlerFunc(app.serverFileText)))
+	mux.Handle("PUT /api/v1/files/content", app.requireAuth(http.HandlerFunc(app.serverFileText)))
+	mux.Handle("GET /api/v1/files/download", app.requireAuth(http.HandlerFunc(app.downloadServerFile)))
+	mux.Handle("POST /api/v1/files/rename", app.requireAuth(http.HandlerFunc(app.renameServerFile)))
+	mux.Handle("DELETE /api/v1/files", app.requireAuth(http.HandlerFunc(app.deleteServerFile)))
+	// WebDAV share configuration (single files-type host).
+	mux.Handle("GET /api/v1/webdav-settings", app.requireAuth(http.HandlerFunc(app.getWebDAVSettings)))
+	mux.Handle("PUT /api/v1/webdav-settings", app.requireAuth(http.HandlerFunc(app.saveWebDAVSettings)))
 	mux.Handle("GET /api/v1/logs/stream", app.requireAuth(http.HandlerFunc(app.streamLogs)))
 	mux.Handle("GET /api/v1/ip-bans", app.requireAuth(http.HandlerFunc(app.listIPBans)))
 	mux.Handle("POST /api/v1/ip-bans", app.requireAuth(http.HandlerFunc(app.saveIPBan)))
@@ -391,7 +430,9 @@ func main() {
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			slog.Warn("HTTP server shutdown", "error", err)
 		}
-		<-serveErr
+		if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Warn("HTTP server serve", "error", err)
+		}
 	}
 }
 
@@ -542,7 +583,7 @@ func (a *App) isCaddyReady() bool {
 }
 
 func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,domain,listener_id,upstream,enabled,version,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server FROM proxy_hosts ORDER BY domain`)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,domain,listener_id,upstream,enabled,version,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server,strip_prefix,rewrite_to,streaming,dial_timeout,response_header_timeout,maintenance,maintenance_message,spa_fallback,browse,webdav,webdav_write FROM proxy_hosts ORDER BY domain`)
 	if err != nil {
 		fail(w, 500, err)
 		return
@@ -556,12 +597,19 @@ func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
 		var certID sql.NullInt64
 		var headerJSON, allowJSON, denyJSON, securityJSON, methodsJSON string
 		var maxBody int64
-		var hideServer int
-		if err := rows.Scan(&h.ID, &h.Name, &h.Domain, &h.ListenerID, &h.Upstream, &enabled, &h.Version, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headerJSON, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer); err != nil {
+		var hideServer, stripPrefix, streaming, maintenance, spaFallback, browse, webdav, webdavWrite int
+		if err := rows.Scan(&h.ID, &h.Name, &h.Domain, &h.ListenerID, &h.Upstream, &enabled, &h.Version, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headerJSON, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer, &stripPrefix, &h.RewriteTo, &streaming, &h.DialTimeout, &h.ResponseHeaderTimeout, &maintenance, &h.MaintenanceMessage, &spaFallback, &browse, &webdav, &webdavWrite); err != nil {
 			fail(w, 500, err)
 			return
 		}
 		h.Enabled = enabled == 1
+		h.StripPrefix = stripPrefix == 1
+		h.Streaming = streaming == 1
+		h.Maintenance = maintenance == 1
+		h.SpaFallback = spaFallback == 1
+		h.Browse = browse == 1
+		h.WebDAV = webdav == 1
+		h.WebDAVWrite = webdavWrite == 1
 		h.RedirectKeepPath = redirectKeepPath == 1
 		if providerID.Valid {
 			h.DNSProviderID = &providerID.Int64
@@ -735,7 +783,7 @@ func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
-	res, err := a.db.ExecContext(r.Context(), `INSERT INTO proxy_hosts(name,domain,listener_id,upstream,enabled,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,spa_fallback,browse,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, h.PasswordHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, 0, 0, h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer))
+	res, err := a.db.ExecContext(r.Context(), `INSERT INTO proxy_hosts(name,domain,listener_id,upstream,enabled,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,spa_fallback,browse,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server,strip_prefix,rewrite_to,streaming,dial_timeout,response_header_timeout,maintenance,maintenance_message,webdav,webdav_write) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, h.PasswordHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, boolInt(h.SpaFallback), boolInt(h.Browse), h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer), boolInt(h.StripPrefix), h.RewriteTo, boolInt(h.Streaming), h.DialTimeout, h.ResponseHeaderTimeout, boolInt(h.Maintenance), h.MaintenanceMessage, boolInt(h.WebDAV), boolInt(h.WebDAVWrite))
 	if err != nil {
 		status, mapped := classifyHostWriteError(err)
 		fail(w, status, mapped)
@@ -816,7 +864,7 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	res, err := a.db.ExecContext(r.Context(), `UPDATE proxy_hosts SET name=?,domain=?,listener_id=?,upstream=?,enabled=?,tls_mode=?,https_port=443,path=?,icon_color=?,dns_provider_id=?,custom_certificate_id=?,custom_headers=?,basic_auth_user=?,basic_auth_hash=?,ip_allowlist=?,ip_denylist=?,rate_limit_requests=?,rate_limit_window=?,type=?,root_path=?,spa_fallback=?,browse=?,redirect_target=?,redirect_status=?,redirect_keep_path=?,security_headers=?,max_body_bytes=?,allowed_methods=?,hide_server=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, storedHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, 0, 0, h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer), id, h.Version)
+	res, err := a.db.ExecContext(r.Context(), `UPDATE proxy_hosts SET name=?,domain=?,listener_id=?,upstream=?,enabled=?,tls_mode=?,https_port=443,path=?,icon_color=?,dns_provider_id=?,custom_certificate_id=?,custom_headers=?,basic_auth_user=?,basic_auth_hash=?,ip_allowlist=?,ip_denylist=?,rate_limit_requests=?,rate_limit_window=?,type=?,root_path=?,spa_fallback=?,browse=?,redirect_target=?,redirect_status=?,redirect_keep_path=?,security_headers=?,max_body_bytes=?,allowed_methods=?,hide_server=?,strip_prefix=?,rewrite_to=?,streaming=?,dial_timeout=?,response_header_timeout=?,maintenance=?,maintenance_message=?,webdav=?,webdav_write=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, storedHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, boolInt(h.SpaFallback), boolInt(h.Browse), h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer), boolInt(h.StripPrefix), h.RewriteTo, boolInt(h.Streaming), h.DialTimeout, h.ResponseHeaderTimeout, boolInt(h.Maintenance), h.MaintenanceMessage, boolInt(h.WebDAV), boolInt(h.WebDAVWrite), id, h.Version)
 	if err != nil {
 		status, mapped := classifyHostWriteError(err)
 		fail(w, status, mapped)
@@ -1003,7 +1051,7 @@ func managedStaticSiteRoot(a *App, domain string) string {
 // Roots inside the managed tree are created on demand; external roots must
 // already exist because the service cannot write outside its data directory.
 func (a *App) prepareSiteStorage(h *Host) error {
-	if h.Type != "static" {
+	if h.Type != "static" && h.Type != "files" {
 		return nil
 	}
 	root := strings.TrimSpace(h.RootPath)
@@ -1059,8 +1107,30 @@ func validateHost(h *Host) error {
 		h.Upstream = ""
 		h.RedirectTarget = ""
 		h.RedirectStatus = 0
+		h.WebDAV = false
+		h.WebDAVWrite = false
 		// An empty root is fine here: prepareSiteStorage assigns a managed
 		// directory below. Anything non-empty must be a clean absolute path.
+		if strings.TrimSpace(h.RootPath) != "" {
+			if err := validateStaticRoot(h.RootPath); err != nil {
+				return err
+			}
+		}
+	case "files":
+		// A file service serves one shared directory over the web and/or WebDAV.
+		// It never proxies, never redirects and has no SPA entry point.
+		h.Upstream = ""
+		h.RedirectTarget = ""
+		h.RedirectStatus = 0
+		h.SpaFallback = false
+		if !h.Browse && !h.WebDAV {
+			return errors.New("请至少开启“网页目录浏览”或“WebDAV”中的一项")
+		}
+		// Write access is meaningless without WebDAV; drop it instead of storing
+		// a switch that cannot take effect.
+		if !h.WebDAV {
+			h.WebDAVWrite = false
+		}
 		if strings.TrimSpace(h.RootPath) != "" {
 			if err := validateStaticRoot(h.RootPath); err != nil {
 				return err
@@ -1089,7 +1159,7 @@ func validateHost(h *Host) error {
 			return errors.New("redirect status must be 301, 302, 307 or 308")
 		}
 	default:
-		return errors.New("site type must be proxy, static or redirect")
+		return errors.New("site type must be proxy, static, files or redirect")
 	}
 	h.Path = strings.TrimSpace(h.Path)
 	if h.Path != "" {
@@ -1101,6 +1171,36 @@ func validateHost(h *Host) error {
 	if h.Path == "/" {
 		h.Path = ""
 	}
+	// Path rewriting. Stripping only makes sense against a matched prefix, and a
+	// rewrite target must be an absolute path so Caddy can apply it verbatim.
+	if h.StripPrefix && h.Path == "" {
+		return errors.New("剥离访问路径前缀需要先填写访问路径")
+	}
+	h.RewriteTo = strings.TrimSpace(h.RewriteTo)
+	if h.RewriteTo != "" {
+		if !strings.HasPrefix(h.RewriteTo, "/") || len(h.RewriteTo) > 512 || strings.ContainsAny(h.RewriteTo, "?#\\\r\n\x00\t ") {
+			return errors.New("重写路径须以 / 开始，不能包含空格、查询参数、片段或反斜杠")
+		}
+	}
+	// Upstream tuning. Empty means "keep the Caddy default".
+	h.DialTimeout = strings.TrimSpace(h.DialTimeout)
+	if h.DialTimeout != "" {
+		d, err := time.ParseDuration(h.DialTimeout)
+		if err != nil || d <= 0 {
+			return errors.New("连接超时须为合法的正时长，例如 10s、500ms")
+		}
+	}
+	h.ResponseHeaderTimeout = strings.TrimSpace(h.ResponseHeaderTimeout)
+	if h.ResponseHeaderTimeout != "" {
+		d, err := time.ParseDuration(h.ResponseHeaderTimeout)
+		if err != nil || d <= 0 {
+			return errors.New("响应头超时须为合法的正时长，例如 30s、2m")
+		}
+	}
+	if len([]rune(h.MaintenanceMessage)) > 500 {
+		return errors.New("维护提示不能超过 500 个字符")
+	}
+	h.MaintenanceMessage = strings.TrimSpace(h.MaintenanceMessage)
 	switch h.IconColor {
 	case "", "blue":
 		h.IconColor = "blue"
@@ -1463,6 +1563,9 @@ func ensureColumn(db *sql.DB, table, column, definition string) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	// Close the cursor before altering: SQLite refuses to write while a read
+	// cursor on the same schema is still open on this connection.
+	rows.Close()
 	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
 	return err
 }

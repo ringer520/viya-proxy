@@ -13,6 +13,7 @@ require (
 	github.com/caddyserver/caddy/v2 v2.11.7
 	github.com/mholt/caddy-l4 v0.1.2
 	github.com/mholt/caddy-ratelimit v0.1.0
+	github.com/mholt/caddy-webdav v0.0.0-20260127042217-fa2f366b0d75
 )
 
 require (

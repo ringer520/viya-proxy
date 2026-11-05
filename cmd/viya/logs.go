@@ -160,12 +160,6 @@ func caddyLogKind(event map[string]any) string {
 	return "other"
 }
 
-func readRecentLogFile(path string, limit int) ([]map[string]any, error) {
-	return readRecentLogFileWhere(path, limit, func(event map[string]any) bool {
-		return caddyLogKind(event) == "access"
-	})
-}
-
 func readRecentLogFileWhere(path string, limit int, keep func(map[string]any) bool) ([]map[string]any, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -180,7 +174,6 @@ func readRecentLogFileWhere(path string, limit int, keep func(map[string]any) bo
 	if info.Size() > 2<<20 {
 		start = info.Size() - (2 << 20)
 		_, _ = f.Seek(start, io.SeekStart)
-
 	}
 	reader := bufio.NewReader(f)
 	if start > 0 {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 )
 
@@ -119,5 +120,34 @@ func migrateBaselineSchema(db *sql.DB) error {
 		return err
 	}
 
+	return nil
+}
+
+// Columns added after the first public release. They are applied on every
+// startup instead of inside a versioned migration: SQLite has no
+// "ADD COLUMN IF NOT EXISTS", and a database created by this build already
+// carries them in the baseline above. ensureColumn is a no-op when the column
+// is present, so the same list serves fresh installs and upgrades alike.
+var proxyHostAdditiveColumns = []struct{ name, definition string }{
+	// Path rewriting, upstream tuning and maintenance mode.
+	{"strip_prefix", "INTEGER NOT NULL DEFAULT 0"},
+	{"rewrite_to", "TEXT NOT NULL DEFAULT ''"},
+	{"streaming", "INTEGER NOT NULL DEFAULT 0"},
+	{"dial_timeout", "TEXT NOT NULL DEFAULT ''"},
+	{"response_header_timeout", "TEXT NOT NULL DEFAULT ''"},
+	{"maintenance", "INTEGER NOT NULL DEFAULT 0"},
+	{"maintenance_message", "TEXT NOT NULL DEFAULT ''"},
+	// File-service sites share a directory over HTTP and/or WebDAV.
+	{"webdav", "INTEGER NOT NULL DEFAULT 0"},
+	{"webdav_write", "INTEGER NOT NULL DEFAULT 0"},
+}
+
+func migrateAdditiveColumns(db *sql.DB) error {
+	for _, column := range proxyHostAdditiveColumns {
+		if err := ensureColumn(db, "proxy_hosts", column.name, column.definition); err != nil {
+			slog.Error("database schema update", "column", column.name, "error", err)
+			return fmt.Errorf("proxy_hosts.%s: %w", column.name, err)
+		}
+	}
 	return nil
 }

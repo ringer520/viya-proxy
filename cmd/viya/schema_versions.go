@@ -64,5 +64,10 @@ CREATE TABLE provider_checks(provider_id INTEGER PRIMARY KEY REFERENCES dns_prov
 			return err
 		}
 	}
+	// Additive columns must also land on databases that were created by an
+	// older release, which never re-run the baseline above.
+	if err := migrateAdditiveColumns(db); err != nil {
+		return fmt.Errorf("additive columns: %w", err)
+	}
 	return nil
 }

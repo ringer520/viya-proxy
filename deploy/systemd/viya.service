@@ -12,6 +12,10 @@ StartLimitIntervalSec=60
 
 [Service]
 Type=simple
+# Least privilege: the panel and its Caddy child run as an unprivileged user.
+# The file service is read-only by default; writes stay limited to the two
+# ReadWritePaths below. Unlock more (VIYA_FILES_READONLY=0 + extra
+# ReadWritePaths) only for a dedicated data directory, never for /.
 User=viya
 Group=viya
 Environment=VIYA_LISTEN=0.0.0.0:8181
@@ -37,5 +41,3 @@ UMask=0077
 
 [Install]
 WantedBy=multi-user.target
-
-

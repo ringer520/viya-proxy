@@ -49,7 +49,8 @@ type siteFileEntry struct {
 }
 
 // loadStaticSite returns the site's id and cleaned root directory. It refuses
-// non-static sites so the file API cannot be pointed at a proxy upstream.
+// other site types so the file API cannot be pointed at a proxy upstream.
+// File services serve a directory too, so they share this path.
 func (a *App) loadStaticSite(r *http.Request) (int64, string, error) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
@@ -59,8 +60,8 @@ func (a *App) loadStaticSite(r *http.Request) (int64, string, error) {
 	if err := a.db.QueryRowContext(r.Context(), `SELECT type,root_path FROM proxy_hosts WHERE id=?`, id).Scan(&siteType, &root); err != nil {
 		return 0, "", errors.New("site not found")
 	}
-	if siteType != "static" {
-		return 0, "", errors.New("file management is only available for static sites")
+	if siteType != "static" && siteType != "files" {
+		return 0, "", errors.New("file management is only available for static and file-service sites")
 	}
 	root = strings.TrimSpace(root)
 	if err := validateStaticRoot(root); err != nil {

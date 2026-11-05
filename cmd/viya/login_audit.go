@@ -116,7 +116,7 @@ func (a *App) listLoginAudit(w http.ResponseWriter, r *http.Request) {
 		}
 		entries = append(entries, entry)
 	}
-	if err := rows.Err(); err != nil && err != sql.ErrNoRows {
+	if err := rows.Err(); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		fail(w, http.StatusInternalServerError, errors.New("login audit unavailable"))
 		return
 	}

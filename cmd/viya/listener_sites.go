@@ -21,7 +21,7 @@ func (a *App) initListenerSites() error {
 		if _, err := a.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
 			return err
 		}
-		defer a.db.Exec(`PRAGMA foreign_keys=ON`)
+		defer func() { _, _ = a.db.Exec(`PRAGMA foreign_keys=ON`) }()
 		tx, err := a.db.Begin()
 		if err != nil {
 			return err
