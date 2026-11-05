@@ -35,10 +35,40 @@ import SitePolicyFields from "./SitePolicyFields.vue";
 import SiteSecurityPolicy from "./SiteSecurityPolicy.vue";
 import { computed, ref, watch } from "vue";
 const iconPickerOpen = ref(false);
+// 上游路径处理：把「剥离前缀」和「重写路径」合并成互斥选项。
+// Caddy 里两者对应两条 rewrite，同时配置时后者会静默覆盖前者，
+// 用单选从结构上避免这种自相矛盾的组合。
+type PathMode = "keep" | "strip" | "rewrite";
+const pathMode = ref<PathMode>("keep");
+
+function syncPathMode() {
+  pathMode.value = form.value.rewrite_to
+    ? "rewrite"
+    : form.value.strip_prefix
+      ? "strip"
+      : "keep";
+}
+
+function onPathModeChange(event: Event) {
+  const next = (event.target as HTMLSelectElement).value as PathMode;
+  pathMode.value = next;
+  if (next === "strip") {
+    form.value.strip_prefix = true;
+    form.value.rewrite_to = "";
+  } else if (next === "rewrite") {
+    form.value.strip_prefix = false;
+  } else {
+    form.value.strip_prefix = false;
+    form.value.rewrite_to = "";
+  }
+}
+
 // File services have their own page; the type picker is replaced by a locked chip.
 const isFileService = computed(() => form.value.type === "files");
 watch(show, (open) => {
-  if (!open) {
+  if (open) {
+    syncPathMode();
+  } else {
     error.value = "";
     iconPickerOpen.value = false;
   }
@@ -441,25 +471,39 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
           autocapitalize="none"
           spellcheck="false"
         /><small>{{
-          t("留空时整个域名都转发；填写路径后仅匹配该路径和它下面的子路径。")
+          t("留空时接管整个域名；填写后只有该路径及其子路径进入本站点，其余路径不归它处理。")
+        }}</small>
+        <small>{{
+          t("同一域名在同一监听端口下只能有一个站点，无法靠路径把同一个域名拆给多个后端。")
         }}</small></label
       >
       <label
-        v-if="form.path"
-        class="drawer-check-line"
-        :title="t('例如访问路径为 /api 时，请求 /api/users 转发到上游会变成 /users')"
+        >{{ t("上游路径处理")
+        }}<select :value="pathMode" @change="onPathModeChange">
+          <option value="keep">{{ t("保持原样转发") }}</option>
+          <option value="strip" :disabled="!form.path">
+            {{ t("剥离访问路径前缀") }}
+          </option>
+          <option value="rewrite">{{ t("重写到固定路径") }}</option>
+        </select>
+        <small v-if="pathMode === 'strip'">{{
+          t("例如访问路径为 /api 时，请求 /api/users 转发到上游会变成 /users")
+        }}</small>
+        <small v-else-if="pathMode === 'rewrite'">{{
+          t("匹配到的请求会整体改写为该路径，不是拼接前缀；查询参数保持不变。")
+        }}</small>
+        <small v-else>{{ t("默认把原始路径原样转发给上游。") }}</small></label
       >
-        <input v-model="form.strip_prefix" type="checkbox" />
-        <span>{{ t("转发时剥离此前缀") }}</span>
-      </label>
-      <label
-        >{{ t("重写路径（选填）")
+      <label v-if="pathMode === 'rewrite'"
+        >{{ t("重写目标路径")
         }}<input
           v-model="form.rewrite_to"
-          placeholder="/new-path"
+          placeholder="/index.php"
           autocapitalize="none"
           spellcheck="false"
-        /><small>{{ t("把匹配到的请求路径改写为目标路径；留空不重写，查询参数保持不变。") }}</small></label
+        /><small>{{
+          t("整个路径会被替换成这个值，例如填 /index.php 时 /api/users 也会变成 /index.php。")
+        }}</small></label
       >
       <h3 class="form-section-title">{{ t("HTTPS 与证书") }}</h3>
       <label
