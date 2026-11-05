@@ -1,0 +1,29 @@
+# Keep the build context small: the image is built from source, so local build
+# output and dependencies must not be shipped to the daemon.
+
+# Git and CI metadata
+.git
+.gitignore
+.gitattributes
+.github
+
+# Local build output (rebuilt inside the image)
+bin
+release
+dist
+internal/web/dist
+
+# Frontend dependencies and build output
+web/node_modules
+web/dist
+
+# Docs, reviews and local runtime state
+docs
+output
+.preview
+*.log
+*.db
+*.db-shm
+*.db-wal
+master.key
+bootstrap-caddy.json

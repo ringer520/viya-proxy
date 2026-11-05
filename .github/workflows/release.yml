@@ -11,6 +11,7 @@ permissions:
 jobs:
   checks:
     uses: ./.github/workflows/checks.yml
+
   release:
     needs: checks
     runs-on: ubuntu-latest
@@ -101,17 +102,43 @@ jobs:
           cd release
           sha256sum *.tar.gz > sha256sums.txt
 
-      - name: Publish release
+      # A release must not fail just because nobody wrote hand-written notes for
+      # the tag. Prefer docs/releases/<tag>.md when it exists, otherwise let
+      # GitHub generate the notes from commits and pull requests.
+      - name: Locate release notes
+        id: notes
+        run: |
+          if [ -f "docs/releases/${GITHUB_REF_NAME}.md" ]; then
+            echo "path=docs/releases/${GITHUB_REF_NAME}.md" >> "$GITHUB_OUTPUT"
+            echo "使用手写发布说明：docs/releases/${GITHUB_REF_NAME}.md"
+          else
+            echo "path=" >> "$GITHUB_OUTPUT"
+            echo "未找到 docs/releases/${GITHUB_REF_NAME}.md，改用自动生成的发布说明。"
+          fi
+
+      - name: Publish release (curated notes)
+        if: steps.notes.outputs.path != ''
         uses: softprops/action-gh-release@v2
         with:
           files: |
             release/*.tar.gz
             release/sha256sums.txt
-          body_path: docs/releases/${{ github.ref_name }}.md
+          body_path: ${{ steps.notes.outputs.path }}
 
+      - name: Publish release (generated notes)
+        if: steps.notes.outputs.path == ''
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.tar.gz
+            release/sha256sums.txt
+          generate_release_notes: true
+
+  # Runs alongside the release so an artifact problem cannot leave the image
+  # behind, and a Docker Hub hiccup cannot block the GitHub release.
   docker:
+    needs: checks
     runs-on: ubuntu-latest
-    needs: release
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -128,11 +155,15 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract version tag
+      - name: Docker metadata
         id: meta
-        run: |
-          echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+        uses: docker/metadata-action@v5
+        with:
+          images: ringer520/viya-proxy
+          tags: |
+            type=raw,value=latest
+            type=ref,event=tag
+            type=sha,prefix=sha-,format=short
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -141,9 +172,10 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
+            VERSION=${{ github.ref_name }}
             BUILD_COMMIT=${{ github.sha }}
-            BUILD_TIME=${{ steps.meta.outputs.built }}
-          tags: |
-            ringer520/viya-proxy:latest
-            ringer520/viya-proxy:${{ steps.meta.outputs.version }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
