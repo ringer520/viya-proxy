@@ -12,6 +12,7 @@
 - [Linux installation](#linux-installation) · [Docker installation and updates](#docker-installation-and-updates)
 - [Backups and restore](#backups-and-restore) · [One-line OpenWrt installation](#one-line-openwrt-installation)
 - [Build from source](#build-from-source) · [Uninstall](#uninstall)
+- [File service permissions](docs/文件服务权限.md) (Chinese): what the file manager can see, how to widen it, why it is read-only
 
 ### Operational status and access protection
 
@@ -59,6 +60,7 @@ Web services and port forwards have separate rolling 30-day statistics. Click th
 
 - **Web services:** reverse proxy, static hosting and URL redirects, grouped by HTTP/HTTPS listener; custom ports and paths, clone, enable/disable and security policies.
 - **Static files:** upload, browse, download, rename and delete website files in the panel. Choose whether to remove hosted files when deleting a site.
+- **Server file browser:** hidden by default and enabled from panel settings; browses the whole filesystem read-only. See [file service permissions](docs/文件服务权限.md) for scope and how to widen it.
 - **TLS certificates:** issue and renew certificates, see issuance progress, upload custom certificates and reuse matching wildcard certificates.
 - **Dynamic DNS:** A, AAAA and CNAME records; choose an interface address or public-IP lookup; scheduled and manual updates.
 - **DNS credentials:** Cloudflare, DNSPod, Alibaba Cloud and other supported providers. Credentials are encrypted with a separately stored master key.
