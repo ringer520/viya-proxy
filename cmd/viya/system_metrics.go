@@ -79,6 +79,38 @@ func storeMetrics(value map[string]any, done chan struct{}) {
 	close(done)
 }
 
+// The distro/kernel banner never changes while the process runs, so read it
+// once and keep it. A failed read is retried on the next sample instead of
+// being latched off, which a sync.Once would do.
+var (
+	hostInfoMu sync.Mutex
+	hostInfo   map[string]any
+)
+
+func staticHostInfo() map[string]any {
+	hostInfoMu.Lock()
+	defer hostInfoMu.Unlock()
+	if hostInfo != nil {
+		return hostInfo
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	info, err := host.InfoWithContext(ctx)
+	if err != nil {
+		return nil
+	}
+	// Distro name/version come from the host's own release files, so a
+	// container reports the image it runs on rather than the hypervisor.
+	hostInfo = map[string]any{
+		"hostname":         info.Hostname,
+		"platform":         info.Platform,
+		"platform_version": info.PlatformVersion,
+		"kernel":           info.KernelVersion,
+		"arch":             info.KernelArch,
+	}
+	return hostInfo
+}
+
 func (a *App) systemMetrics(w http.ResponseWriter, r *http.Request) {
 	if value, ok := readMetricsCache(3 * time.Second); ok {
 		writeJSON(w, 200, value)
@@ -137,6 +169,9 @@ func (a *App) collectMetrics(r *http.Request) map[string]any {
 		} else {
 			errs = append(errs, "Disk unavailable")
 		}
+	}
+	if info := staticHostInfo(); info != nil {
+		result["host"] = info
 	}
 	if u, e := host.UptimeWithContext(ctx); e == nil {
 		result["uptime"] = u
