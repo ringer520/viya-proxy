@@ -76,7 +76,6 @@ import {
   openCreate,
   show as siteFormOpen,
   webSearchOpen,
-  webHosts,
   fileSearch,
   fileStatusFilter,
 } from "./composables/useHosts";
@@ -787,10 +786,6 @@ onBeforeUnmount(() => {
             ><component :is="item.icon" :size="18" /><span>{{
               item.label
             }}</span
-            ><span
-              v-if="item.id === 'proxy-sites'"
-              class="count"
-              >{{ webHosts.length }}</span
             ><ThemeEmblem v-if="activeAnimeTheme && activeSection===item.id" class="nav-theme-emblem"/></a
           >
         </div>
