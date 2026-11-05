@@ -31,6 +31,9 @@ func Handler() http.Handler {
 			r.URL.Path = "/"
 		}
 		setCacheControl(w, name)
+		if serveNotModified(w, r, etagFor(root, name)) {
+			return
+		}
 		if serveCompressed(w, r, root, cache, name) {
 			return
 		}

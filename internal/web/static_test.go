@@ -149,3 +149,99 @@ func TestHandlerSPAFallbackServesIndex(t *testing.T) {
 		t.Errorf("index.html 应 no-cache，实际 %q", rec.Header().Get("Cache-Control"))
 	}
 }
+
+func TestETagCore(t *testing.T) {
+	cases := map[string]string{
+		`W/"1f-abc"`:      "1f-abc",
+		`"1f-abc"`:        "1f-abc",
+		`W/"1f-abc-gzip"`: "1f-abc",
+		`1f-abc`:          "1f-abc",
+	}
+	for in, want := range cases {
+		if got := etagCore(in); got != want {
+			t.Errorf("etagCore(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Both representations carry the same bytes, so a cache holding either variant
+// must be able to revalidate against the other.
+func TestETagMatchesIgnoresEncodingSuffix(t *testing.T) {
+	identity := `W/"100-abcdef"`
+	gzipETagValue := gzipETag(identity)
+
+	if !etagMatches(identity, identity) {
+		t.Error("identity validator should match itself")
+	}
+	if !etagMatches(gzipETagValue, identity) {
+		t.Error("gzip validator should revalidate an identity response")
+	}
+	if !etagMatches(identity, gzipETagValue) {
+		t.Error("identity validator should revalidate a gzip response")
+	}
+	if !etagMatches(`W/"other", `+identity, identity) {
+		t.Error("a list should match on any entry")
+	}
+	if etagMatches(`W/"other"`, identity) {
+		t.Error("unrelated validator must not match")
+	}
+	if etagMatches("", identity) {
+		t.Error("an absent header must not match")
+	}
+}
+
+// A stored copy used to be downloaded in full on every panel load because
+// embed.FS gives no modification time and no validator was set.
+func TestHandlerRevalidatesWithETag(t *testing.T) {
+	h := Handler()
+
+	first := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, first)
+
+	etag := rec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("响应对 / 未下发 ETag，浏览器无法 304")
+	}
+
+	second := httptest.NewRequest(http.MethodGet, "/", nil)
+	second.Header.Set("If-None-Match", etag)
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, second)
+
+	if rec2.Code != http.StatusNotModified {
+		t.Fatalf("状态 = %d，应为 304", rec2.Code)
+	}
+	if rec2.Body.Len() != 0 {
+		t.Errorf("304 不应带响应体，实际 %d 字节", rec2.Body.Len())
+	}
+}
+
+func TestHandlerGzipETagDiffersFromIdentity(t *testing.T) {
+	name := findAsset(t, ".js")
+	if name == "" {
+		t.Skip("没有可压缩的资源")
+	}
+	h := Handler()
+
+	plain := httptest.NewRequest(http.MethodGet, "/"+name, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, plain)
+	identity := rec.Header().Get("ETag")
+
+	gz := httptest.NewRequest(http.MethodGet, "/"+name, nil)
+	gz.Header.Set("Accept-Encoding", "gzip")
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, gz)
+	compressed := rec2.Header().Get("ETag")
+
+	if rec2.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("应返回 gzip，实际 %q", rec2.Header().Get("Content-Encoding"))
+	}
+	if identity == "" || compressed == "" {
+		t.Fatalf("两个表示都应带 ETag，得到 %q / %q", identity, compressed)
+	}
+	if identity == compressed {
+		t.Error("压缩与非压缩表示的 ETag 必须不同")
+	}
+}

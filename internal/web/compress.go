@@ -127,6 +127,11 @@ func serveCompressed(w http.ResponseWriter, r *http.Request, root fs.FS, cache *
 
 	w.Header().Set("Content-Encoding", "gzip")
 	w.Header().Set("Content-Type", contentType)
+	// The validator was computed for the identity bytes; mark the variant so a
+	// cache never mixes the two representations.
+	if etag := w.Header().Get("ETag"); etag != "" {
+		w.Header().Set("ETag", gzipETag(etag))
+	}
 	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(body))
 	return true
 }
