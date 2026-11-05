@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,60 +35,18 @@ func maintenancePage(h Host) string {
 }
 
 func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
-	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,listener_id,upstream,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server,strip_prefix,rewrite_to,streaming,dial_timeout,response_header_timeout,maintenance,maintenance_message,spa_fallback,browse,webdav,webdav_write FROM proxy_hosts WHERE enabled=1 ORDER BY domain`)
+	rows, err := a.db.QueryContext(ctx, `SELECT `+hostReadColumns+` FROM proxy_hosts WHERE enabled=1 ORDER BY domain`)
 	if err != nil {
 		return nil, err
 	}
 	hosts := []Host{}
 	for rows.Next() {
-		var h Host
-		var providerID sql.NullInt64
-		var certID sql.NullInt64
-		var redirectKeepPath int
-		var headers, allowJSON, denyJSON, securityJSON, methodsJSON string
-		var maxBody int64
-		var hideServer, stripPrefix, streaming, maintenance, spaFallback, browse, webdav, webdavWrite int
-		if err := rows.Scan(&h.ID, &h.Domain, &h.ListenerID, &h.Upstream, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headers, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer, &stripPrefix, &h.RewriteTo, &streaming, &h.DialTimeout, &h.ResponseHeaderTimeout, &maintenance, &h.MaintenanceMessage, &spaFallback, &browse, &webdav, &webdavWrite); err != nil {
+		h, scanErr := scanHost(rows)
+		if scanErr != nil {
 			rows.Close()
-			return nil, err
+			return nil, scanErr
 		}
-		h.RedirectKeepPath = redirectKeepPath == 1
-		h.StripPrefix = stripPrefix == 1
-		h.Streaming = streaming == 1
-		h.Maintenance = maintenance == 1
-		h.SpaFallback = spaFallback == 1
-		h.Browse = browse == 1
-		h.WebDAV = webdav == 1
-		h.WebDAVWrite = webdavWrite == 1
-		if providerID.Valid {
-			h.DNSProviderID = &providerID.Int64
-		}
-		if certID.Valid {
-			h.CustomCertificateID = &certID.Int64
-		}
-		if err := json.Unmarshal([]byte(headers), &h.CustomHeaders); err != nil {
-			rows.Close()
-			return nil, errors.New("已保存的自定义请求头无效")
-		}
-		if err := json.Unmarshal([]byte(securityJSON), &h.SecurityHeaders); err != nil {
-			rows.Close()
-			return nil, errors.New("已保存的安全响应头无效")
-		}
-		h.MaxBodyBytes = maxBody
-		h.HideServer = hideServer == 1
-		if err := json.Unmarshal([]byte(methodsJSON), &h.AllowedMethods); err != nil {
-			rows.Close()
-			return nil, errors.New("已保存的请求方法无效")
-		}
-		if err := json.Unmarshal([]byte(allowJSON), &h.IPAllowlist); err != nil {
-			rows.Close()
-			return nil, errors.New("已保存的 IP 允许列表无效")
-		}
-		if err := json.Unmarshal([]byte(denyJSON), &h.IPDenylist); err != nil {
-			rows.Close()
-			return nil, errors.New("已保存的 IP 拒绝列表无效")
-		}
-		hosts = append(hosts, h)
+		hosts = append(hosts, *h)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()

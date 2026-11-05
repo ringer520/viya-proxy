@@ -599,7 +599,7 @@ func (a *App) isCaddyReady() bool {
 }
 
 func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,domain,listener_id,upstream,enabled,version,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server,strip_prefix,rewrite_to,streaming,dial_timeout,response_header_timeout,maintenance,maintenance_message,spa_fallback,browse,webdav,webdav_write FROM proxy_hosts ORDER BY domain`)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT `+hostReadColumns+` FROM proxy_hosts ORDER BY domain`)
 	if err != nil {
 		fail(w, 500, err)
 		return
@@ -607,56 +607,12 @@ func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	result := []Host{}
 	for rows.Next() {
-		var h Host
-		var enabled, redirectKeepPath int
-		var providerID sql.NullInt64
-		var certID sql.NullInt64
-		var headerJSON, allowJSON, denyJSON, securityJSON, methodsJSON string
-		var maxBody int64
-		var hideServer, stripPrefix, streaming, maintenance, spaFallback, browse, webdav, webdavWrite int
-		if err := rows.Scan(&h.ID, &h.Name, &h.Domain, &h.ListenerID, &h.Upstream, &enabled, &h.Version, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headerJSON, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer, &stripPrefix, &h.RewriteTo, &streaming, &h.DialTimeout, &h.ResponseHeaderTimeout, &maintenance, &h.MaintenanceMessage, &spaFallback, &browse, &webdav, &webdavWrite); err != nil {
-			fail(w, 500, err)
+		h, scanErr := scanHost(rows)
+		if scanErr != nil {
+			fail(w, 500, scanErr)
 			return
 		}
-		h.Enabled = enabled == 1
-		h.StripPrefix = stripPrefix == 1
-		h.Streaming = streaming == 1
-		h.Maintenance = maintenance == 1
-		h.SpaFallback = spaFallback == 1
-		h.Browse = browse == 1
-		h.WebDAV = webdav == 1
-		h.WebDAVWrite = webdavWrite == 1
-		h.RedirectKeepPath = redirectKeepPath == 1
-		if providerID.Valid {
-			h.DNSProviderID = &providerID.Int64
-		}
-		if certID.Valid {
-			h.CustomCertificateID = &certID.Int64
-		}
-		if err := json.Unmarshal([]byte(headerJSON), &h.CustomHeaders); err != nil {
-			fail(w, 500, errors.New("已保存的自定义请求头无效"))
-			return
-		}
-		if err := json.Unmarshal([]byte(securityJSON), &h.SecurityHeaders); err != nil {
-			fail(w, 500, errors.New("已保存的安全响应头无效"))
-			return
-		}
-		h.MaxBodyBytes = maxBody
-		h.HideServer = hideServer == 1
-		if err := json.Unmarshal([]byte(methodsJSON), &h.AllowedMethods); err != nil {
-			fail(w, 500, errors.New("已保存的请求方法无效"))
-			return
-		}
-		if err := json.Unmarshal([]byte(allowJSON), &h.IPAllowlist); err != nil {
-			fail(w, 500, errors.New("已保存的 IP 允许列表无效"))
-			return
-		}
-		if err := json.Unmarshal([]byte(denyJSON), &h.IPDenylist); err != nil {
-			fail(w, 500, errors.New("已保存的 IP 拒绝列表无效"))
-			return
-		}
-		h.BasicAuthEnabled = h.PasswordHash != ""
-		result = append(result, h)
+		result = append(result, *h)
 	}
 	if err := rows.Err(); err != nil {
 		fail(w, 500, err)
@@ -790,16 +746,11 @@ func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
 		}
 		h.PasswordHash = hash
 	}
-	headerJSON, _ := json.Marshal(h.CustomHeaders)
-	allowJSON, _ := json.Marshal(h.IPAllowlist)
-	denyJSON, _ := json.Marshal(h.IPDenylist)
-	securityJSON, _ := json.Marshal(h.SecurityHeaders)
-	methodsJSON, _ := json.Marshal(h.AllowedMethods)
 	if err := a.prepareSiteStorage(&h); err != nil {
 		fail(w, 400, err)
 		return
 	}
-	res, err := a.db.ExecContext(r.Context(), `INSERT INTO proxy_hosts(name,domain,listener_id,upstream,enabled,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,spa_fallback,browse,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server,strip_prefix,rewrite_to,streaming,dial_timeout,response_header_timeout,maintenance,maintenance_message,webdav,webdav_write) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, h.PasswordHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, boolInt(h.SpaFallback), boolInt(h.Browse), h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer), boolInt(h.StripPrefix), h.RewriteTo, boolInt(h.Streaming), h.DialTimeout, h.ResponseHeaderTimeout, boolInt(h.Maintenance), h.MaintenanceMessage, boolInt(h.WebDAV), boolInt(h.WebDAVWrite))
+	res, err := a.db.ExecContext(r.Context(), hostInsertSQL(), hostWriteValues(h)...)
 	if err != nil {
 		status, mapped := classifyHostWriteError(err)
 		fail(w, status, mapped)
@@ -852,11 +803,6 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.prepareHostPolicy(r.Context(), &h)
-	headerJSON, _ := json.Marshal(h.CustomHeaders)
-	allowJSON, _ := json.Marshal(h.IPAllowlist)
-	denyJSON, _ := json.Marshal(h.IPDenylist)
-	securityJSON, _ := json.Marshal(h.SecurityHeaders)
-	methodsJSON, _ := json.Marshal(h.AllowedMethods)
 	if err := a.prepareSiteStorage(&h); err != nil {
 		fail(w, 400, err)
 		return
@@ -880,7 +826,8 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	res, err := a.db.ExecContext(r.Context(), `UPDATE proxy_hosts SET name=?,domain=?,listener_id=?,upstream=?,enabled=?,tls_mode=?,https_port=443,path=?,icon_color=?,dns_provider_id=?,custom_certificate_id=?,custom_headers=?,basic_auth_user=?,basic_auth_hash=?,ip_allowlist=?,ip_denylist=?,rate_limit_requests=?,rate_limit_window=?,type=?,root_path=?,spa_fallback=?,browse=?,redirect_target=?,redirect_status=?,redirect_keep_path=?,security_headers=?,max_body_bytes=?,allowed_methods=?,hide_server=?,strip_prefix=?,rewrite_to=?,streaming=?,dial_timeout=?,response_header_timeout=?,maintenance=?,maintenance_message=?,webdav=?,webdav_write=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?`, h.Name, h.Domain, h.ListenerID, h.Upstream, boolInt(h.Enabled), h.TLSMode, h.Path, h.IconColor, h.DNSProviderID, h.CustomCertificateID, string(headerJSON), h.BasicAuthUser, storedHash, string(allowJSON), string(denyJSON), h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath, boolInt(h.SpaFallback), boolInt(h.Browse), h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath), string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer), boolInt(h.StripPrefix), h.RewriteTo, boolInt(h.Streaming), h.DialTimeout, h.ResponseHeaderTimeout, boolInt(h.Maintenance), h.MaintenanceMessage, boolInt(h.WebDAV), boolInt(h.WebDAVWrite), id, h.Version)
+	h.PasswordHash = storedHash
+	res, err := a.db.ExecContext(r.Context(), hostUpdateSQL(), append(hostWriteValues(h), id, h.Version)...)
 	if err != nil {
 		status, mapped := classifyHostWriteError(err)
 		fail(w, status, mapped)
