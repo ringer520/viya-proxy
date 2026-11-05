@@ -29,26 +29,26 @@
 
 运行概览展示服务器资源、可切换时间范围的流量趋势和需要关注的服务状态。点击 Web 错误率可按站点和状态码定位近期异常；其他管理页面可展开查看。
 
-![Viya 运行概览](docs/screenshots/02-overview.png)
+![Viya 运行概览](docs/screenshots/02-overview.webp)
 
 <details>
 <summary>展开查看其他界面</summary>
 
 | Web 服务 | TCP / UDP 端口转发 |
 | --- | --- |
-| ![Web 服务](docs/screenshots/03-proxy-sites.png) | ![端口转发](docs/screenshots/04-layer4.png) |
+| ![Web 服务](docs/screenshots/03-proxy-sites.webp) | ![端口转发](docs/screenshots/04-layer4.webp) |
 
 | 动态 DNS | SSL 证书 |
 | --- | --- |
-| ![动态 DNS](docs/screenshots/05-ddns.png) | ![SSL 证书](docs/screenshots/06-certificates.png) |
+| ![动态 DNS](docs/screenshots/05-ddns.webp) | ![SSL 证书](docs/screenshots/06-certificates.webp) |
 
 | DNS 凭据 | IP 封禁 |
 | --- | --- |
-| ![DNS 凭据](docs/screenshots/07-dns-providers.png) | ![IP 封禁](docs/screenshots/08-ip-bans.png) |
+| ![DNS 凭据](docs/screenshots/07-dns-providers.webp) | ![IP 封禁](docs/screenshots/08-ip-bans.webp) |
 
 | 日志 | 配置历史 |
 | --- | --- |
-| ![日志](docs/screenshots/09-logs.png) | ![配置历史](docs/screenshots/10-config-history.png) |
+| ![日志](docs/screenshots/09-logs.webp) | ![配置历史](docs/screenshots/10-config-history.webp) |
 
 </details>
 
@@ -202,6 +202,15 @@ VERSION=v0.3.1 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 
 需要 `curl` 或 `wget`、`tar`、`sha256sum`、`netstat`、UCI 和 HTTPS CA 证书。缺少证书时，opkg 系统可执行 `opkg update && opkg install ca-bundle`；使用 apk 的 OpenWrt 可安装 `ca-certificates`。安装器不会自动开放 WAN 防火墙端口。
 
+OpenWrt 的 80 端口默认由 LuCI 的 uhttpd 占用，而 Viya 的 Web 监听默认就是 80/443。安装器会指出占用该端口的进程并继续安装，不会中断；但在释放该端口或把 Web 监听改到其他端口之前，**已保存的站点无法对外服务**，表现为配置应用失败。安装结束时的 `ACTION REQUIRED` 段落会重复这项提示。两种处理方式：
+
+```sh
+# 让 LuCI 让出 80（之后 LuCI 在 8080）
+uci set uhttpd.main.listen_http='0.0.0.0:8080' '[::]:8080'
+uci commit uhttpd && /etc/init.d/uhttpd restart
+# 或者保持 LuCI 不动，在面板「Web 服务 → 监听端口」里把 80/443 改为其他端口
+```
+
 新服务可通过 UCI 修改监听地址，再重启：
 
 ```sh
@@ -222,6 +231,8 @@ pnpm --dir web install --frozen-lockfile
 pnpm --dir web build
 go build ./cmd/viya
 ```
+
+前端产物输出到 `internal/web/dist/`，该目录由构建生成、不入库（已在 `.gitignore` 中忽略）。因此请务必先执行 `pnpm --dir web build`，否则 `go build` 会因 `go:embed` 找不到文件而失败。
 
 Windows PowerShell 构建 Linux 包：
 

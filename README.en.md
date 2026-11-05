@@ -29,26 +29,26 @@ Region rules use the source connecting to Caddy, which may be a CDN or proxy add
 
 The overview brings together host resource gauges, a 24-hour traffic trend and service health. Expand the section below to view the management pages.
 
-![Viya runtime overview](docs/screenshots/02-overview.png)
+![Viya runtime overview](docs/screenshots/02-overview.webp)
 
 <details>
 <summary>Show other pages</summary>
 
 | Web services | TCP / UDP forwarding |
 | --- | --- |
-| ![Web services](docs/screenshots/03-proxy-sites.png) | ![Port forwarding](docs/screenshots/04-layer4.png) |
+| ![Web services](docs/screenshots/03-proxy-sites.webp) | ![Port forwarding](docs/screenshots/04-layer4.webp) |
 
 | Dynamic DNS | TLS certificates |
 | --- | --- |
-| ![Dynamic DNS](docs/screenshots/05-ddns.png) | ![Certificates](docs/screenshots/06-certificates.png) |
+| ![Dynamic DNS](docs/screenshots/05-ddns.webp) | ![Certificates](docs/screenshots/06-certificates.webp) |
 
 | DNS credentials | IP bans |
 | --- | --- |
-| ![DNS credentials](docs/screenshots/07-dns-providers.png) | ![IP bans](docs/screenshots/08-ip-bans.png) |
+| ![DNS credentials](docs/screenshots/07-dns-providers.webp) | ![IP bans](docs/screenshots/08-ip-bans.webp) |
 
 | Logs | Configuration history |
 | --- | --- |
-| ![Logs](docs/screenshots/09-logs.png) | ![Configuration history](docs/screenshots/10-config-history.png) |
+| ![Logs](docs/screenshots/09-logs.webp) | ![Configuration history](docs/screenshots/10-config-history.webp) |
 
 </details>
 
