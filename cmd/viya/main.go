@@ -176,16 +176,23 @@ func main() {
 		slog.Error("migrate legacy database filename", "error", err)
 		os.Exit(1)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(dataDir, "viya.db"))
+	// PRAGMAs are per-connection: running them once after Open only configures
+	// the first pooled connection, so any second connection would fail fast
+	// with SQLITE_BUSY and run without foreign-key enforcement. They go in the
+	// DSN instead so every connection the pool opens inherits them.
+	dbPath := filepath.ToSlash(filepath.Join(dataDir, "viya.db"))
+	dsn := "file:" + dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		slog.Error("open database", "error", err)
 		os.Exit(1)
 	}
-	db.SetMaxOpenConns(1)
-	// SQLite is single-writer; one connection keeps transactions serialized but
-	// means a long write (configuration import, traffic ingestion) briefly
-	// queues every other request. Keep writes short and batch them where
-	// possible instead of raising this limit.
+	// WAL (set in migrateSchema) allows concurrent readers next to one writer,
+	// so the pool can serve several GETs while a write commits. busy_timeout
+	// makes a writer wait for the lock instead of failing with "database is
+	// locked". Keep writes short: the limit bounds concurrency, it does not
+	// make long transactions safe.
+	db.SetMaxOpenConns(4)
 	if err := migrateSchema(db); err != nil {
 		slog.Error("database migration failed", "error", err)
 		os.Exit(1)
