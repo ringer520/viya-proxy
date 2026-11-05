@@ -51,10 +51,6 @@ import { networkInterfaces, providers, saving } from "../composables/useState";
           required
           :placeholder="t('家庭宽带 IPv4')" /></label
       ><label
-        >{{ t("备注")
-        }}<input v-model="ddnsForm.comment" maxlength="500" placeholder="viya"
-      /></label
-      ><label
         >{{ t("DNS 服务商")
         }}<select
           v-model="ddnsForm.dns_provider_id"
