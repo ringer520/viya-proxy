@@ -53,7 +53,7 @@ function save() {
   })
     .then(async (r) => {
       const resp = await r.json().catch(() => null);
-      if (!r.ok) throw new Error((resp && resp.error) || t("保存失败"));
+      if (!r.ok) throw new Error((resp && t(resp.error)) || t("保存失败"));
       configured.value = true;
       savedOnce.value = true;
       password.value = "";

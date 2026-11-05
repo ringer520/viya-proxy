@@ -25,7 +25,7 @@ export const banKind = ref("ip");
 export const banForm = ref({ domain: "", ip: "", reason: "",expires_at:0 });
 export const banPreview=ref<{domain:string;client_ip:string;client_blocked:boolean;panel_domain:boolean;message:string}|null>(null),banRiskConfirmed=ref(false);
 watch([banForm,banKind],()=>{banPreview.value=null;banRiskConfirmed.value=false},{deep:true});
-export async function previewBan(){banError.value='';saving.value=true;try{const r=await fetch('/api/v1/ip-bans/preview',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken.value},body:JSON.stringify({...banForm.value,ip:banKind.value==='foreign'?'foreign':banForm.value.ip})});const data=await r.json();if(!r.ok)throw Error(data.error);banPreview.value=data}catch(e){banError.value=e instanceof Error?t(e.message):t('读取失败')}finally{saving.value=false}}
+export async function previewBan(){banError.value='';saving.value=true;try{const r=await fetch('/api/v1/ip-bans/preview',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken.value},body:JSON.stringify({...banForm.value,ip:banKind.value==='foreign'?'foreign':banForm.value.ip})});const data=await r.json();if(!r.ok)throw Error(t(data.error));banPreview.value=data}catch(e){banError.value=e instanceof Error?t(e.message):t('读取失败')}finally{saving.value=false}}
 
 export function openBan(ban?: IPBan) {
   if (!guardWrite()) return;
@@ -601,7 +601,7 @@ export async function saveProvider() {
 export async function removeProvider(provider: Provider) {
   if (!guardWrite()) return;
 
-  let usage:string[]=[];try{const r=await fetch(`/api/v1/dns-providers/${provider.id}/usage`);const d=await r.json();if(!r.ok)throw Error(d.error);usage=d.map((v:{kind:string;name:string})=>v.kind+': '+v.name)}catch(e){error.value=e instanceof Error?t(e.message):t('读取失败');return}
+  let usage:string[]=[];try{const r=await fetch(`/api/v1/dns-providers/${provider.id}/usage`);const d=await r.json();if(!r.ok)throw Error(t(d.error));usage=d.map((v:{kind:string;name:string})=>v.kind+': '+v.name)}catch(e){error.value=e instanceof Error?t(e.message):t('读取失败');return}
  if(usage.length){error.value=t('此凭据仍在使用，请先修改关联资源后再删除')+'：'+usage.join('；');return}
   if (await confirmDeletion(tr`删除 DNS 凭据“${provider.name}”？`+(usage.length?"\n"+t("当前关联：")+usage.join("；"):"")))
     await performDelete(`/api/v1/dns-providers/${provider.id}`);

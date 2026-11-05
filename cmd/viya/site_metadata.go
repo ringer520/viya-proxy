@@ -40,12 +40,12 @@ func (a *App) attachSiteMetadata(ctx context.Context, hosts []Host) {
 func (a *App) updateSiteMetadata(w http.ResponseWriter, r *http.Request) {
 	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if e != nil || id < 1 {
-		fail(w, 400, errors.New("invalid site id"))
+		fail(w, 400, errors.New("站点 ID 无效"))
 		return
 	}
 	var m siteMetadata
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&m) != nil {
-		fail(w, 400, errors.New("invalid metadata"))
+		fail(w, 400, errors.New("元信息无效"))
 		return
 	}
 	if e = a.db.QueryRowContext(r.Context(), `SELECT domain FROM proxy_hosts WHERE id=?`, id).Scan(&m.Domain); e != nil {

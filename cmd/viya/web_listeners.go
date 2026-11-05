@@ -152,7 +152,7 @@ func (a *App) checkWebListener(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		protocol := r.URL.Query().Get("protocol")
 		if protocol != "http" && protocol != "https" {
-			fail(w, 400, errors.New("protocol must be http or https"))
+			fail(w, 400, errors.New("协议只能是 HTTP 或 HTTPS"))
 			return
 		}
 		err = a.listenerPortAvailable(r.Context(), port, protocol)

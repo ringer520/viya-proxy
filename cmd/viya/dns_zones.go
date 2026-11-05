@@ -34,7 +34,7 @@ type cloudflareZonePage struct {
 func (a *App) listDNSZones(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		fail(w, http.StatusBadRequest, errors.New("invalid DNS provider id"))
+		fail(w, http.StatusBadRequest, errors.New("DNS 凭据 ID 无效"))
 		return
 	}
 	kind, credentials, err := a.loadDNSProvider(r.Context(), id)
@@ -64,7 +64,7 @@ func (a *App) listDNSZones(w http.ResponseWriter, r *http.Request) {
 
 func cloudflareZones(ctx context.Context, token string) ([]DNSZoneOption, int, error) {
 	if token == "" {
-		return nil, 0, errors.New("Cloudflare API token is empty")
+		return nil, 0, errors.New("Cloudflare API Token 为空")
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	zones := []DNSZoneOption{}
@@ -87,7 +87,7 @@ func cloudflareZones(ctx context.Context, token string) ([]DNSZoneOption, int, e
 			return nil, response.StatusCode, decodeErr
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 || !result.Success {
-			return nil, response.StatusCode, errors.New("Cloudflare did not return a successful zone list")
+			return nil, response.StatusCode, errors.New("Cloudflare 未返回可用的 Zone 列表")
 		}
 		zones = append(zones, result.Result...)
 		if page >= result.ResultInfo.TotalPages || len(result.Result) == 0 {

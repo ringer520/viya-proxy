@@ -301,7 +301,7 @@ func (a *App) expiringCertificates(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT id,domain,tls_mode,custom_certificate_id FROM proxy_hosts ORDER BY domain`)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("certificate inventory unavailable"))
+		fail(w, http.StatusInternalServerError, errors.New("无法获取证书清单"))
 		return
 	}
 	hosts := []Host{}
@@ -310,7 +310,7 @@ func (a *App) expiringCertificates(w http.ResponseWriter, r *http.Request) {
 		var certID sql.NullInt64
 		if err := rows.Scan(&host.ID, &host.Domain, &host.TLSMode, &certID); err != nil {
 			rows.Close()
-			fail(w, http.StatusInternalServerError, errors.New("certificate inventory unavailable"))
+			fail(w, http.StatusInternalServerError, errors.New("无法获取证书清单"))
 			return
 		}
 		if certID.Valid {
@@ -322,7 +322,7 @@ func (a *App) expiringCertificates(w http.ResponseWriter, r *http.Request) {
 
 	sources, err := a.certificateSources(r.Context(), hosts)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("certificate inventory unavailable"))
+		fail(w, http.StatusInternalServerError, errors.New("无法获取证书清单"))
 		return
 	}
 

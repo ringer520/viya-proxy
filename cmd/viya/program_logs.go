@@ -33,10 +33,10 @@ func validateLogSettings(v *LogSettings) error {
 	switch v.Level {
 	case "DEBUG", "INFO", "WARN", "ERROR":
 	default:
-		return errors.New("Invalid log level")
+		return errors.New("日志级别无效")
 	}
 	if v.AccessMB < 1 || v.AccessMB > 1024 || v.ProgramMB < 1 || v.ProgramMB > 1024 || v.Backups < 1 || v.Backups > 30 || v.Days < 1 || v.Days > 365 {
-		return errors.New("Log size: 1–1024 MiB; backup files: 1–30; retention: 1–365 days")
+		return errors.New("日志大小 1–1024 MiB；备份文件 1–30 个；保留 1–365 天")
 	}
 	return nil
 }
@@ -51,7 +51,7 @@ func (a *App) loadLogSettings() (LogSettings, error) {
 		return v, e
 	}
 	if json.Unmarshal([]byte(raw), &v) != nil {
-		return v, errors.New("Invalid stored log settings")
+		return v, errors.New("已保存的日志设置无效")
 	}
 	return v, validateLogSettings(&v)
 }
@@ -172,7 +172,7 @@ func (a *App) getLogSettings(w http.ResponseWriter, r *http.Request) {
 func (a *App) updateLogSettings(w http.ResponseWriter, r *http.Request) {
 	var v LogSettings
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&v) != nil {
-		fail(w, 400, errors.New("Invalid log settings"))
+		fail(w, 400, errors.New("日志设置无效"))
 		return
 	}
 	if e := validateLogSettings(&v); e != nil {
@@ -200,7 +200,7 @@ func (a *App) updateLogSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.confirmRestoredApplication(ctx, nil)
-		fail(w, 502, errors.New("Log settings were not applied; previous settings restored"))
+		fail(w, 502, errors.New("日志设置未能应用，已恢复原设置"))
 		return
 	}
 	a.configureProgramLogging()

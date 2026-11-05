@@ -42,7 +42,7 @@ var providerFields = map[string][]string{
 func (a *App) listDNSProviders(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,provider_type,length(credentials_ciphertext)>0 FROM dns_providers ORDER BY name`)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not read DNS providers"))
+		fail(w, http.StatusInternalServerError, errors.New("无法读取 DNS 凭据"))
 		return
 	}
 	defer rows.Close()
@@ -50,13 +50,13 @@ func (a *App) listDNSProviders(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p DNSProvider
 		if err := rows.Scan(&p.ID, &p.Name, &p.ProviderType, &p.HasCredentials); err != nil {
-			fail(w, http.StatusInternalServerError, errors.New("could not read DNS providers"))
+			fail(w, http.StatusInternalServerError, errors.New("无法读取 DNS 凭据"))
 			return
 		}
 		providers = append(providers, p)
 	}
 	if err := rows.Err(); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not read DNS providers"))
+		fail(w, http.StatusInternalServerError, errors.New("无法读取 DNS 凭据"))
 		return
 	}
 	rows.Close()
@@ -92,26 +92,26 @@ func (a *App) createDNSProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	tx, err := a.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not save DNS provider"))
+		fail(w, http.StatusInternalServerError, errors.New("无法保存 DNS 凭据"))
 		return
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(r.Context(), `INSERT INTO dns_providers(name,provider_type,credentials_ciphertext,credentials_nonce) VALUES(?,?,x'',x'')`, input.Name, input.Provider)
 	if err != nil {
-		fail(w, http.StatusConflict, errors.New("DNS provider could not be saved"))
+		fail(w, http.StatusConflict, errors.New("DNS 凭据保存失败"))
 		return
 	}
 	id, err := result.LastInsertId()
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not save DNS provider"))
+		fail(w, http.StatusInternalServerError, errors.New("无法保存 DNS 凭据"))
 		return
 	}
 	if err := a.storeProviderCredentials(r, tx, id, input.Credentials); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not encrypt DNS provider credentials"))
+		fail(w, http.StatusInternalServerError, errors.New("无法加密 DNS 凭据"))
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not save DNS provider"))
+		fail(w, http.StatusInternalServerError, errors.New("无法保存 DNS 凭据"))
 		return
 	}
 	writeJSON(w, http.StatusCreated, DNSProvider{ID: id, Name: input.Name, ProviderType: input.Provider, HasCredentials: true})
@@ -120,7 +120,7 @@ func (a *App) createDNSProvider(w http.ResponseWriter, r *http.Request) {
 func (a *App) updateDNSProvider(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		fail(w, http.StatusBadRequest, errors.New("invalid DNS provider id"))
+		fail(w, http.StatusBadRequest, errors.New("DNS 凭据 ID 无效"))
 		return
 	}
 	var input dnsProviderInput
@@ -134,53 +134,53 @@ func (a *App) updateDNSProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	var currentType string
 	if err := a.db.QueryRowContext(r.Context(), `SELECT provider_type FROM dns_providers WHERE id=?`, id).Scan(&currentType); err != nil {
-		fail(w, http.StatusNotFound, errors.New("DNS provider not found"))
+		fail(w, http.StatusNotFound, errors.New("DNS 凭据不存在"))
 		return
 	}
 	if currentType != input.Provider {
 		var references int
 		if err := a.db.QueryRowContext(r.Context(), `SELECT (SELECT COUNT(*) FROM proxy_hosts WHERE dns_provider_id=?)+(SELECT COUNT(*) FROM managed_certificates WHERE dns_provider_id=?)+(SELECT COUNT(*) FROM ddns_records WHERE dns_provider_id=?)`, id, id, id).Scan(&references); err != nil {
-			fail(w, 500, errors.New("could not check DNS provider references"))
+			fail(w, 500, errors.New("无法检查 DNS 凭据引用"))
 			return
 		}
 		if references > 0 {
-			fail(w, http.StatusConflict, errors.New("provider type cannot be changed while proxy hosts or DDNS records use it"))
+			fail(w, http.StatusConflict, errors.New("该凭据仍被站点或 DDNS 记录使用，不能更改类型"))
 			return
 		}
 	}
 	var proxyHostReferences int
 	if err := a.db.QueryRowContext(r.Context(), `SELECT (SELECT COUNT(*) FROM proxy_hosts WHERE dns_provider_id=?)+(SELECT COUNT(*) FROM managed_certificates WHERE dns_provider_id=?)`, id, id).Scan(&proxyHostReferences); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not check proxy host references"))
+		fail(w, http.StatusInternalServerError, errors.New("无法检查站点引用"))
 		return
 	}
 	tx, err := a.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not update DNS provider"))
+		fail(w, http.StatusInternalServerError, errors.New("无法更新 DNS 凭据"))
 		return
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(r.Context(), `UPDATE dns_providers SET name=?,provider_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, input.Name, input.Provider, id)
 	if err != nil {
-		fail(w, http.StatusConflict, errors.New("DNS provider could not be updated"))
+		fail(w, http.StatusConflict, errors.New("DNS 凭据更新失败"))
 		return
 	}
 	changed, err := result.RowsAffected()
 	if err != nil || changed == 0 {
-		fail(w, http.StatusNotFound, errors.New("DNS provider not found"))
+		fail(w, http.StatusNotFound, errors.New("DNS 凭据不存在"))
 		return
 	}
 	if err := a.storeProviderCredentials(r, tx, id, input.Credentials); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not encrypt DNS provider credentials"))
+		fail(w, http.StatusInternalServerError, errors.New("无法加密 DNS 凭据"))
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not update DNS provider"))
+		fail(w, http.StatusInternalServerError, errors.New("无法更新 DNS 凭据"))
 		return
 	}
 	_, _ = a.db.ExecContext(r.Context(), `DELETE FROM provider_checks WHERE provider_id=?`, id)
 	if proxyHostReferences > 0 {
 		if err := a.apply(r.Context()); err != nil {
-			fail(w, http.StatusBadGateway, errors.New("DNS credentials were saved, but Caddy could not reload them; retry applying the configuration"))
+			fail(w, http.StatusBadGateway, errors.New("DNS 凭据已保存，但 Caddy 未能重新加载，请重试应用配置"))
 			return
 		}
 	}
@@ -190,12 +190,12 @@ func (a *App) updateDNSProvider(w http.ResponseWriter, r *http.Request) {
 func (a *App) deleteDNSProvider(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		fail(w, http.StatusBadRequest, errors.New("invalid DNS provider id"))
+		fail(w, http.StatusBadRequest, errors.New("DNS 凭据 ID 无效"))
 		return
 	}
 	var references int
 	if err := a.db.QueryRowContext(r.Context(), `SELECT (SELECT COUNT(*) FROM proxy_hosts WHERE dns_provider_id=?)+(SELECT COUNT(*) FROM managed_certificates WHERE dns_provider_id=?)+(SELECT COUNT(*) FROM ddns_records WHERE dns_provider_id=?)`, id, id, id).Scan(&references); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not check DNS provider references"))
+		fail(w, http.StatusInternalServerError, errors.New("无法检查 DNS 凭据引用"))
 		return
 	}
 	if references > 0 {
@@ -209,12 +209,12 @@ func (a *App) deleteDNSProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.db.ExecContext(r.Context(), `DELETE FROM dns_providers WHERE id=?`, id)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not delete DNS provider"))
+		fail(w, http.StatusInternalServerError, errors.New("无法删除 DNS 凭据"))
 		return
 	}
 	changed, err := result.RowsAffected()
 	if err != nil || changed == 0 {
-		fail(w, http.StatusNotFound, errors.New("DNS provider not found"))
+		fail(w, http.StatusNotFound, errors.New("DNS 凭据不存在"))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -225,14 +225,14 @@ func (a *App) loadDNSProvider(ctx context.Context, id int64) (string, map[string
 	var ciphertext, nonce []byte
 	var keyVersion int
 	if err := a.db.QueryRowContext(ctx, `SELECT provider_type,credentials_ciphertext,credentials_nonce,key_version FROM dns_providers WHERE id=?`, id).Scan(&providerType, &ciphertext, &nonce, &keyVersion); err != nil {
-		return "", nil, errors.New("DNS provider credentials are unavailable")
+		return "", nil, errors.New("DNS 凭据不可用")
 	}
 	if keyVersion != 1 {
-		return "", nil, errors.New("unsupported DNS provider credential key version")
+		return "", nil, errors.New("不支持的凭据密钥版本")
 	}
 	plaintext, err := secretstore.Decrypt(a.masterKey, nonce, ciphertext, []byte(fmt.Sprintf("viya:dns-provider:%d:v1", id)))
 	if err != nil {
-		return "", nil, errors.New("DNS provider credentials could not be decrypted")
+		return "", nil, errors.New("DNS 凭据无法解密")
 	}
 	defer func() {
 		for i := range plaintext {
@@ -241,7 +241,7 @@ func (a *App) loadDNSProvider(ctx context.Context, id int64) (string, map[string
 	}()
 	var credentials map[string]string
 	if err := json.Unmarshal(plaintext, &credentials); err != nil {
-		return "", nil, errors.New("DNS provider credentials are invalid")
+		return "", nil, errors.New("DNS 凭据无效")
 	}
 	return providerType, credentials, nil
 }
@@ -249,7 +249,7 @@ func (a *App) loadDNSProvider(ctx context.Context, id int64) (string, map[string
 func decodeDNSProvider(w http.ResponseWriter, r *http.Request, input *dnsProviderInput) error {
 	defer r.Body.Close()
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(input); err != nil {
-		return errors.New("invalid DNS provider request")
+		return errors.New("DNS 凭据请求无效")
 	}
 	return nil
 }
@@ -257,14 +257,14 @@ func decodeDNSProvider(w http.ResponseWriter, r *http.Request, input *dnsProvide
 func validateDNSProvider(input *dnsProviderInput) error {
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" || len(input.Name) > 100 {
-		return errors.New("DNS provider name must be between 1 and 100 characters")
+		return errors.New("DNS 凭据名称需为 1-100 个字符")
 	}
 	required, ok := providerFields[input.Provider]
 	if !ok {
-		return errors.New("unsupported DNS provider type")
+		return errors.New("不支持的 DNS 服务商类型")
 	}
 	if len(input.Credentials) > 8 {
-		return errors.New("too many credential fields")
+		return errors.New("凭据字段过多")
 	}
 	allowed := make(map[string]bool, len(required)+1)
 	for _, key := range required {

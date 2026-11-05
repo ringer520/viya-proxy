@@ -215,7 +215,7 @@ func (a *App) rollbackConfiguration(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, f := range payload.Files {
 			if !allowedConfigFile(f.Path) {
-				return errors.New("invalid recovery file")
+				return errors.New("恢复文件无效")
 			}
 			dest := filepath.Join(a.dataDir, filepath.FromSlash(f.Path))
 			if e = os.MkdirAll(filepath.Dir(dest), 0700); e != nil {
@@ -280,7 +280,7 @@ func restoreRecoveryRuntime(ctx context.Context, tx *sql.Tx, tables []tableDump)
 				}
 			}
 			if column < 0 {
-				return errors.New("invalid runtime reference")
+				return errors.New("运行时引用无效")
 			}
 			kept := [][]configCell{}
 			for _, row := range table.Rows {

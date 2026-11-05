@@ -19,7 +19,7 @@ async function check(manual=false){
     if(!response.ok)throw Error(t('读取版本信息失败'))
     const data=await response.json();if(!alive)return
     identity.value=data;current.value=data.current||'';latest.value=data.latest||'';available.value=!!data.update_available;docker.value=!!data.in_docker;managed.value=!!data.managed;notes.value=data.notes||'';url.value=data.release_url||''
-    if(data.error)error.value=data.error
+    if(t(data.error))error.value=t(data.error)
     else if(manual)message.value=data.update_available?t('发现新版本'):t('当前已是最新版本')
     if(manual)expanded.value=true
   }catch(e){if(alive)error.value=e instanceof Error?t(e.message):t('检查更新失败，请检查服务器网络')}
@@ -59,7 +59,7 @@ async function update(){
     let response:Response|undefined
     try {response=await apiFetch('/api/v1/version/update',{method:'POST',headers:{'X-CSRF-Token':props.csrf},signal:requests.signal})}
     catch(e){if(!(e instanceof TypeError)||!alive)throw e;restarting=true}
-    if(response){const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||t('更新失败'))}
+    if(response){const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(t(data.error)||t('更新失败'))}
     restarting=true;stage.value=t('正在等待服务重启');progress.value=Math.max(progress.value,95)
     if(!await waitForVersion(target))throw Error(t('服务尚未恢复，请稍后手动刷新页面'))
     if(!alive)return

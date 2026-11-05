@@ -98,12 +98,12 @@ async function previewFile(entry:Entry){
    if(blob.size>10*1024*1024 || !/^image\/(png|jpeg|gif|webp|avif|bmp)$/i.test(blob.type))throw Error(t("不支持的图片格式，请下载后查看"));
    preview.value.image=URL.createObjectURL(blob);return;
  }
- const r=await fetch(api(`/text?path=${encodeURIComponent(entry.path)}`));const b=await r.json();if(!r.ok)throw Error(b.error||t("读取文件失败"));preview.value={entry,content:b.content,original:b.content,version:b.version,editable:b.editable};}
+ const r=await fetch(api(`/text?path=${encodeURIComponent(entry.path)}`));const b=await r.json();if(!r.ok)throw Error(t(b.error)||t("读取文件失败"));preview.value={entry,content:b.content,original:b.content,version:b.version,editable:b.editable};}
  catch(e){previewError.value=e instanceof Error?e.message:t("读取文件失败");}finally{textLoading.value=false;}
 }
 async function saveText(){
  const d=preview.value;if(!d?.editable||textBusy.value)return;textBusy.value=true;previewError.value="";
- try{const r=await fetch(api(`/text?path=${encodeURIComponent(d.entry.path)}`),{method:"PUT",headers:headers(true),body:JSON.stringify({content:d.content,version:d.version})});const b=await r.json();if(!r.ok)throw Error(b.error||t("保存失败"));d.original=d.content;d.version=b.version;note.value=t("文件已保存");await load();}
+ try{const r=await fetch(api(`/text?path=${encodeURIComponent(d.entry.path)}`),{method:"PUT",headers:headers(true),body:JSON.stringify({content:d.content,version:d.version})});const b=await r.json();if(!r.ok)throw Error(t(b.error)||t("保存失败"));d.original=d.content;d.version=b.version;note.value=t("文件已保存");await load();}
  catch(e){previewError.value=e instanceof Error?e.message:t("保存失败");}finally{textBusy.value=false;}
 }
 
@@ -270,7 +270,7 @@ async function doUpload(items: UploadItem[], overwrite: boolean) {
       overwrite,
       (p) => (uploadProgress.value = p),
     );
-    if (!body.ok && body.error) throw Error(t(body.error) || t("上传失败"));
+    if (!body.ok && t(body.error)) throw Error(t(body.error) || t("上传失败"));
     const stored = body.stored || 0;
     const extracted = body.extracted || 0;
     const skipped = body.skipped || 0;

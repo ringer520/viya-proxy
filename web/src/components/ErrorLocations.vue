@@ -10,7 +10,7 @@ const groups=ref<Group[]>([]),selected=ref<Group|null>(null),busy=ref(false),err
 let request:AbortController|undefined
 function label(status:number){if([502,503,504].includes(status))return t('上游异常');if(status>=500)return t('应用错误');if(status===401)return t('需要身份验证');if(status===403)return t('访问被拒绝');if(status===404)return t('页面不存在');if(status===429)return t('请求过于频繁');return t('请求错误')}
 async function load(){request?.abort();const controller=new AbortController();request=controller;busy.value=true;error.value='';groups.value=[];selected.value=null
- try{const r=await apiFetch('/api/v1/proxy-hosts/error-locations?range='+props.range,{signal:controller.signal});const data=await r.json();if(!r.ok)throw Error(data.error||t('读取失败'));if(controller.signal.aborted)return;groups.value=data.groups;limited.value=data.limited}
+ try{const r=await apiFetch('/api/v1/proxy-hosts/error-locations?range='+props.range,{signal:controller.signal});const data=await r.json();if(!r.ok)throw Error(t(data.error)||t('读取失败'));if(controller.signal.aborted)return;groups.value=data.groups;limited.value=data.limited}
  catch(e){if(!controller.signal.aborted)error.value=e instanceof Error?t(e.message):t('读取失败')}
  finally{if(request===controller)busy.value=false}
 }

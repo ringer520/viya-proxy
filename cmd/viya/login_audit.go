@@ -103,7 +103,7 @@ func (a *App) listLoginAudit(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.QueryContext(r.Context(),
 		`SELECT id,username,ip,user_agent,result,reason,created_at FROM login_audit WHERE (?=0 OR created_at>=?) AND (?=0 OR created_at<=?) AND (?='' OR result=?) AND (?='' OR instr(lower(username||' '||ip||' '||reason),?)>0) ORDER BY id DESC LIMIT ?`, query.From, query.From, query.To, query.To, result, result, query.Text, query.Text, limit)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("login audit unavailable"))
+		fail(w, http.StatusInternalServerError, errors.New("无法获取登录审计"))
 		return
 	}
 	defer rows.Close()
@@ -111,13 +111,13 @@ func (a *App) listLoginAudit(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var entry loginAuditEntry
 		if err := rows.Scan(&entry.ID, &entry.Username, &entry.IP, &entry.UserAgent, &entry.Result, &entry.Reason, &entry.CreatedAt); err != nil {
-			fail(w, http.StatusInternalServerError, errors.New("login audit unavailable"))
+			fail(w, http.StatusInternalServerError, errors.New("无法获取登录审计"))
 			return
 		}
 		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		fail(w, http.StatusInternalServerError, errors.New("login audit unavailable"))
+		fail(w, http.StatusInternalServerError, errors.New("无法获取登录审计"))
 		return
 	}
 	writeJSON(w, http.StatusOK, entries)

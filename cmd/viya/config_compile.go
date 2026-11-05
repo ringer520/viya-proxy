@@ -69,25 +69,25 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		}
 		if err := json.Unmarshal([]byte(headers), &h.CustomHeaders); err != nil {
 			rows.Close()
-			return nil, errors.New("stored custom headers are invalid")
+			return nil, errors.New("已保存的自定义请求头无效")
 		}
 		if err := json.Unmarshal([]byte(securityJSON), &h.SecurityHeaders); err != nil {
 			rows.Close()
-			return nil, errors.New("stored security headers are invalid")
+			return nil, errors.New("已保存的安全响应头无效")
 		}
 		h.MaxBodyBytes = maxBody
 		h.HideServer = hideServer == 1
 		if err := json.Unmarshal([]byte(methodsJSON), &h.AllowedMethods); err != nil {
 			rows.Close()
-			return nil, errors.New("stored allowed methods are invalid")
+			return nil, errors.New("已保存的请求方法无效")
 		}
 		if err := json.Unmarshal([]byte(allowJSON), &h.IPAllowlist); err != nil {
 			rows.Close()
-			return nil, errors.New("stored IP allowlist is invalid")
+			return nil, errors.New("已保存的 IP 允许列表无效")
 		}
 		if err := json.Unmarshal([]byte(denyJSON), &h.IPDenylist); err != nil {
 			rows.Close()
-			return nil, errors.New("stored IP denylist is invalid")
+			return nil, errors.New("已保存的 IP 拒绝列表无效")
 		}
 		hosts = append(hosts, h)
 	}
@@ -353,7 +353,7 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		}
 		if host.TLSMode == "dns-01" {
 			if host.DNSProviderID == nil {
-				return nil, errors.New("DNS provider is missing for a DNS-01 host")
+				return nil, errors.New("DNS-01 站点缺少 DNS 凭据")
 			}
 			providerType, credentials, err := a.loadDNSProvider(ctx, *host.DNSProviderID)
 			if err != nil {
@@ -463,7 +463,7 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		}
 		var certPath, keyPath string
 		if err := a.db.QueryRowContext(ctx, `SELECT cert_path,key_path FROM custom_certificates WHERE id=?`, *host.CustomCertificateID).Scan(&certPath, &keyPath); err != nil {
-			return nil, errors.New("custom certificate files are unavailable")
+			return nil, errors.New("自定义证书文件不可用")
 		}
 		if certPath == "" || keyPath == "" {
 			return nil, fmt.Errorf("custom certificate %d has no stored file paths; remove or re-upload it", *host.CustomCertificateID)

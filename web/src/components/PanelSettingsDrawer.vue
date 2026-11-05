@@ -63,7 +63,7 @@ async function loadUsers(){
 async function addUser(){
  if(!admin.value||locked.value)return
  userBusy.value=true;userError.value='';userNote.value=''
- try{const response=await apiFetch('/api/v1/users',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify(userForm.value)});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||t('创建失败'));userForm.value={username:'',password:'',role:'viewer'};userNote.value=t('账号已创建');await loadUsers()}
+ try{const response=await apiFetch('/api/v1/users',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify(userForm.value)});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(t(data.error)||t('创建失败'));userForm.value={username:'',password:'',role:'viewer'};userNote.value=t('账号已创建');await loadUsers()}
  catch(e){userError.value=e instanceof Error?t(e.message):t('创建失败')}
  finally{userBusy.value=false}
 }
@@ -71,7 +71,7 @@ async function setUserRole(user:PanelUser,event:Event){
  const target=event.target as HTMLSelectElement
  if(!admin.value||locked.value){target.value=user.role;return}
  userBusy.value=true;userError.value='';userNote.value=''
- try{const response=await apiFetch(`/api/v1/users/${user.id}`,{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify({role:target.value})});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||t('更新失败'));userNote.value=t('权限已更新');await loadUsers()}
+ try{const response=await apiFetch(`/api/v1/users/${user.id}`,{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify({role:target.value})});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(t(data.error)||t('更新失败'));userNote.value=t('权限已更新');await loadUsers()}
  catch(e){userError.value=e instanceof Error?t(e.message):t('更新失败')}
  finally{target.value=users.value.find(item=>item.id===user.id)?.role||user.role;userBusy.value=false}
 }
@@ -79,7 +79,7 @@ async function removeUser(user:PanelUser){
  if(!admin.value||locked.value)return
  if(!await confirmDeletion(tr`确定删除账号 ${user.username} 吗？`))return
  userBusy.value=true;userError.value='';userNote.value=''
- try{const response=await apiFetch(`/api/v1/users/${user.id}`,{method:'DELETE',headers:{'X-CSRF-Token':props.csrf}});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||t('删除失败'));userNote.value=t('账号已删除');await loadUsers()}
+ try{const response=await apiFetch(`/api/v1/users/${user.id}`,{method:'DELETE',headers:{'X-CSRF-Token':props.csrf}});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(t(data.error)||t('删除失败'));userNote.value=t('账号已删除');await loadUsers()}
  catch(e){userError.value=e instanceof Error?t(e.message):t('删除失败')}
  finally{userBusy.value=false}
 }
@@ -93,21 +93,21 @@ async function saveAlerts(){
  if(!admin.value||locked.value||!alertReady.value||!alertDirty.value)return
  alertBusy.value=true;alertError.value='';alertNote.value=''
  const draft={...alertForm.value,webhook_url:alertForm.value.webhook_url.trim()}
- try{const response=await apiFetch('/api/v1/alert-settings',{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify(draft)});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||t('保存失败'));alertForm.value=draft;alertSaved.value=JSON.stringify(draft);alertNote.value=t('通知设置已保存')}
+ try{const response=await apiFetch('/api/v1/alert-settings',{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify(draft)});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(t(data.error)||t('保存失败'));alertForm.value=draft;alertSaved.value=JSON.stringify(draft);alertNote.value=t('通知设置已保存')}
  catch(e){alertError.value=e instanceof Error?t(e.message):t('保存失败')}
  finally{alertBusy.value=false}
 }
 async function testAlerts(){
  if(!admin.value||locked.value||!alertReady.value||alertDirty.value||!JSON.parse(alertSaved.value).enabled)return
  alertBusy.value=true;alertError.value='';alertNote.value=''
- try{const response=await apiFetch('/api/v1/alert-settings/test',{method:'POST',headers:{'X-CSRF-Token':props.csrf}});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||t('发送失败'));alertNote.value=t('测试通知已发送，请检查接收端')}
+ try{const response=await apiFetch('/api/v1/alert-settings/test',{method:'POST',headers:{'X-CSRF-Token':props.csrf}});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(t(data.error)||t('发送失败'));alertNote.value=t('测试通知已发送，请检查接收端')}
  catch(e){alertError.value=e instanceof Error?t(e.message):t('发送失败')}
  finally{alertBusy.value=false}
 }
 function splitRules(raw:string){return raw.split(/[\n,]/).map(item=>item.trim()).filter(Boolean)}
 async function loadAccess(){
  if(!admin.value)return
- try{const response=await apiFetch('/api/v1/panel/access',{signal:reads.signal});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||t('读取访问规则失败'));if(!mounted)return
+ try{const response=await apiFetch('/api/v1/panel/access',{signal:reads.signal});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(t(data.error)||t('读取访问规则失败'));if(!mounted)return
   const next={block_public_ip_host:!!data.block_public_ip_host,hosts:(data.hosts||[]).join('\n'),ips:(data.ips||[]).join('\n'),https_only:!!data.https_only}
   accessForm.value=next;accessSaved.value=JSON.stringify(next);accessCurrent.value={host:data.current_host||'',ip:data.current_ip||''};accessReady.value=true}
  catch(e){if(mounted&&(e as Error).name!=='AbortError')accessError.value=e instanceof Error?t(e.message):t('读取访问规则失败')}
@@ -116,7 +116,7 @@ async function saveAccess(){
  if(!admin.value||locked.value||!accessReady.value||!accessDirty.value)return
  accessBusy.value=true;accessError.value='';accessNote.value=''
  try{const response=await apiFetch('/api/v1/panel/access',{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify({block_public_ip_host:accessForm.value.block_public_ip_host,hosts:splitRules(accessForm.value.hosts),ips:splitRules(accessForm.value.ips),https_only:accessForm.value.https_only})})
-  const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||t('保存失败'))
+  const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(t(data.error)||t('保存失败'))
   const next={block_public_ip_host:!!data.block_public_ip_host,hosts:(data.hosts||[]).join('\n'),ips:(data.ips||[]).join('\n'),https_only:!!data.https_only}
   accessForm.value=next;accessSaved.value=JSON.stringify(next);accessNote.value=t('面板访问规则已保存')}
  catch(e){accessError.value=e instanceof Error?t(e.message):t('保存失败')}

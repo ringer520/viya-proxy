@@ -23,7 +23,7 @@ async function check() {
       body: JSON.stringify({ zone: zone.value }),
     })
     const data = await response.json()
-    if (!response.ok) throw Error(data.error || t('检查失败'))
+    if (!response.ok) throw Error(t(data.error) || t('检查失败'))
     failed.value = ['auth-failed','permission-denied','network-error','provider-error'].includes(data.status)
     note.value = t(data.message)
   } catch (error) {

@@ -57,7 +57,7 @@ async function load(force=false){
  if(tab.value==='settings'||loading.value&&!force)return
  request?.abort();const controller=new AbortController();request=controller
  loading.value=true;const selected=tab.value,current=++sequence
- try{const r=await fetch(endpoint(selected),{signal:controller.signal});const body=await r.json();if(!r.ok)throw Error(body.error||t('读取失败'));if(current!==sequence||selected!==tab.value)return
+ try{const r=await fetch(endpoint(selected),{signal:controller.signal});const body=await r.json();if(!r.ok)throw Error(t(body.error)||t('读取失败'));if(current!==sequence||selected!==tab.value)return
  if(selected==='program')program.value=body;else if(selected==='audit')audit.value=Array.isArray(body)?body:[];else events.value=body;error.value=''
  }catch(e){if(current===sequence&&!controller.signal.aborted)error.value=e instanceof Error?t(e.message):t('读取失败')}
  finally{if(current===sequence)loading.value=false}

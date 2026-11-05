@@ -469,9 +469,9 @@ func (a *App) startCaddy(dataDir string) error {
 	case err := <-ready:
 		return err
 	case <-time.After(12 * time.Second):
-		return errors.New("timed out waiting for Caddy Admin API")
+		return errors.New("等待 Caddy Admin API 超时")
 	case <-a.ctx.Done():
-		return errors.New("startup interrupted")
+		return errors.New("启动被中断")
 	}
 }
 
@@ -572,7 +572,7 @@ func waitAdmin(ctx context.Context, done <-chan struct{}, processErr *error, adm
 			return fmt.Errorf("Caddy exited before Admin API became ready: %w", *processErr)
 		case <-ticker.C:
 		case <-deadline.C:
-			return errors.New("timed out waiting for Caddy Admin API")
+			return errors.New("等待 Caddy Admin API 超时")
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -634,25 +634,25 @@ func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
 			h.CustomCertificateID = &certID.Int64
 		}
 		if err := json.Unmarshal([]byte(headerJSON), &h.CustomHeaders); err != nil {
-			fail(w, 500, errors.New("stored custom headers are invalid"))
+			fail(w, 500, errors.New("已保存的自定义请求头无效"))
 			return
 		}
 		if err := json.Unmarshal([]byte(securityJSON), &h.SecurityHeaders); err != nil {
-			fail(w, 500, errors.New("stored security headers are invalid"))
+			fail(w, 500, errors.New("已保存的安全响应头无效"))
 			return
 		}
 		h.MaxBodyBytes = maxBody
 		h.HideServer = hideServer == 1
 		if err := json.Unmarshal([]byte(methodsJSON), &h.AllowedMethods); err != nil {
-			fail(w, 500, errors.New("stored allowed methods are invalid"))
+			fail(w, 500, errors.New("已保存的请求方法无效"))
 			return
 		}
 		if err := json.Unmarshal([]byte(allowJSON), &h.IPAllowlist); err != nil {
-			fail(w, 500, errors.New("stored IP allowlist is invalid"))
+			fail(w, 500, errors.New("已保存的 IP 允许列表无效"))
 			return
 		}
 		if err := json.Unmarshal([]byte(denyJSON), &h.IPDenylist); err != nil {
-			fail(w, 500, errors.New("stored IP denylist is invalid"))
+			fail(w, 500, errors.New("已保存的 IP 拒绝列表无效"))
 			return
 		}
 		h.BasicAuthEnabled = h.PasswordHash != ""
@@ -727,7 +727,7 @@ func (a *App) testUpstream(w http.ResponseWriter, r *http.Request) {
 		Upstream string `json:"upstream"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&input); err != nil {
-		fail(w, http.StatusBadRequest, errors.New("invalid upstream test request"))
+		fail(w, http.StatusBadRequest, errors.New("上游测试请求无效"))
 		return
 	}
 	u, err := parseUpstream(input.Upstream)
@@ -750,7 +750,7 @@ func (a *App) testUpstream(w http.ResponseWriter, r *http.Request) {
 func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
 	var h Host
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&h); err != nil {
-		fail(w, 400, errors.New("invalid JSON body"))
+		fail(w, 400, errors.New("请求内容不是有效的 JSON"))
 		return
 	}
 	if err := validateHost(&h); err != nil {
@@ -780,12 +780,12 @@ func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
 	a.prepareHostPolicy(r.Context(), &h)
 	if h.BasicAuthEnabled {
 		if len(h.BasicAuthPassword) < 8 || len(h.BasicAuthPassword) > 72 {
-			fail(w, 400, errors.New("Basic Auth password must be 8-72 bytes"))
+			fail(w, 400, errors.New("Basic Auth 密码需为 8-72 字节"))
 			return
 		}
 		hash, err := hashPassword(h.BasicAuthPassword)
 		if err != nil {
-			fail(w, 500, errors.New("could not hash Basic Auth password"))
+			fail(w, 500, errors.New("Basic Auth 密码哈希失败"))
 			return
 		}
 		h.PasswordHash = hash
@@ -819,7 +819,7 @@ func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
 func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 	var h Host
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&h); err != nil {
-		fail(w, 400, errors.New("invalid JSON body"))
+		fail(w, 400, errors.New("请求内容不是有效的 JSON"))
 		return
 	}
 	if err := validateHost(&h); err != nil {
@@ -828,7 +828,7 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		fail(w, 400, errors.New("invalid proxy host id"))
+		fail(w, 400, errors.New("站点 ID 无效"))
 		return
 	}
 	if err := a.validateHostListener(r.Context(), &h); err != nil {
@@ -865,17 +865,17 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 	if h.BasicAuthEnabled {
 		if h.BasicAuthPassword != "" {
 			if len(h.BasicAuthPassword) < 8 || len(h.BasicAuthPassword) > 72 {
-				fail(w, 400, errors.New("Basic Auth password must be 8-72 bytes"))
+				fail(w, 400, errors.New("Basic Auth 密码需为 8-72 字节"))
 				return
 			}
 			storedHash, err = hashPassword(h.BasicAuthPassword)
 			if err != nil {
-				fail(w, 500, errors.New("could not hash Basic Auth password"))
+				fail(w, 500, errors.New("Basic Auth 密码哈希失败"))
 				return
 			}
 		} else {
 			if err := a.db.QueryRowContext(r.Context(), `SELECT basic_auth_hash FROM proxy_hosts WHERE id=?`, id).Scan(&storedHash); err != nil || storedHash == "" {
-				fail(w, 400, errors.New("Basic Auth password is required"))
+				fail(w, 400, errors.New("请填写 Basic Auth 密码"))
 				return
 			}
 		}
@@ -898,7 +898,7 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if exists == 0 {
-			fail(w, 404, errors.New("proxy host not found"))
+			fail(w, 404, errors.New("站点不存在"))
 			return
 		}
 		fail(w, 409, errors.New("该站点已被其他会话修改，请刷新后重新编辑"))
@@ -917,7 +917,7 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		fail(w, 400, errors.New("invalid proxy host id"))
+		fail(w, 400, errors.New("站点 ID 无效"))
 		return
 	}
 	tx, err := a.db.BeginTx(r.Context(), nil)
@@ -929,9 +929,9 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 	var siteType, domain, rootPath string
 	if err := tx.QueryRowContext(r.Context(), `SELECT type,domain,root_path FROM proxy_hosts WHERE id=?`, id).Scan(&siteType, &domain, &rootPath); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			fail(w, 404, errors.New("proxy host not found"))
+			fail(w, 404, errors.New("站点不存在"))
 		} else {
-			fail(w, 500, errors.New("could not read proxy host"))
+			fail(w, 500, errors.New("无法读取站点"))
 		}
 		return
 	}
@@ -944,14 +944,14 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 		rootPath = filepath.Clean(strings.TrimSpace(rootPath))
 		rows, queryErr := tx.QueryContext(r.Context(), `SELECT domain,root_path FROM proxy_hosts WHERE type='static' AND id<>?`, id)
 		if queryErr != nil {
-			fail(w, 500, errors.New("could not check shared static site files"))
+			fail(w, 500, errors.New("无法检查共享静态站点文件"))
 			return
 		}
 		for rows.Next() {
 			var otherDomain, otherRoot string
 			if scanErr := rows.Scan(&otherDomain, &otherRoot); scanErr != nil {
 				_ = rows.Close()
-				fail(w, 500, errors.New("could not check shared static site files"))
+				fail(w, 500, errors.New("无法检查共享静态站点文件"))
 				return
 			}
 			otherRoot = strings.TrimSpace(otherRoot)
@@ -967,7 +967,7 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 		}
 		if rowsErr := rows.Err(); rowsErr != nil {
 			_ = rows.Close()
-			fail(w, 500, errors.New("could not check shared static site files"))
+			fail(w, 500, errors.New("无法检查共享静态站点文件"))
 			return
 		}
 		_ = rows.Close()
@@ -985,7 +985,7 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 	}
 	changed, err := res.RowsAffected()
 	if err != nil || changed == 0 {
-		fail(w, 404, errors.New("proxy host not found"))
+		fail(w, 404, errors.New("站点不存在"))
 		return
 	}
 	if _, err = tx.ExecContext(r.Context(), `DELETE FROM panel_settings WHERE key=?`, "site_meta:"+strconv.FormatInt(id, 10)); err != nil {
@@ -1010,7 +1010,7 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 	if deleteSiteFiles && !sharedSiteFiles {
 		if err := a.removeManagedStaticSite(rootPath); err != nil {
 			slog.Error("could not remove deleted static site files", "error", err)
-			fail(w, 500, errors.New("site was deleted, but its static files could not be removed"))
+			fail(w, 500, errors.New("站点已删除，但静态文件未能移除"))
 			return
 		}
 	}
@@ -1023,17 +1023,17 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 func validateStaticRoot(root string) error {
 	root = strings.TrimSpace(root)
 	if root == "" {
-		return errors.New("static site root directory is required")
+		return errors.New("请填写静态站点根目录")
 	}
 	if !filepath.IsAbs(root) {
-		return errors.New("static site root must be an absolute path")
+		return errors.New("静态站点根目录必须是绝对路径")
 	}
 	if strings.ContainsRune(root, 0) {
-		return errors.New("static site root contains invalid characters")
+		return errors.New("静态站点根目录包含无效字符")
 	}
 	for _, segment := range strings.FieldsFunc(root, func(r rune) bool { return r == '/' || r == '\\' }) {
 		if segment == ".." {
-			return errors.New("static site root cannot contain .. segments")
+			return errors.New("静态站点根目录不能包含 .. 路径段")
 		}
 	}
 	return nil
@@ -1093,11 +1093,11 @@ func (a *App) prepareSiteStorage(h *Host) error {
 	}
 	h.RootPath = filepath.Clean(root)
 	if err := os.MkdirAll(h.RootPath, 0750); err != nil {
-		return errors.New("static site root is not accessible; create the directory on the server first")
+		return errors.New("静态站点根目录不可访问，请先在服务器上创建该目录")
 	}
 	info, err := os.Stat(h.RootPath)
 	if err != nil || !info.IsDir() {
-		return errors.New("static site root must be an existing directory")
+		return errors.New("静态站点根目录必须是已存在的目录")
 	}
 	return nil
 }
@@ -1109,7 +1109,7 @@ func validateHost(h *Host) error {
 	}
 	h.Domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h.Domain)), ".")
 	if h.Domain == "" || !domainRE.MatchString(h.Domain) {
-		return errors.New("domain must be a valid hostname")
+		return errors.New("域名必须是有效主机名")
 	}
 	switch h.Type {
 	case "", "proxy":
@@ -1157,14 +1157,14 @@ func validateHost(h *Host) error {
 		h.RootPath = ""
 		target := strings.TrimSpace(h.RedirectTarget)
 		if target == "" {
-			return errors.New("redirect target is required")
+			return errors.New("请填写跳转目标")
 		}
 		u, err := url.Parse(target)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return errors.New("redirect target must be an http(s):// URL")
+			return errors.New("跳转目标必须是 http(s):// 地址")
 		}
 		if u.RawQuery != "" || u.Fragment != "" {
-			return errors.New("redirect target cannot contain a query string or fragment; the request's own is preserved")
+			return errors.New("跳转目标不能包含查询串或片段，请求自带的会保留")
 		}
 		h.RedirectTarget = strings.TrimRight(target, "/")
 		switch h.RedirectStatus {
@@ -1172,10 +1172,10 @@ func validateHost(h *Host) error {
 			h.RedirectStatus = 301
 		case 301, 302, 307, 308:
 		default:
-			return errors.New("redirect status must be 301, 302, 307 or 308")
+			return errors.New("跳转状态码只能是 301、302、307 或 308")
 		}
 	default:
-		return errors.New("site type must be proxy, static, files or redirect")
+		return errors.New("站点类型只能是反向代理、静态站点、文件服务或跳转")
 	}
 	h.Path = strings.TrimSpace(h.Path)
 	if h.Path != "" {
@@ -1271,7 +1271,7 @@ func parseUpstream(raw string) (*url.URL, error) {
 
 func validateHeaders(headers map[string]string) error {
 	if len(headers) > 40 {
-		return errors.New("at most 40 custom request headers are allowed")
+		return errors.New("自定义请求头最多 40 个")
 	}
 	for key, value := range headers {
 		if !headerNameRE.MatchString(key) || strings.EqualFold(key, "Host") || strings.EqualFold(key, "Content-Length") || strings.EqualFold(key, "Connection") || strings.EqualFold(key, "Transfer-Encoding") || strings.EqualFold(key, "Upgrade") {
@@ -1288,7 +1288,7 @@ func validateHostSecurity(h *Host) error {
 	if h.BasicAuthEnabled {
 		h.BasicAuthUser = strings.TrimSpace(h.BasicAuthUser)
 		if h.BasicAuthUser == "" || len(h.BasicAuthUser) > 128 || strings.ContainsAny(h.BasicAuthUser, ":\r\n\x00") {
-			return errors.New("Basic Auth username must be 1-128 characters and cannot contain colon or control characters")
+			return errors.New("Basic Auth 用户名需为 1-128 个字符，且不能包含冒号或控制字符")
 		}
 	} else {
 		h.BasicAuthUser = ""
@@ -1304,7 +1304,7 @@ func validateHostSecurity(h *Host) error {
 		return fmt.Errorf("invalid IP denylist: %w", err)
 	}
 	if h.RateLimitRequests < 0 || h.RateLimitRequests > 1000000 {
-		return errors.New("rate limit must be between 0 and 1000000 requests per window")
+		return errors.New("限流需在每窗口 0-1000000 次之间")
 	}
 	if h.RateLimitRequests == 0 {
 		h.RateLimitWindow = ""
@@ -1315,14 +1315,14 @@ func validateHostSecurity(h *Host) error {
 	}
 	duration, err := time.ParseDuration(h.RateLimitWindow)
 	if err != nil || duration < 100*time.Millisecond || duration > 24*time.Hour {
-		return errors.New("rate limit window must be between 100ms and 24h")
+		return errors.New("限流窗口需在 100ms 到 24 小时之间")
 	}
 	return nil
 }
 
 func normalizeCIDRs(input []string) ([]string, error) {
 	if len(input) > 1000 {
-		return nil, errors.New("at most 1000 IP ranges are allowed")
+		return nil, errors.New("IP 网段最多 1000 条")
 	}
 	result := make([]string, 0, len(input))
 	seen := map[string]bool{}
@@ -1340,7 +1340,7 @@ func normalizeCIDRs(input []string) ([]string, error) {
 		}
 		_, network, err := net.ParseCIDR(value)
 		if err != nil {
-			return nil, errors.New("entries must be IP addresses or CIDR ranges")
+			return nil, errors.New("条目必须是 IP 地址或 CIDR 网段")
 		}
 		normalized := network.String()
 		if !seen[normalized] {
@@ -1365,33 +1365,33 @@ func (a *App) validateTLSSettings(ctx context.Context, h *Host) error {
 	switch h.TLSMode {
 	case "auto", "http-01", "none", "internal":
 		if h.DNSProviderID != nil {
-			return errors.New("DNS provider can only be selected for DNS-01 TLS")
+			return errors.New("只有在 DNS-01 模式下才能选择 DNS 凭据")
 		}
 	case "dns-01":
 		if h.DNSProviderID == nil || *h.DNSProviderID < 1 {
-			return errors.New("a DNS provider is required for DNS-01 TLS")
+			return errors.New("DNS-01 模式必须选择 DNS 凭据")
 		}
 		var exists int
 		if err := a.db.QueryRowContext(ctx, `SELECT 1 FROM dns_providers WHERE id=?`, *h.DNSProviderID).Scan(&exists); err != nil {
-			return errors.New("selected DNS provider does not exist")
+			return errors.New("所选 DNS 凭据不存在")
 		}
 	case "custom":
 		if h.DNSProviderID != nil {
-			return errors.New("DNS provider cannot be selected for a custom certificate")
+			return errors.New("自定义证书不能选择 DNS 凭据")
 		}
 		if h.CustomCertificateID == nil || *h.CustomCertificateID < 1 {
-			return errors.New("a custom certificate is required")
+			return errors.New("请选择自定义证书")
 		}
 		var namesJSON string
 		if err := a.db.QueryRowContext(ctx, `SELECT dns_names_json FROM custom_certificates WHERE id=?`, *h.CustomCertificateID).Scan(&namesJSON); err != nil {
-			return errors.New("selected custom certificate does not exist")
+			return errors.New("所选自定义证书不存在")
 		}
 		var names []string
 		if json.Unmarshal([]byte(namesJSON), &names) != nil || !certificateMatchesDomain(names, h.Domain) {
-			return errors.New("custom certificate SAN does not cover this domain")
+			return errors.New("自定义证书的域名不包含该站点")
 		}
 	default:
-		return errors.New("TLS mode must be auto, http-01, dns-01, internal, custom, or none")
+		return errors.New("TLS 模式只能是自动、HTTP-01、DNS-01、内部签发、自定义或不启用")
 	}
 	return nil
 }
@@ -1520,36 +1520,36 @@ func upstreamDial(raw string) string { u, _ := url.Parse(raw); return u.Host }
 func caddyAdminListen(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "http" || u.User != nil || u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
-		return "", errors.New("Caddy Admin API must be a local HTTP URL with a host and port")
+		return "", errors.New("Caddy Admin API 必须是带主机和端口的本地 HTTP 地址")
 	}
 	host, port, err := net.SplitHostPort(u.Host)
 	if err != nil || port == "" {
-		return "", errors.New("Caddy Admin API must include a port")
+		return "", errors.New("Caddy Admin API 必须包含端口")
 	}
 	portNumber, err := strconv.Atoi(port)
 	if err != nil || portNumber < 1 || portNumber > 65535 {
-		return "", errors.New("Caddy Admin API port is invalid")
+		return "", errors.New("Caddy Admin API 端口无效")
 	}
 	ip := net.ParseIP(host)
 	if !(ip != nil && ip.IsLoopback() || strings.EqualFold(host, "localhost")) {
-		return "", errors.New("Caddy Admin API must use a loopback address")
+		return "", errors.New("Caddy Admin API 必须使用回环地址")
 	}
 	return net.JoinHostPort(host, port), nil
 }
 func validateListenAddress(address string) error {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
-		return errors.New("listener must be an IP address and explicit port, such as :8080")
+		return errors.New("监听地址必须是 IP 加端口，例如 :8080")
 	}
 	if host != "" {
 		ip := net.ParseIP(host)
 		if ip == nil {
-			return errors.New("listener host must be an IP address or empty")
+			return errors.New("监听主机必须是 IP 地址或留空")
 		}
 	}
 	portNumber, err := strconv.Atoi(port)
 	if err != nil || portNumber < 1 || portNumber > 65535 {
-		return errors.New("listener port is invalid")
+		return errors.New("监听端口无效")
 	}
 	return nil
 }

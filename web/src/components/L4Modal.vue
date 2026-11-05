@@ -15,7 +15,7 @@ import { applyRetryVisible, saving } from "../composables/useState";
 
 import { retryApply } from "../composables/useApply";
 const checkBusy=ref(false),checkNote=ref('');watch(l4Form,()=>checkNote.value='',{deep:true});
-async function checkPort(){checkBusy.value=true;checkNote.value='';try{const r=await apiFetch('/api/v1/layer4-rules/check',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken.value},body:JSON.stringify({...l4Form.value,id:l4EditingID.value||0})});const d=await r.json();if(!r.ok)throw Error(d.error);checkNote.value=t(d.message)}catch(e){checkNote.value=e instanceof Error?t(e.message):t('检查失败')}finally{checkBusy.value=false}}
+async function checkPort(){checkBusy.value=true;checkNote.value='';try{const r=await apiFetch('/api/v1/layer4-rules/check',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken.value},body:JSON.stringify({...l4Form.value,id:l4EditingID.value||0})});const d=await r.json();if(!r.ok)throw Error(t(d.error));checkNote.value=t(d.message)}catch(e){checkNote.value=e instanceof Error?t(e.message):t('检查失败')}finally{checkBusy.value=false}}
 </script>
 
 <template>

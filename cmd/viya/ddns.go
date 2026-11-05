@@ -86,7 +86,7 @@ func (a *App) listDDNSRecords(w http.ResponseWriter, r *http.Request) {
 	a.ddnsMu.Unlock()
 	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,comment,dns_provider_id,zone,record_name,record_type,cname_target,ip_source,interface_name,interface_ip,ttl_seconds,interval_minutes,enabled,last_ip,last_run_at,next_run_at,last_error,last_changed_at,last_success_at,last_status,last_stage FROM ddns_records ORDER BY name`)
 	if err != nil {
-		fail(w, 500, errors.New("could not read DDNS records"))
+		fail(w, 500, errors.New("无法读取 DDNS 记录"))
 		return
 	}
 	defer rows.Close()
@@ -95,7 +95,7 @@ func (a *App) listDDNSRecords(w http.ResponseWriter, r *http.Request) {
 		var v DDNSRecord
 		var en int
 		if err := rows.Scan(&v.ID, &v.Name, &v.Comment, &v.DNSProviderID, &v.Zone, &v.RecordName, &v.RecordType, &v.CNAMETarget, &v.IPSource, &v.InterfaceName, &v.InterfaceIP, &v.TTLSeconds, &v.IntervalMinutes, &en, &v.LastIP, &v.LastRunAt, &v.NextRunAt, &v.LastError, &v.LastChangedAt, &v.LastSuccessAt, &v.LastStatus, &v.LastStage); err != nil {
-			fail(w, 500, errors.New("could not read DDNS records"))
+			fail(w, 500, errors.New("无法读取 DDNS 记录"))
 			return
 		}
 		v.Enabled = en == 1
@@ -103,7 +103,7 @@ func (a *App) listDDNSRecords(w http.ResponseWriter, r *http.Request) {
 		out = append(out, v)
 	}
 	if err := rows.Err(); err != nil {
-		fail(w, 500, errors.New("could not read DDNS records"))
+		fail(w, 500, errors.New("无法读取 DDNS 记录"))
 		return
 	}
 	writeJSON(w, 200, out)
@@ -111,7 +111,7 @@ func (a *App) listDDNSRecords(w http.ResponseWriter, r *http.Request) {
 func (a *App) listNetworkInterfaces(w http.ResponseWriter, r *http.Request) {
 	interfaces, err := networkInterfaces()
 	if err != nil {
-		fail(w, 500, errors.New("could not read network interfaces"))
+		fail(w, 500, errors.New("无法读取网卡"))
 		return
 	}
 	writeJSON(w, 200, interfaces)
@@ -275,29 +275,29 @@ func interfaceIPSelected(name string, v6 bool, selected string) (netip.Addr, err
 func validateDDNS(v *DDNSRecord) error {
 	v.Name = strings.TrimSpace(v.Name)
 	if v.Name == "" || len(v.Name) > 100 {
-		return errors.New("DDNS name must be 1-100 characters")
+		return errors.New("DDNS 名称需为 1-100 个字符")
 	}
 	v.Zone = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(v.Zone)), ".")
 	if !domainRE.MatchString(v.Zone) || strings.Contains(v.Zone, "*") {
-		return errors.New("zone must be a DNS zone name")
+		return errors.New("Zone 必须是有效的 DNS 域名")
 	}
 	v.RecordName = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(v.RecordName)), ".")
 	if v.RecordName == "" {
-		return errors.New("record name is required (use @ for the zone apex)")
+		return errors.New("请填写记录名（根记录用 @）")
 	}
 	if v.RecordName != "@" && !domainRE.MatchString(v.RecordName) {
-		return errors.New("record name must be @ or a relative DNS name")
+		return errors.New("记录名必须是 @ 或相对域名")
 	}
 	if strings.HasSuffix(v.RecordName, "."+v.Zone) || v.RecordName == v.Zone {
-		return errors.New("record name must be relative to the selected zone")
+		return errors.New("记录名必须相对于所选 Zone")
 	}
 	if v.RecordType != "A" && v.RecordType != "AAAA" && v.RecordType != "CNAME" {
-		return errors.New("record type must be A, AAAA or CNAME")
+		return errors.New("记录类型只能是 A、AAAA 或 CNAME")
 	}
 	if v.RecordType == "CNAME" {
 		v.CNAMETarget = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(v.CNAMETarget)), ".")
 		if !domainRE.MatchString(v.CNAMETarget) || strings.Contains(v.CNAMETarget, "*") || net.ParseIP(v.CNAMETarget) != nil {
-			return errors.New("CNAME target must be a hostname, not an IP address")
+			return errors.New("CNAME 目标必须是主机名，不能是 IP 地址")
 		}
 		owner := v.RecordName
 		if owner == "@" {
@@ -306,7 +306,7 @@ func validateDDNS(v *DDNSRecord) error {
 			owner += "." + v.Zone
 		}
 		if strings.EqualFold(owner, v.CNAMETarget) {
-			return errors.New("CNAME target cannot point to the record itself")
+			return errors.New("CNAME 目标不能指向记录自身")
 		}
 		v.IPSource, v.InterfaceName, v.InterfaceIP = "", "", ""
 	} else {
@@ -318,7 +318,7 @@ func validateDDNS(v *DDNSRecord) error {
 		}
 	}
 	if v.DNSProviderID < 1 {
-		return errors.New("a DNS provider is required")
+		return errors.New("请选择 DNS 凭据")
 	}
 	if v.RecordType != "CNAME" {
 		if v.IPSource == "" {
@@ -339,13 +339,13 @@ func validateDDNS(v *DDNSRecord) error {
 		v.TTLSeconds = 300
 	}
 	if v.TTLSeconds < 60 || v.TTLSeconds > 86400 {
-		return errors.New("TTL must be between 60 and 86400 seconds")
+		return errors.New("TTL 需在 60-86400 秒之间")
 	}
 	if v.IntervalMinutes == 0 {
 		v.IntervalMinutes = 5
 	}
 	if v.IntervalMinutes < 5 || v.IntervalMinutes > 1440 {
-		return errors.New("DDNS interval must be between 5 and 1440 minutes")
+		return errors.New("DDNS 间隔需在 5-1440 分钟之间")
 	}
 	return nil
 }
@@ -360,7 +360,7 @@ func sameDNSValue(recordType, current, desired string) bool {
 func (a *App) saveDDNS(w http.ResponseWriter, r *http.Request, id int64, create bool) {
 	var v DDNSRecord
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&v); err != nil {
-		fail(w, 400, errors.New("invalid JSON body"))
+		fail(w, 400, errors.New("请求内容不是有效的 JSON"))
 		return
 	}
 	if err := validateDDNS(&v); err != nil {
@@ -371,7 +371,7 @@ func (a *App) saveDDNS(w http.ResponseWriter, r *http.Request, id int64, create 
 	defer a.ddnsMu.Unlock()
 	var exists int
 	if err := a.db.QueryRowContext(r.Context(), `SELECT 1 FROM dns_providers WHERE id=?`, v.DNSProviderID).Scan(&exists); err != nil {
-		fail(w, 400, errors.New("selected DNS provider does not exist"))
+		fail(w, 400, errors.New("所选 DNS 凭据不存在"))
 		return
 	}
 	v.Comment = strings.TrimSpace(v.Comment)
@@ -394,7 +394,7 @@ func (a *App) saveDDNS(w http.ResponseWriter, r *http.Request, id int64, create 
 		res = rr
 	}
 	if err != nil {
-		fail(w, 409, errors.New("DDNS record could not be saved"))
+		fail(w, 409, errors.New("DDNS 记录保存失败"))
 		return
 	}
 	if create {
@@ -402,7 +402,7 @@ func (a *App) saveDDNS(w http.ResponseWriter, r *http.Request, id int64, create 
 	} else {
 		n, _ := res.RowsAffected()
 		if n == 0 {
-			fail(w, 404, errors.New("DDNS record not found"))
+			fail(w, 404, errors.New("DDNS 记录不存在"))
 			return
 		}
 		v.ID = id
@@ -420,7 +420,7 @@ func (a *App) createDDNSRecord(w http.ResponseWriter, r *http.Request) { a.saveD
 func (a *App) updateDDNSRecord(w http.ResponseWriter, r *http.Request) {
 	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if e != nil || id < 1 {
-		fail(w, 400, errors.New("invalid DDNS record id"))
+		fail(w, 400, errors.New("DDNS 记录 ID 无效"))
 		return
 	}
 	a.saveDDNS(w, r, id, false)
@@ -428,19 +428,19 @@ func (a *App) updateDDNSRecord(w http.ResponseWriter, r *http.Request) {
 func (a *App) deleteDDNSRecord(w http.ResponseWriter, r *http.Request) {
 	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if e != nil || id < 1 {
-		fail(w, 400, errors.New("invalid DDNS record id"))
+		fail(w, 400, errors.New("DDNS 记录 ID 无效"))
 		return
 	}
 	a.ddnsMu.Lock()
 	defer a.ddnsMu.Unlock()
 	res, e := a.db.ExecContext(r.Context(), `DELETE FROM ddns_records WHERE id=?`, id)
 	if e != nil {
-		fail(w, 500, errors.New("could not delete DDNS record"))
+		fail(w, 500, errors.New("无法删除 DDNS 记录"))
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		fail(w, 404, errors.New("DDNS record not found"))
+		fail(w, 404, errors.New("DDNS 记录不存在"))
 		return
 	}
 	w.WriteHeader(204)
@@ -448,12 +448,12 @@ func (a *App) deleteDDNSRecord(w http.ResponseWriter, r *http.Request) {
 func (a *App) listDDNSRuns(w http.ResponseWriter, r *http.Request) {
 	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if e != nil || id < 1 {
-		fail(w, 400, errors.New("invalid DDNS record id"))
+		fail(w, 400, errors.New("DDNS 记录 ID 无效"))
 		return
 	}
 	rows, e := a.db.QueryContext(r.Context(), `SELECT id,observed_ip,status,error_text,created_at FROM ddns_runs WHERE ddns_record_id=? ORDER BY id DESC LIMIT 100`, id)
 	if e != nil {
-		fail(w, 500, errors.New("could not read DDNS history"))
+		fail(w, 500, errors.New("无法读取 DDNS 历史"))
 		return
 	}
 	defer rows.Close()
@@ -461,7 +461,7 @@ func (a *App) listDDNSRuns(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var v DDNSRun
 		if rows.Scan(&v.ID, &v.ObservedIP, &v.Status, &v.Error, &v.CreatedAt) != nil {
-			fail(w, 500, errors.New("could not read DDNS history"))
+			fail(w, 500, errors.New("无法读取 DDNS 历史"))
 			return
 		}
 		out = append(out, v)
@@ -471,7 +471,7 @@ func (a *App) listDDNSRuns(w http.ResponseWriter, r *http.Request) {
 func (a *App) runDDNSRecord(w http.ResponseWriter, r *http.Request) {
 	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if e != nil || id < 1 {
-		fail(w, 400, errors.New("invalid DDNS record id"))
+		fail(w, 400, errors.New("DDNS 记录 ID 无效"))
 		return
 	}
 	a.ddnsMu.Lock()
@@ -613,7 +613,7 @@ func providerFor(ctx context.Context, load func(context.Context, int64) (string,
 	case "vultr":
 		return &vultr.Provider{APIToken: c["api_token"]}, nil
 	default:
-		return nil, errors.New("unsupported DNS provider")
+		return nil, errors.New("不支持该 DNS 服务商")
 	}
 }
 func (a *App) updateDDNSRecordNow(ctx context.Context, id int64) (string, error) {
@@ -627,10 +627,10 @@ func (a *App) executeDDNSRecord(ctx context.Context, id int64, manual bool) (str
 	var enabled int
 	err := a.db.QueryRowContext(ctx, `SELECT id,name,comment,dns_provider_id,zone,record_name,record_type,cname_target,ip_source,interface_name,interface_ip,ttl_seconds,interval_minutes,enabled,last_ip FROM ddns_records WHERE id=?`, id).Scan(&v.ID, &v.Name, &v.Comment, &v.DNSProviderID, &v.Zone, &v.RecordName, &v.RecordType, &v.CNAMETarget, &v.IPSource, &v.InterfaceName, &v.InterfaceIP, &v.TTLSeconds, &v.IntervalMinutes, &enabled, &v.LastIP)
 	if err != nil {
-		return "", errors.New("DDNS record not found")
+		return "", errors.New("DDNS 记录不存在")
 	}
 	if enabled != 1 && !manual {
-		return "", errors.New("DDNS record is disabled")
+		return "", errors.New("DDNS 记录未启用")
 	}
 	status := "failed"
 	stage := "address"
@@ -683,7 +683,7 @@ func (a *App) executeDDNSRecord(ctx context.Context, id int64, manual bool) (str
 					err = fmt.Errorf("CNAME cannot coexist with the existing %s record at this name; remove the conflicting record first", conflictingType)
 					message = err.Error()
 				} else if len(matches) > 1 {
-					err = errors.New("multiple records exist for this name and type; refusing to replace an RRset with multiple values")
+					err = errors.New("该名称与类型下存在多条记录，拒绝整体覆盖")
 					message = err.Error()
 				} else if len(matches) == 1 && sameDNSValue(v.RecordType, matches[0].RR().Data, observed) {
 					status = "unchanged"
@@ -701,7 +701,7 @@ func (a *App) executeDDNSRecord(ctx context.Context, id int64, manual bool) (str
 							existing.TTL = uint32(v.TTLSeconds)
 							target = existing
 						} else {
-							err = errors.New("AliDNS returned an unsupported record shape")
+							err = errors.New("阿里云 DNS 返回了不支持的记录结构")
 							message = err.Error()
 						}
 					}
@@ -779,26 +779,26 @@ func (a *App) executeDDNSRecord(ctx context.Context, id int64, manual bool) (str
 func (a *App) toggleDDNSEnabled(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		fail(w, 400, errors.New("invalid DDNS record id"))
+		fail(w, 400, errors.New("DDNS 记录 ID 无效"))
 		return
 	}
 	var input struct {
 		Enabled *bool `json:"enabled"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&input) != nil || input.Enabled == nil {
-		fail(w, 400, errors.New("enabled is required"))
+		fail(w, 400, errors.New("缺少启用状态"))
 		return
 	}
 	a.ddnsMu.Lock()
 	defer a.ddnsMu.Unlock()
 	result, err := a.db.ExecContext(r.Context(), `UPDATE ddns_records SET enabled=?,next_run_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, boolInt(*input.Enabled), time.Now().Unix(), id)
 	if err != nil {
-		fail(w, 500, errors.New("could not update DDNS schedule"))
+		fail(w, 500, errors.New("无法更新 DDNS 计划"))
 		return
 	}
 	count, _ := result.RowsAffected()
 	if count == 0 {
-		fail(w, 404, errors.New("DDNS record not found"))
+		fail(w, 404, errors.New("DDNS 记录不存在"))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"enabled": *input.Enabled})

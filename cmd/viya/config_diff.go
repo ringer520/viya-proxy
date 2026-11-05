@@ -92,7 +92,7 @@ func (a *App) loadRevisionConfig(r *http.Request, id int64) (map[string]string, 
 	}
 	var value any
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		return nil, false, errors.New("stored revision is not readable")
+		return nil, false, errors.New("已保存的修订无法读取")
 	}
 	flat := map[string]string{}
 	complete := flattenJSON("", value, flat)
@@ -104,7 +104,7 @@ func (a *App) loadRevisionConfig(r *http.Request, id int64) (map[string]string, 
 func (a *App) configRevisionDiff(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		fail(w, http.StatusBadRequest, errors.New("invalid revision id"))
+		fail(w, http.StatusBadRequest, errors.New("修订 ID 无效"))
 		return
 	}
 	againstRaw := strings.TrimSpace(r.URL.Query().Get("against"))
@@ -114,24 +114,24 @@ func (a *App) configRevisionDiff(w http.ResponseWriter, r *http.Request) {
 	var against int64
 	if againstRaw == "current" {
 		if err := a.db.QueryRowContext(r.Context(), `SELECT id FROM config_revisions WHERE status='applied' ORDER BY id DESC LIMIT 1`).Scan(&against); err != nil {
-			fail(w, http.StatusNotFound, errors.New("no applied revision to compare against"))
+			fail(w, http.StatusNotFound, errors.New("没有可对比的已应用修订"))
 			return
 		}
 	} else {
 		against, err = strconv.ParseInt(againstRaw, 10, 64)
 		if err != nil || against < 1 {
-			fail(w, http.StatusBadRequest, errors.New("invalid comparison revision"))
+			fail(w, http.StatusBadRequest, errors.New("对比修订无效"))
 			return
 		}
 	}
 	base, baseOK, err := a.loadRevisionConfig(r, against)
 	if err != nil {
-		fail(w, http.StatusNotFound, errors.New("comparison revision not found"))
+		fail(w, http.StatusNotFound, errors.New("对比修订不存在"))
 		return
 	}
 	target, targetOK, err := a.loadRevisionConfig(r, id)
 	if err != nil {
-		fail(w, http.StatusNotFound, errors.New("revision not found"))
+		fail(w, http.StatusNotFound, errors.New("修订不存在"))
 		return
 	}
 
@@ -185,12 +185,12 @@ func (a *App) configRevisionDiff(w http.ResponseWriter, r *http.Request) {
 func (a *App) configRevision(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		fail(w, http.StatusBadRequest, errors.New("invalid revision id"))
+		fail(w, http.StatusBadRequest, errors.New("修订 ID 无效"))
 		return
 	}
 	var raw, status string
 	if err := a.db.QueryRowContext(r.Context(), `SELECT status,config_json FROM config_revisions WHERE id=?`, id).Scan(&status, &raw); err != nil {
-		fail(w, http.StatusNotFound, errors.New("revision not found"))
+		fail(w, http.StatusNotFound, errors.New("修订不存在"))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

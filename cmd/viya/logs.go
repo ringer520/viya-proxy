@@ -34,7 +34,7 @@ func (a *App) recentLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	events, err := readRecentLogFileWhere(filepathJoin(a.dataDir, "access.log"), query.Limit, func(event map[string]any) bool { return caddyLogKind(event) == "access" && query.matches(event) })
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		fail(w, 500, errors.New("could not read access logs"))
+		fail(w, 500, errors.New("无法读取访问日志"))
 		return
 	}
 	if events == nil {
@@ -61,7 +61,7 @@ func (a *App) layer4RuleLogs(w http.ResponseWriter, r *http.Request) {
 		return caddyLogKind(event) == "layer4" && logEventPort(event["local"]) == port
 	})
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		fail(w, 500, errors.New("could not read forwarding logs"))
+		fail(w, 500, errors.New("无法读取转发日志"))
 		return
 	}
 	out := []map[string]any{}
@@ -430,7 +430,7 @@ func intValue(value any) int {
 func (a *App) listIPBans(w http.ResponseWriter, r *http.Request) {
 	rows, e := a.db.QueryContext(r.Context(), `SELECT id,domain,ip,reason,expires_at,created_at,source FROM ip_bans WHERE expires_at=0 OR expires_at>? ORDER BY expires_at`, time.Now().Unix())
 	if e != nil {
-		fail(w, 500, errors.New("could not list IP bans"))
+		fail(w, 500, errors.New("无法读取 IP 封禁"))
 		return
 	}
 	defer rows.Close()
@@ -438,7 +438,7 @@ func (a *App) listIPBans(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var v IPBan
 		if rows.Scan(&v.ID, &v.Domain, &v.IP, &v.Reason, &v.ExpiresAt, &v.CreatedAt, &v.Source) != nil {
-			fail(w, 500, errors.New("could not list IP bans"))
+			fail(w, 500, errors.New("无法读取 IP 封禁"))
 			return
 		}
 		out = append(out, v)
@@ -448,7 +448,7 @@ func (a *App) listIPBans(w http.ResponseWriter, r *http.Request) {
 func (a *App) removeIPBan(w http.ResponseWriter, r *http.Request) {
 	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if e != nil || id < 1 {
-		fail(w, 400, errors.New("invalid ban id"))
+		fail(w, 400, errors.New("封禁 ID 无效"))
 		return
 	}
 	if pending := a.pendingAccessConfirmation(r.Context()); pending != nil {
@@ -461,12 +461,12 @@ func (a *App) removeIPBan(w http.ResponseWriter, r *http.Request) {
 	}
 	res, e := a.db.ExecContext(r.Context(), `DELETE FROM ip_bans WHERE id=?`, id)
 	if e != nil {
-		fail(w, 500, errors.New("could not remove IP ban"))
+		fail(w, 500, errors.New("无法移除 IP 封禁"))
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		fail(w, 404, errors.New("IP ban not found"))
+		fail(w, 404, errors.New("IP 封禁不存在"))
 		return
 	}
 	if e = a.apply(r.Context()); e != nil {

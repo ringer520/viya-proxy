@@ -171,24 +171,24 @@ func validateSecurityHeaders(sh SecurityHeaders) error {
 	switch sh.Mode {
 	case "", "follow", "custom", "none":
 	default:
-		return errors.New("invalid site security policy mode")
+		return errors.New("站点安全策略模式无效")
 	}
 
 	switch sh.FrameOptions {
 	case "", "SAMEORIGIN", "DENY":
 	default:
-		return errors.New("X-Frame-Options must be SAMEORIGIN or DENY")
+		return errors.New("X-Frame-Options 只能是 SAMEORIGIN 或 DENY")
 	}
 	switch sh.ReferrerPolicy {
 	case "", "no-referrer", "strict-origin-when-cross-origin", "same-origin", "origin":
 	default:
-		return errors.New("unsupported Referrer-Policy value")
+		return errors.New("不支持的 Referrer-Policy 值")
 	}
 	if len(sh.CSP) > 4096 {
-		return errors.New("Content-Security-Policy is too long")
+		return errors.New("内容安全策略过长")
 	}
 	if strings.ContainsAny(sh.CSP, "\r\n") {
-		return errors.New("Content-Security-Policy must be a single line")
+		return errors.New("内容安全策略必须是单行")
 	}
 	return nil
 }
@@ -197,7 +197,7 @@ func validateSitePolicy(p SitePolicy) error {
 	switch p.Mode {
 	case "", "custom", "inherit", "none":
 	default:
-		return errors.New("invalid default security policy mode")
+		return errors.New("默认安全策略模式无效")
 	}
 
 	if err := validateSecurityHeaders(SecurityHeaders{
@@ -213,24 +213,24 @@ func validateSitePolicy(p SitePolicy) error {
 	switch p.RateLimitWin {
 	case "", "1s", "10s", "1m", "1h":
 	default:
-		return errors.New("unsupported rate limit window")
+		return errors.New("不支持的限流窗口")
 	}
 	if p.RateLimit < 0 || p.RateLimit > 1000000 {
-		return errors.New("rate limit must be between 0 and 1000000")
+		return errors.New("限流需在 0-1000000 之间")
 	}
 	if err := validateHeaders(p.CustomHeaders); err != nil {
 		return err
 	}
 	for _, list := range [][]string{p.IPAllowlist, p.IPDenylist} {
 		if len(list) > 64 {
-			return errors.New("at most 64 IP entries are allowed")
+			return errors.New("IP 条目最多 64 条")
 		}
 		if _, err := normalizeCIDRs(list); err != nil {
 			return fmt.Errorf("invalid policy IP rule: %w", err)
 		}
 	}
 	if p.MaxBodyBytes < 0 || p.MaxBodyBytes > 10<<30 {
-		return errors.New("request body limit must be between 0 and 10 GiB")
+		return errors.New("请求体上限需在 0-10 GiB 之间")
 	}
 	for _, method := range p.AllowedMethods {
 		switch method {
@@ -257,11 +257,11 @@ func (a *App) getSecurityDefaults(w http.ResponseWriter, r *http.Request) {
 func (a *App) saveSecurityGlobal(w http.ResponseWriter, r *http.Request) {
 	var p SitePolicy
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&p); err != nil {
-		fail(w, 400, errors.New("invalid JSON body"))
+		fail(w, 400, errors.New("请求内容不是有效的 JSON"))
 		return
 	}
 	if p.Mode == "inherit" {
-		fail(w, 400, errors.New("global policy cannot inherit"))
+		fail(w, 400, errors.New("全局策略不能设为继承"))
 		return
 	}
 	a.saveResolvedPolicy(w, r, "", p)
@@ -269,12 +269,12 @@ func (a *App) saveSecurityGlobal(w http.ResponseWriter, r *http.Request) {
 func (a *App) saveSecurityDomain(w http.ResponseWriter, r *http.Request) {
 	domain := canonicalSiteDomain(r.PathValue("domain"))
 	if domain == "" || !strings.Contains(domain, ".") {
-		fail(w, 400, errors.New("invalid root domain"))
+		fail(w, 400, errors.New("根域名无效"))
 		return
 	}
 	var p SitePolicy
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&p); err != nil {
-		fail(w, 400, errors.New("invalid JSON body"))
+		fail(w, 400, errors.New("请求内容不是有效的 JSON"))
 		return
 	}
 	a.saveResolvedPolicy(w, r, domain, p)
@@ -282,7 +282,7 @@ func (a *App) saveSecurityDomain(w http.ResponseWriter, r *http.Request) {
 func (a *App) deleteSecurityDomain(w http.ResponseWriter, r *http.Request) {
 	domain := canonicalSiteDomain(r.PathValue("domain"))
 	if domain == "" || !strings.Contains(domain, ".") {
-		fail(w, 400, errors.New("invalid root domain"))
+		fail(w, 400, errors.New("根域名无效"))
 		return
 	}
 	a.saveResolvedPolicy(w, r, domain, SitePolicy{Mode: "inherit"})
@@ -302,21 +302,21 @@ func (a *App) applySecurityDefaults(w http.ResponseWriter, r *http.Request) {
 	defer a.mu.Unlock()
 	var input applySecurityInput
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&input); err != nil {
-		fail(w, http.StatusBadRequest, errors.New("invalid JSON body"))
+		fail(w, http.StatusBadRequest, errors.New("请求内容不是有效的 JSON"))
 		return
 	}
 	if input.Scope != "" && input.Scope != "inherited" {
-		fail(w, 400, errors.New("only inherited sites can be updated"))
+		fail(w, 400, errors.New("只有继承策略的站点可以这样更新"))
 		return
 	}
 	root := canonicalSiteDomain(input.Domain)
 	if root == "" {
-		fail(w, http.StatusBadRequest, errors.New("domain is required"))
+		fail(w, http.StatusBadRequest, errors.New("请填写域名"))
 		return
 	}
 	policy, ok := a.readSecurityDomains(r.Context())[root]
 	if !ok || !policy.Enabled {
-		fail(w, http.StatusBadRequest, errors.New("this domain has no default policy to apply"))
+		fail(w, http.StatusBadRequest, errors.New("该域名没有可应用的默认策略"))
 		return
 	}
 	headers := SecurityHeaders{
@@ -347,7 +347,7 @@ func (a *App) applySecurityDefaults(w http.ResponseWriter, r *http.Request) {
 	globalPolicy := a.readSecurityGlobal(r.Context())
 	rows, err := a.db.QueryContext(r.Context(), `SELECT id,domain,security_headers FROM proxy_hosts`)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not read sites"))
+		fail(w, http.StatusInternalServerError, errors.New("无法读取站点"))
 		return
 	}
 	var ids []int64
@@ -375,13 +375,13 @@ func (a *App) applySecurityDefaults(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not read sites"))
+		fail(w, http.StatusInternalServerError, errors.New("无法读取站点"))
 		return
 	}
 
 	tx, err := a.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not begin policy update"))
+		fail(w, http.StatusInternalServerError, errors.New("无法开始策略更新"))
 		return
 	}
 	defer tx.Rollback()
@@ -389,17 +389,17 @@ func (a *App) applySecurityDefaults(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.ExecContext(r.Context(),
 			`UPDATE proxy_hosts SET security_headers=?,custom_headers=?,ip_allowlist=?,ip_denylist=?,rate_limit_requests=?,rate_limit_window=?,max_body_bytes=?,allowed_methods=?,hide_server=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 			string(headersJSON), string(customJSON), string(allowJSON), string(denyJSON), policy.RateLimit, policy.RateLimitWin, policy.MaxBodyBytes, string(methodsJSON), boolInt(policy.HideServer), id); err != nil {
-			fail(w, http.StatusInternalServerError, errors.New("could not update a site"))
+			fail(w, http.StatusInternalServerError, errors.New("无法更新站点"))
 			return
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not save policy updates"))
+		fail(w, http.StatusInternalServerError, errors.New("无法保存策略更新"))
 		return
 	}
 	if len(ids) > 0 {
 		if err := a.applyLocked(r.Context()); err != nil {
-			fail(w, http.StatusBadGateway, errors.New("saved but Caddy could not apply the configuration"))
+			fail(w, http.StatusBadGateway, errors.New("已保存，但 Caddy 未能应用配置"))
 			return
 		}
 	}

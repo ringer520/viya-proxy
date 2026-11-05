@@ -50,7 +50,7 @@ type credentials struct {
 func (a *App) authStatus(w http.ResponseWriter, r *http.Request) {
 	var count int
 	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("authentication status unavailable"))
+		fail(w, http.StatusInternalServerError, errors.New("无法获取登录状态"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"setup_required": count == 0})
@@ -65,17 +65,17 @@ func (a *App) setupAdmin(w http.ResponseWriter, r *http.Request) {
 	a.configMu.RLock()
 	defer a.configMu.RUnlock()
 	if !validOrigin(r, a.trustedProxies) {
-		fail(w, http.StatusForbidden, errors.New("request origin rejected"))
+		fail(w, http.StatusForbidden, errors.New("请求来源被拒绝"))
 		return
 	}
 	if !a.authorizeSetup(r) {
-		fail(w, http.StatusForbidden, errors.New("initial setup is unavailable"))
+		fail(w, http.StatusForbidden, errors.New("当前无法进行初始化"))
 		return
 	}
 	if !a.allowLogin(r) {
 		a.recordLoginAudit(r, "", auditBlocked, auditReasonRateLimited)
 		w.Header().Set("Retry-After", "300")
-		fail(w, http.StatusTooManyRequests, errors.New("too many setup attempts; try again later"))
+		fail(w, http.StatusTooManyRequests, errors.New("初始化尝试过于频繁，请稍后再试"))
 		return
 	}
 	var input credentials
@@ -85,45 +85,45 @@ func (a *App) setupAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	input.Username = strings.TrimSpace(input.Username)
 	if len(input.Username) < 3 || len(input.Username) > 64 || input.Password == "" || len(input.Password) < 8 || len(input.Password) > 72 {
-		fail(w, http.StatusBadRequest, errors.New("username must be 3-64 characters and password 8-72 bytes"))
+		fail(w, http.StatusBadRequest, errors.New("用户名需 3-64 个字符，密码需 8-72 字节"))
 		return
 	}
 	for _, char := range input.Username {
 		if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' || char == '-' || char == '.') {
-			fail(w, http.StatusBadRequest, errors.New("username may contain only letters, numbers, dot, dash, and underscore"))
+			fail(w, http.StatusBadRequest, errors.New("用户名只能包含字母、数字、点、连字符和下划线"))
 			return
 		}
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("password hashing failed"))
+		fail(w, http.StatusInternalServerError, errors.New("密码哈希失败"))
 		return
 	}
 	tx, err := a.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("account setup failed"))
+		fail(w, http.StatusInternalServerError, errors.New("账号初始化失败"))
 		return
 	}
 	defer tx.Rollback()
 	var count int
 	if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("account setup failed"))
+		fail(w, http.StatusInternalServerError, errors.New("账号初始化失败"))
 		return
 	}
 	if count != 0 {
-		fail(w, http.StatusConflict, errors.New("administrator is already configured"))
+		fail(w, http.StatusConflict, errors.New("管理员已初始化"))
 		return
 	}
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO users(username,password_hash) VALUES(?,?)`, input.Username, hash); err != nil {
-		fail(w, http.StatusConflict, errors.New("administrator could not be created"))
+		fail(w, http.StatusConflict, errors.New("无法创建管理员"))
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("account setup failed"))
+		fail(w, http.StatusInternalServerError, errors.New("账号初始化失败"))
 		return
 	}
 	if err := a.createSession(w, r, input.Username); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("administrator created but session could not be started; log in"))
+		fail(w, http.StatusInternalServerError, errors.New("管理员已创建，但会话未能建立，请重新登录"))
 		return
 	}
 	a.recordLoginAudit(r, input.Username, auditSuccess, auditReasonSetup)
@@ -134,13 +134,13 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	a.configMu.RLock()
 	defer a.configMu.RUnlock()
 	if !validOrigin(r, a.trustedProxies) {
-		fail(w, http.StatusForbidden, errors.New("request origin rejected"))
+		fail(w, http.StatusForbidden, errors.New("请求来源被拒绝"))
 		return
 	}
 	if !a.allowLogin(r) {
 		a.recordLoginAudit(r, "", auditBlocked, auditReasonRateLimited)
 		w.Header().Set("Retry-After", "300")
-		fail(w, http.StatusTooManyRequests, errors.New("too many login attempts; try again later"))
+		fail(w, http.StatusTooManyRequests, errors.New("登录尝试过于频繁，请稍后再试"))
 		return
 	}
 	var input credentials
@@ -156,16 +156,16 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		// time as a wrong password; otherwise response timing enumerates them.
 		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(input.Password))
 		a.recordLoginAudit(r, input.Username, auditFailure, auditReasonUnknownUser)
-		fail(w, http.StatusUnauthorized, errors.New("username or password is incorrect"))
+		fail(w, http.StatusUnauthorized, errors.New("用户名或密码不正确"))
 		return
 	}
 	if bcrypt.CompareHashAndPassword(storedHash, []byte(input.Password)) != nil {
 		a.recordLoginAudit(r, input.Username, auditFailure, auditReasonPassword)
-		fail(w, http.StatusUnauthorized, errors.New("username or password is incorrect"))
+		fail(w, http.StatusUnauthorized, errors.New("用户名或密码不正确"))
 		return
 	}
 	if err := a.createSessionForUser(w, r, userID); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not start session"))
+		fail(w, http.StatusInternalServerError, errors.New("无法建立会话"))
 		return
 	}
 	a.clearLoginAttempts(r)
@@ -179,10 +179,10 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 	defer r.Body.Close()
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err := decoder.Decode(dst); err != nil {
-		return errors.New("invalid request body")
+		return errors.New("请求内容无效")
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		return errors.New("invalid request body")
+		return errors.New("请求内容无效")
 	}
 	return nil
 }
@@ -191,13 +191,13 @@ func decodeCredentials(w http.ResponseWriter, r *http.Request, dst *credentials)
 	defer r.Body.Close()
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 	if err := decoder.Decode(dst); err != nil {
-		return errors.New("invalid credentials request")
+		return errors.New("凭据请求无效")
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		return errors.New("invalid credentials request")
+		return errors.New("凭据请求无效")
 	}
 	if dst.Username == "" || dst.Password == "" {
-		return errors.New("username and password are required")
+		return errors.New("请输入用户名和密码")
 	}
 	return nil
 }
@@ -252,7 +252,7 @@ func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 	secret, _ := sessionCookie(r)
 	hash := sha256.Sum256([]byte(secret))
 	if _, err := a.db.ExecContext(r.Context(), `DELETE FROM sessions WHERE token_hash=?`, hash[:]); err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("could not end session"))
+		fail(w, http.StatusInternalServerError, errors.New("无法结束会话"))
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: "viya_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: a.secureCookies, SameSite: http.SameSiteStrictMode})
@@ -314,14 +314,14 @@ func (a *App) requireSession(next http.Handler, holdConfigLock bool) http.Handle
 		}
 		secret, ok := sessionCookie(r)
 		if !ok {
-			fail(w, http.StatusUnauthorized, errors.New("authentication required"))
+			fail(w, http.StatusUnauthorized, errors.New("需要登录"))
 			return
 		}
 		hash := sha256.Sum256([]byte(secret))
 		var session sessionContext
 		var expires int64
 		if err := a.db.QueryRowContext(r.Context(), `SELECT users.username,sessions.csrf_token,sessions.expires_at,COALESCE(users.role,'admin') FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=?`, hash[:]).Scan(&session.username, &session.csrf, &expires, &session.role); err != nil || expires <= time.Now().Unix() {
-			fail(w, http.StatusUnauthorized, errors.New("session expired; log in again"))
+			fail(w, http.StatusUnauthorized, errors.New("会话已过期，请重新登录"))
 			return
 		}
 		if session.role != roleAdmin && session.role != roleViewer {
@@ -331,18 +331,18 @@ func (a *App) requireSession(next http.Handler, holdConfigLock bool) http.Handle
 			session.role = roleViewer
 		}
 		if isViewerRole(session.role) && isWriteRequest(r.Method) && !viewerWritePaths[r.URL.Path] {
-			fail(w, http.StatusForbidden, errors.New("this account is read-only"))
+			fail(w, http.StatusForbidden, errors.New("当前账号为只读权限"))
 			return
 		}
 		a.renewSession(w, r, secret, expires)
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			if !validOrigin(r, a.trustedProxies) {
-				fail(w, http.StatusForbidden, errors.New("request origin rejected"))
+				fail(w, http.StatusForbidden, errors.New("请求来源被拒绝"))
 				return
 			}
 			provided := r.Header.Get("X-CSRF-Token")
 			if len(provided) != len(session.csrf) || subtle.ConstantTimeCompare([]byte(provided), []byte(session.csrf)) != 1 {
-				fail(w, http.StatusForbidden, errors.New("CSRF token is missing or invalid"))
+				fail(w, http.StatusForbidden, errors.New("CSRF 令牌缺失或无效"))
 				return
 			}
 		}
@@ -457,7 +457,7 @@ func parseTrustedProxies(value string) ([]*net.IPNet, error) {
 		}
 		_, proxy, err := net.ParseCIDR(entry)
 		if err != nil {
-			return nil, errors.New("trusted proxies must be IP addresses or CIDR ranges")
+			return nil, errors.New("可信代理必须是 IP 地址或 CIDR 网段")
 		}
 		proxies = append(proxies, proxy)
 	}

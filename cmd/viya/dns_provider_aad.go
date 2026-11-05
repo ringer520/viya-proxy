@@ -59,7 +59,7 @@ func migrateDNSProviderAAD(db *sql.DB, key []byte) error {
 		oldAAD := []byte(fmt.Sprintf("crpm:dns-provider:%d:v1", item.id))
 		plaintext, err := secretstore.Decrypt(key, item.nonce, item.ciphertext, oldAAD)
 		if err != nil {
-			return errors.New("a DNS provider credential cannot be decrypted; check that the original Viya master key was preserved")
+			return errors.New("有一条 DNS 凭据无法解密，请确认保留了原 Viya 主密钥")
 		}
 		newNonce, newCiphertext, err := secretstore.Encrypt(key, plaintext, newAAD)
 		for i := range plaintext {

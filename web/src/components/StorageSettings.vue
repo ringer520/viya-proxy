@@ -18,13 +18,13 @@ async function write(cleanup=false){
  if(busy.value||props.blocked||!props.admin)return
  if(cleanup&&!await confirmDeletion(t('按已保存的保留策略清理过期统计和近期访问记录。网站文件、证书和恢复点会保留。确认继续？'),t('确认清理')))return
  busy.value=true;emit('busy',true);error.value='';note.value=''
- try{const r=await apiFetch(cleanup?'/api/v1/storage/cleanup':'/api/v1/storage/retention',{method:cleanup?'POST':'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify(cleanup?{confirmed:true}:{traffic_days:days.value,access_events:events.value})});const data=await r.json();if(!r.ok)throw Error(data.error||t('保存失败'));note.value=cleanup?t('已清理过期记录；数据库空闲页会自动复用'):t('已保存保留策略');await load()}catch(e){error.value=e instanceof Error?e.message:t('操作失败')}finally{busy.value=false;emit('busy',false)}
+ try{const r=await apiFetch(cleanup?'/api/v1/storage/cleanup':'/api/v1/storage/retention',{method:cleanup?'POST':'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify(cleanup?{confirmed:true}:{traffic_days:days.value,access_events:events.value})});const data=await r.json();if(!r.ok)throw Error(t(data.error)||t('保存失败'));note.value=cleanup?t('已清理过期记录；数据库空闲页会自动复用'):t('已保存保留策略');await load()}catch(e){error.value=e instanceof Error?e.message:t('操作失败')}finally{busy.value=false;emit('busy',false)}
 }
 async function clearStatistics(){
  if(busy.value||props.blocked||!props.admin)return
  if(!await confirmDeletion(t('清空所有 Web 服务及端口转发的累计、月度统计和近期访问样例，清空后重新计数。此操作无法撤销，原始日志文件及业务配置会保留。'),t('清空所有统计')))return
  busy.value=true;emit('busy',true);error.value='';note.value=''
- try{const response=await apiFetch('/api/v1/traffic/reset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify({confirmed:true})});const data=await response.json();if(!response.ok)throw Error(data.error||t('操作失败'));await refreshTraffic();await load();note.value=t('所有统计已清空，新的访问将重新计数')}
+ try{const response=await apiFetch('/api/v1/traffic/reset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':props.csrf},body:JSON.stringify({confirmed:true})});const data=await response.json();if(!response.ok)throw Error(t(data.error)||t('操作失败'));await refreshTraffic();await load();note.value=t('所有统计已清空，新的访问将重新计数')}
  catch(e){error.value=e instanceof Error?t(e.message):t('操作失败')}
  finally{busy.value=false;emit('busy',false)}
 }

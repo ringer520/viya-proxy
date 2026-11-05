@@ -71,7 +71,7 @@ async function apiJSON(url: string, init?: RequestInit): Promise<any> {
     body = null;
   }
   if (!r.ok) {
-    throw new Error((body && body.error) || `请求失败（${r.status}）`);
+    throw new Error((body && t(body.error)) || `请求失败（${r.status}）`);
   }
   return body;
 }
@@ -153,7 +153,7 @@ async function uploadFiles(files: FileList | null) {
       body: form,
     });
     const body = await r.json().catch(() => null);
-    if (!r.ok) throw new Error((body && body.error) || t("上传失败"));
+    if (!r.ok) throw new Error((body && t(body.error)) || t("上传失败"));
     await loadList(currentPath.value);
   } catch (e: any) {
     errorMsg.value = e.message || t("上传失败");

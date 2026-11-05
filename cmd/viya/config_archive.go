@@ -369,7 +369,7 @@ func rewrapArchiveCredentials(payload *configPayload, destination []byte) error 
 		}
 		for _, row := range table.Rows {
 			if len(row) != len(table.Columns) {
-				return errors.New("Invalid credential row")
+				return errors.New("凭据记录无效")
 			}
 			id := row[cols["id"]].Value
 			n, e := base64.StdEncoding.DecodeString(row[cols["credentials_nonce"]].Value)

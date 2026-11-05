@@ -208,7 +208,7 @@ func (a *App) ingestTrafficFile(path string) error {
 	}
 	if offset > 0 {
 		if offset < int64(len(first)) {
-			return errors.New("invalid traffic cursor")
+			return errors.New("流量游标无效")
 		}
 		if strings.HasSuffix(path, ".gz") {
 			if _, err = io.CopyN(io.Discard, reader, offset-int64(len(first))); err != nil {
@@ -407,7 +407,7 @@ func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
 	// has to be scanned for the 24-hour window the panel actually draws.
 	totals, err := a.db.QueryContext(r.Context(), `SELECT site_id,SUM(requests),SUM(errors),SUM(upload),SUM(download) FROM traffic_hours GROUP BY site_id`)
 	if err != nil {
-		fail(w, 500, errors.New("could not read traffic statistics"))
+		fail(w, 500, errors.New("无法读取流量统计"))
 		return
 	}
 	for totals.Next() {
@@ -415,7 +415,7 @@ func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
 		var counters trafficCounters
 		if err = totals.Scan(&id, &counters.Requests, &counters.Errors, &counters.Upload, &counters.Download); err != nil {
 			totals.Close()
-			fail(w, 500, errors.New("could not read traffic statistics"))
+			fail(w, 500, errors.New("无法读取流量统计"))
 			return
 		}
 		summaryFor(id).Total = counters
@@ -423,13 +423,13 @@ func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
 	err = totals.Err()
 	totals.Close()
 	if err != nil {
-		fail(w, 500, errors.New("could not read traffic statistics"))
+		fail(w, 500, errors.New("无法读取流量统计"))
 		return
 	}
 	if window == "24h" {
 		rows, err := a.db.QueryContext(r.Context(), `SELECT site_id,hour,requests,errors,upload,download FROM traffic_hours WHERE hour>=? ORDER BY hour`, cutoff)
 		if err != nil {
-			fail(w, 500, errors.New("could not read traffic statistics"))
+			fail(w, 500, errors.New("无法读取流量统计"))
 			return
 		}
 		defer rows.Close()
@@ -453,7 +453,7 @@ func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT site_id,hour-hour%86400 AS day,SUM(requests),SUM(errors),SUM(upload),SUM(download) FROM traffic_hours WHERE hour>=? GROUP BY site_id,day ORDER BY day`, cutoff)
 	if err != nil {
-		fail(w, 500, errors.New("could not read traffic statistics"))
+		fail(w, 500, errors.New("无法读取流量统计"))
 		return
 	}
 	defer rows.Close()
@@ -506,7 +506,7 @@ func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
 	}
 	totals, err := a.db.QueryContext(r.Context(), `SELECT rule_id,SUM(connections),SUM(upload),SUM(download) FROM layer4_traffic_hours GROUP BY rule_id`)
 	if err != nil {
-		fail(w, 500, errors.New("could not read traffic statistics"))
+		fail(w, 500, errors.New("无法读取流量统计"))
 		return
 	}
 	for totals.Next() {
@@ -514,7 +514,7 @@ func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
 		var c trafficCounters
 		if err = totals.Scan(&id, &c.Requests, &c.Upload, &c.Download); err != nil {
 			totals.Close()
-			fail(w, 500, errors.New("could not read traffic statistics"))
+			fail(w, 500, errors.New("无法读取流量统计"))
 			return
 		}
 		summaryFor(id).Total = c
@@ -522,13 +522,13 @@ func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
 	err = totals.Err()
 	totals.Close()
 	if err != nil {
-		fail(w, 500, errors.New("could not read traffic statistics"))
+		fail(w, 500, errors.New("无法读取流量统计"))
 		return
 	}
 	if window == "24h" {
 		rows, err := a.db.QueryContext(r.Context(), `SELECT rule_id,hour,connections,upload,download FROM layer4_traffic_hours WHERE hour>=? ORDER BY hour`, cutoff)
 		if err != nil {
-			fail(w, 500, errors.New("could not read traffic statistics"))
+			fail(w, 500, errors.New("无法读取流量统计"))
 			return
 		}
 		defer rows.Close()
@@ -552,7 +552,7 @@ func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT rule_id,hour-hour%86400 AS day,SUM(connections),SUM(upload),SUM(download) FROM layer4_traffic_hours WHERE hour>=? GROUP BY rule_id,day ORDER BY day`, cutoff)
 	if err != nil {
-		fail(w, 500, errors.New("could not read traffic statistics"))
+		fail(w, 500, errors.New("无法读取流量统计"))
 		return
 	}
 	defer rows.Close()
@@ -576,12 +576,12 @@ func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
 func (a *App) siteAccessLogs(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		fail(w, 400, errors.New("invalid site id"))
+		fail(w, 400, errors.New("站点 ID 无效"))
 		return
 	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT event FROM site_access_events WHERE site_id=? ORDER BY id DESC LIMIT 50`, id)
 	if err != nil {
-		fail(w, 500, errors.New("could not read site access logs"))
+		fail(w, 500, errors.New("无法读取站点访问日志"))
 		return
 	}
 	defer rows.Close()

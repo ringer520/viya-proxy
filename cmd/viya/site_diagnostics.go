@@ -27,7 +27,7 @@ type diagnosticStep struct {
 func (a *App) diagnoseSite(w http.ResponseWriter, r *http.Request) {
 	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if e != nil || id < 1 {
-		fail(w, 400, errors.New("invalid site id"))
+		fail(w, 400, errors.New("站点 ID 无效"))
 		return
 	}
 	var h Host

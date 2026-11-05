@@ -171,7 +171,7 @@ func (a *App) managedPolicies(ctx context.Context) ([]any, []string, bool, error
 				issuer["challenges"] = map[string]any{"tls-alpn": map[string]any{"disabled": true}}
 			} else {
 				if v.ProviderID == nil {
-					return nil, nil, false, errors.New("managed certificate DNS credentials missing")
+					return nil, nil, false, errors.New("托管证书缺少 DNS 凭据")
 				}
 				kind, credentials, err := a.loadDNSProvider(ctx, *v.ProviderID)
 				if err != nil {

@@ -63,7 +63,7 @@ watch([securityForm,securityDialog],()=>{
     previewRequest=new AbortController();
     try{
       const r=await fetch("/api/v1/security-defaults/preview",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrfToken.value},body:JSON.stringify({domain:securityDialog.value.domain,policy:securityForm.value}),signal:previewRequest.signal});
-      const data=await r.json();if(!r.ok)throw Error(data.error||t("读取影响范围失败"));
+      const data=await r.json();if(!r.ok)throw Error(t(data.error)||t("读取影响范围失败"));
       if(seq===previewSequence)securityImpact.value=data;
     }catch(e){if(seq===previewSequence)securityPreviewError.value=e instanceof Error?e.message:t("读取影响范围失败")}
     finally{if(seq===previewSequence)securityPreviewPending.value=false}
@@ -75,7 +75,7 @@ export async function saveSecurityDefaults(){
   try{
     const target=securityDialog.value.scope==="domain"?`/api/v1/security-defaults/domain/${encodeURIComponent(securityDialog.value.domain)}`:"/api/v1/security-defaults/global";
     const r=await fetch(target,{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":csrfToken.value},body:JSON.stringify(securityForm.value)});
-    const body=await r.json().catch(()=>({}));if(!r.ok)throw Error(body.error||t("保存失败"));
+    const body=await r.json().catch(()=>({}));if(!r.ok)throw Error(t(body.error)||t("保存失败"));
     await loadSecurityDefaults();await load();
     securityNotice.value=tr`已保存，${body.updated ?? 0} 个跟随站点已同步。`;
   }catch(e){securityError.value=e instanceof Error?e.message:t("保存失败")}

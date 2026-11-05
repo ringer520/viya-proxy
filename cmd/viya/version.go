@@ -348,7 +348,7 @@ func httpGetWithProgress(url string, limit int64, progress func(downloaded, tota
 		if n > 0 {
 			downloaded += int64(n)
 			if downloaded > limit {
-				return nil, errors.New("download exceeds size limit")
+				return nil, errors.New("下载内容超过大小限制")
 			}
 			if _, err := buf.Write(chunk[:n]); err != nil {
 				return nil, err

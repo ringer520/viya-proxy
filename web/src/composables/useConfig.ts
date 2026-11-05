@@ -27,7 +27,7 @@ export async function loadRevisionDiff(id: number, against = "current") {
       )}`,
     );
     const data = await r.json();
-    if (!r.ok) throw Error(data.error || t("对比失败"));
+    if (!r.ok) throw Error(t(data.error) || t("对比失败"));
     revisionDiff.value = {
       id,
       from: data.from,

@@ -153,16 +153,16 @@ func (a *App) updateAlertSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	input.WebhookURL = strings.TrimSpace(input.WebhookURL)
 	if input.Enabled && !validWebhookURL(input.WebhookURL) {
-		fail(w, http.StatusBadRequest, errors.New("webhook must be an http or https URL"))
+		fail(w, http.StatusBadRequest, errors.New("Webhook 必须是 http 或 https 地址"))
 		return
 	}
 	if input.WebhookURL != "" && !validWebhookURL(input.WebhookURL) {
-		fail(w, http.StatusBadRequest, errors.New("webhook must be an http or https URL"))
+		fail(w, http.StatusBadRequest, errors.New("Webhook 必须是 http 或 https 地址"))
 		return
 	}
 	if err := a.saveAlertConfig(input); err != nil {
 		slog.Error("save alert settings", "error", err)
-		fail(w, http.StatusInternalServerError, errors.New("could not save alert settings"))
+		fail(w, http.StatusInternalServerError, errors.New("无法保存告警设置"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -173,7 +173,7 @@ func (a *App) updateAlertSettings(w http.ResponseWriter, r *http.Request) {
 func (a *App) testAlertSettings(w http.ResponseWriter, r *http.Request) {
 	config := a.loadAlertConfig()
 	if !config.Enabled || config.WebhookURL == "" {
-		fail(w, http.StatusBadRequest, errors.New("enable alerts and set a webhook first"))
+		fail(w, http.StatusBadRequest, errors.New("请先启用告警并填写 Webhook"))
 		return
 	}
 	payload := map[string]any{

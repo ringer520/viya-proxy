@@ -54,14 +54,14 @@ type siteFileEntry struct {
 func (a *App) loadStaticSite(r *http.Request) (int64, string, error) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		return 0, "", errors.New("invalid site id")
+		return 0, "", errors.New("站点 ID 无效")
 	}
 	var siteType, root string
 	if err := a.db.QueryRowContext(r.Context(), `SELECT type,root_path FROM proxy_hosts WHERE id=?`, id).Scan(&siteType, &root); err != nil {
-		return 0, "", errors.New("site not found")
+		return 0, "", errors.New("站点不存在")
 	}
 	if siteType != "static" && siteType != "files" {
-		return 0, "", errors.New("file management is only available for static and file-service sites")
+		return 0, "", errors.New("只有静态站点与文件服务站点可以管理文件")
 	}
 	root = strings.TrimSpace(root)
 	if err := validateStaticRoot(root); err != nil {
@@ -83,7 +83,7 @@ func (a *App) validateManagedStaticSiteRoot(root string) error {
 	root = filepath.Clean(strings.TrimSpace(root))
 	base := filepath.Clean(a.managedSitesDir())
 	if root == "." || root == base || !a.underManagedRoot(root) {
-		return errors.New("refusing to remove a static site outside its managed directory")
+		return errors.New("拒绝删除管理目录之外的静态站点")
 	}
 	if err := refuseSymlink(base, root); err != nil {
 		return err
@@ -96,7 +96,7 @@ func (a *App) validateManagedStaticSiteRoot(root string) error {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return errors.New("static site root must be a managed directory")
+		return errors.New("静态站点根目录必须是面板管理的目录")
 	}
 	return nil
 }
@@ -121,11 +121,11 @@ func resolveWithinRoot(root, rel string) (string, error) {
 		return root, nil
 	}
 	if strings.ContainsRune(rel, 0) {
-		return "", errors.New("invalid path")
+		return "", errors.New("路径无效")
 	}
 	for _, segment := range strings.FieldsFunc(rel, func(r rune) bool { return r == '/' || r == '\\' }) {
 		if segment == ".." {
-			return "", errors.New("path escapes the site root")
+			return "", errors.New("路径超出站点根目录")
 		}
 	}
 	cleaned := filepath.Clean("/" + filepath.ToSlash(rel)) // forces a rooted, ..-collapsed form
@@ -136,7 +136,7 @@ func resolveWithinRoot(root, rel string) (string, error) {
 	full := filepath.Join(root, filepath.FromSlash(cleaned))
 	rootPrefix := root + string(os.PathSeparator)
 	if full != root && !strings.HasPrefix(full, rootPrefix) {
-		return "", errors.New("path escapes the site root")
+		return "", errors.New("路径超出站点根目录")
 	}
 	return full, nil
 }
@@ -146,7 +146,7 @@ func resolveWithinRoot(root, rel string) (string, error) {
 func refuseSymlink(root, full string) error {
 	rel, err := filepath.Rel(root, full)
 	if err != nil {
-		return errors.New("invalid path")
+		return errors.New("路径无效")
 	}
 	current := root
 	if rel == "." {
@@ -159,7 +159,7 @@ func refuseSymlink(root, full string) error {
 			return nil // not created yet; creation cannot follow a link
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("symbolic links are not allowed here")
+			return errors.New("此处不允许使用符号链接")
 		}
 	}
 	return nil
@@ -193,12 +193,12 @@ func (a *App) listSiteFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
-		fail(w, 404, errors.New("directory not found"))
+		fail(w, 404, errors.New("目录不存在"))
 		return
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		fail(w, 500, errors.New("could not read directory"))
+		fail(w, 500, errors.New("无法读取目录"))
 		return
 	}
 	items := []siteFileEntry{}
@@ -262,7 +262,7 @@ func (a *App) siteFileStats(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		fail(w, 500, errors.New("could not inspect site directory"))
+		fail(w, 500, errors.New("无法检查站点目录"))
 		return
 	}
 	writeJSON(w, 200, map[string]any{
@@ -295,7 +295,7 @@ func (a *App) downloadSiteFile(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := os.Stat(full)
 	if err != nil || info.IsDir() {
-		fail(w, 404, errors.New("file not found"))
+		fail(w, 404, errors.New("文件不存在"))
 		return
 	}
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(full)+`"`)
@@ -317,7 +317,7 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.underManagedRoot(root) {
-		fail(w, 400, errors.New("this site's directory is managed outside the panel; upload there instead"))
+		fail(w, 400, errors.New("该站点目录由面板之外管理，请直接上传到那里"))
 		return
 	}
 	target := root
@@ -332,18 +332,18 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := os.MkdirAll(target, siteMkdirMode); err != nil {
-		fail(w, 500, errors.New("could not create target directory"))
+		fail(w, 500, errors.New("无法创建目标目录"))
 		return
 	}
 	overwrite := r.URL.Query().Get("overwrite") != "0"
 	r.Body = http.MaxBytesReader(w, r.Body, siteFileMaxRequest)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		fail(w, 400, errors.New("invalid multipart upload (too large?)"))
+		fail(w, 400, errors.New("上传内容无效（可能过大）"))
 		return
 	}
 	form := r.MultipartForm
 	if form == nil || len(form.File["files"]) == 0 {
-		fail(w, 400, errors.New("no files were uploaded"))
+		fail(w, 400, errors.New("没有上传任何文件"))
 		return
 	}
 	stored, extracted, skipped := 0, 0, 0
@@ -360,7 +360,7 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if rel == "" || rel == "." {
-			fail(w, 400, errors.New("invalid file name"))
+			fail(w, 400, errors.New("文件名无效"))
 			return
 		}
 		dstPath, err := resolveWithinRoot(target, rel)
@@ -374,7 +374,7 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		src, err := header.Open()
 		if err != nil {
-			fail(w, 500, errors.New("could not read uploaded file"))
+			fail(w, 500, errors.New("无法读取上传文件"))
 			return
 		}
 		// A zip archive unpacks into the current target (its entries carry
@@ -398,13 +398,13 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := os.MkdirAll(filepath.Dir(dstPath), siteMkdirMode); err != nil {
 			src.Close()
-			fail(w, 500, errors.New("could not create directory"))
+			fail(w, 500, errors.New("无法创建目录"))
 			return
 		}
 		dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, siteFileMode)
 		if err != nil {
 			src.Close()
-			fail(w, 500, errors.New("could not write file"))
+			fail(w, 500, errors.New("无法写入文件"))
 			return
 		}
 		_, copyErr := io.Copy(dst, src)
@@ -412,7 +412,7 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 		closeErr := dst.Close()
 		if copyErr != nil || closeErr != nil {
 			_ = os.Remove(dstPath)
-			fail(w, 500, errors.New("could not store file"))
+			fail(w, 500, errors.New("无法保存文件"))
 			return
 		}
 		stored++
@@ -426,23 +426,23 @@ func extractZip(src io.Reader, dest string, maxEntries int, maxBytes int64) (int
 	// large. The reader is already capped by http.MaxBytesReader upstream.
 	tmp, err := os.CreateTemp("", "viya-upload-*.zip")
 	if err != nil {
-		return 0, errors.New("could not stage archive")
+		return 0, errors.New("无法暂存归档")
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := io.Copy(tmp, src); err != nil {
 		tmp.Close()
-		return 0, errors.New("could not read archive")
+		return 0, errors.New("无法读取归档")
 	}
 	if err := tmp.Close(); err != nil {
-		return 0, errors.New("could not read archive")
+		return 0, errors.New("无法读取归档")
 	}
 	reader, err := zip.OpenReader(tmp.Name())
 	if err != nil {
-		return 0, errors.New("not a valid zip archive")
+		return 0, errors.New("不是有效的 zip 归档")
 	}
 	defer reader.Close()
 	if len(reader.File) > maxEntries {
-		return 0, errors.New("archive has too many entries")
+		return 0, errors.New("归档条目过多")
 	}
 	destPrefix := dest + string(os.PathSeparator)
 	written := int64(0)
@@ -466,32 +466,32 @@ func extractZip(src io.Reader, dest string, maxEntries int, maxBytes int64) (int
 		}
 		if file.FileInfo().IsDir() {
 			if err := os.MkdirAll(target, siteMkdirMode); err != nil {
-				return count, errors.New("could not create directory")
+				return count, errors.New("无法创建目录")
 			}
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(target), siteMkdirMode); err != nil {
-			return count, errors.New("could not create directory")
+			return count, errors.New("无法创建目录")
 		}
 		written += int64(file.UncompressedSize64)
 		if written > maxBytes {
-			return count, errors.New("archive expands beyond the size limit")
+			return count, errors.New("归档解压后超过大小限制")
 		}
 		in, err := file.Open()
 		if err != nil {
-			return count, errors.New("could not read archive entry")
+			return count, errors.New("无法读取归档条目")
 		}
 		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, siteFileMode)
 		if err != nil {
 			in.Close()
-			return count, errors.New("could not write archive entry")
+			return count, errors.New("无法写入归档条目")
 		}
 		_, copyErr := io.Copy(out, in)
 		in.Close()
 		closeErr := out.Close()
 		if copyErr != nil || closeErr != nil {
 			_ = os.Remove(target)
-			return count, errors.New("could not store archive entry")
+			return count, errors.New("无法保存归档条目")
 		}
 		count++
 	}
@@ -506,7 +506,7 @@ func (a *App) deleteSiteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.underManagedRoot(root) {
-		fail(w, 400, errors.New("this site's directory is managed outside the panel"))
+		fail(w, 400, errors.New("该站点目录由面板之外管理"))
 		return
 	}
 	if err := refuseSymlink(root, full); err != nil {
@@ -514,17 +514,17 @@ func (a *App) deleteSiteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if full == root {
-		fail(w, 400, errors.New("refusing to delete the site root"))
+		fail(w, 400, errors.New("拒绝删除站点根目录"))
 		return
 	}
 	info, err := os.Lstat(full)
 	if err != nil {
-		fail(w, 404, errors.New("not found"))
+		fail(w, 404, errors.New("未找到"))
 		return
 	}
 	if !info.IsDir() {
 		if err := os.Remove(full); err != nil {
-			fail(w, 500, errors.New("could not delete file"))
+			fail(w, 500, errors.New("无法删除文件"))
 			return
 		}
 		writeJSON(w, 200, map[string]any{"deleted": 1})
@@ -533,15 +533,15 @@ func (a *App) deleteSiteFile(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("recursive") != "1" {
 		entries, err := os.ReadDir(full)
 		if err != nil {
-			fail(w, 500, errors.New("could not read directory"))
+			fail(w, 500, errors.New("无法读取目录"))
 			return
 		}
 		if len(entries) > 0 {
-			fail(w, 400, errors.New("directory is not empty; confirm recursive delete"))
+			fail(w, 400, errors.New("目录非空，请确认递归删除"))
 			return
 		}
 		if err := os.Remove(full); err != nil {
-			fail(w, 500, errors.New("could not delete directory"))
+			fail(w, 500, errors.New("无法删除目录"))
 			return
 		}
 		writeJSON(w, 200, map[string]any{"deleted": 1})
@@ -565,7 +565,7 @@ func removeTree(root string, maxEntries int) (int, error) {
 		}
 		count++
 		if count > maxEntries {
-			return errors.New("directory has too many entries to delete at once")
+			return errors.New("目录条目过多，无法一次删除")
 		}
 		return nil
 	})
@@ -573,7 +573,7 @@ func removeTree(root string, maxEntries int) (int, error) {
 		return 0, err
 	}
 	if err := os.RemoveAll(root); err != nil {
-		return 0, errors.New("could not delete directory")
+		return 0, errors.New("无法删除目录")
 	}
 	return count, nil
 }
@@ -586,7 +586,7 @@ func (a *App) mkdirSiteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.underManagedRoot(root) {
-		fail(w, 400, errors.New("this site's directory is managed outside the panel"))
+		fail(w, 400, errors.New("该站点目录由面板之外管理"))
 		return
 	}
 	var input struct {
@@ -601,7 +601,7 @@ func (a *App) mkdirSiteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if full == root {
-		fail(w, 400, errors.New("invalid path"))
+		fail(w, 400, errors.New("路径无效"))
 		return
 	}
 	if err := refuseSymlink(root, full); err != nil {
@@ -609,7 +609,7 @@ func (a *App) mkdirSiteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := os.MkdirAll(full, siteMkdirMode); err != nil {
-		fail(w, 500, errors.New("could not create directory"))
+		fail(w, 500, errors.New("无法创建目录"))
 		return
 	}
 	writeJSON(w, 201, map[string]any{"path": relPath(root, full)})

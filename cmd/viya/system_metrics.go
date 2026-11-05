@@ -186,14 +186,14 @@ func (a *App) toggleHostEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 || json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048)).Decode(&input) != nil || input.Enabled == nil {
-		fail(w, 400, errors.New("Invalid site state"))
+		fail(w, 400, errors.New("站点状态无效"))
 		return
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	var previous int
 	if err := a.db.QueryRowContext(r.Context(), `SELECT enabled FROM proxy_hosts WHERE id=?`, id).Scan(&previous); err != nil {
-		fail(w, 404, errors.New("Site not found"))
+		fail(w, 404, errors.New("站点不存在"))
 		return
 	}
 	res, err := a.db.ExecContext(r.Context(), `UPDATE proxy_hosts SET enabled=?,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND version=?`, boolInt(*input.Enabled), id, input.Version)
@@ -203,7 +203,7 @@ func (a *App) toggleHostEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		fail(w, 409, errors.New("Site changed; refresh and retry"))
+		fail(w, 409, errors.New("站点已被修改，请刷新后重试"))
 		return
 	}
 	if err = a.applyLocked(r.Context()); err != nil {
@@ -213,14 +213,14 @@ func (a *App) toggleHostEnabled(w http.ResponseWriter, r *http.Request) {
 		if _, rbErr := a.db.ExecContext(rollbackCtx, `UPDATE proxy_hosts SET enabled=?,version=version+1 WHERE id=?`, previous, id); rbErr != nil {
 			slog.Error("rollback site enabled state", "id", id, "error", rbErr)
 			cancel()
-			fail(w, 500, errors.New("Site apply failed and the previous state could not be restored"))
+			fail(w, 500, errors.New("站点应用失败，且未能恢复原状态"))
 			return
 		}
 		if rbErr := a.applyLocked(rollbackCtx); rbErr != nil {
 			slog.Error("reapply after site rollback", "error", rbErr)
 		}
 		cancel()
-		fail(w, 502, errors.New("Site state could not be applied; previous state restored"))
+		fail(w, 502, errors.New("站点状态未能应用，已恢复原状态"))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"enabled": *input.Enabled, "version": input.Version + 1})

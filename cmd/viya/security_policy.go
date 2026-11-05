@@ -153,7 +153,7 @@ func (a *App) previewSecurityPolicy(w http.ResponseWriter, r *http.Request) {
 		Policy SitePolicy `json:"policy"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&input); err != nil {
-		fail(w, 400, errors.New("invalid JSON body"))
+		fail(w, 400, errors.New("请求内容不是有效的 JSON"))
 		return
 	}
 	if input.Policy.Mode == "none" || input.Policy.Mode == "inherit" {
@@ -186,14 +186,14 @@ func (a *App) livePolicyConfig(ctx context.Context) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return nil, errors.New("Caddy configuration is unavailable")
+		return nil, errors.New("无法获取 Caddy 配置")
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
 	if err != nil {
 		return nil, err
 	}
 	if !json.Valid(body) {
-		return nil, errors.New("invalid live configuration")
+		return nil, errors.New("当前运行的配置无效")
 	}
 	return body, nil
 }
@@ -210,7 +210,7 @@ func (a *App) restoreLivePolicyConfig(ctx context.Context, body []byte) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return errors.New("Caddy configuration restoration failed")
+		return errors.New("Caddy 配置恢复失败")
 	}
 	a.confirmRestoredApplication(ctx, body)
 	return nil

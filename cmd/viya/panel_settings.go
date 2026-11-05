@@ -18,7 +18,7 @@ func (a *App) getPanelSettings(w http.ResponseWriter, r *http.Request) {
 	addr := env("VIYA_LISTEN", "127.0.0.1:8181")
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("panel listen address is invalid"))
+		fail(w, http.StatusInternalServerError, errors.New("面板监听地址无效"))
 		return
 	}
 	var stored string
@@ -47,7 +47,7 @@ func (a *App) updatePanelPort(w http.ResponseWriter, r *http.Request) {
 	addr := env("VIYA_LISTEN", "127.0.0.1:8181")
 	host, current, err := net.SplitHostPort(addr)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, errors.New("panel listen address is invalid"))
+		fail(w, http.StatusInternalServerError, errors.New("面板监听地址无效"))
 		return
 	}
 	var saved string
@@ -156,7 +156,7 @@ func (a *App) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 	session := r.Context().Value(sessionContextKey{}).(sessionContext)
 	secret, ok := sessionCookie(r)
 	if !ok {
-		fail(w, 401, errors.New("authentication required"))
+		fail(w, 401, errors.New("需要登录"))
 		return
 	}
 	hash := sha256.Sum256([]byte(secret))
