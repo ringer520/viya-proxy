@@ -243,20 +243,157 @@ if ! systemctl is-active --quiet viya.service && ! systemctl is-active --quiet "
   fi
 fi
 
+# Host ports 80/443 belong to Caddy, but a fresh install has no sites yet, so a
+# conflict here does not break the panel: Caddy boots from an empty bootstrap
+# config, the readiness probe only checks the admin API, and the install
+# succeeds. The failure surfaces later, on the first config apply, as
+# "configuration not applied" while every site stays unreachable. So do not
+# abort; report precisely who owns the port and repeat it after the install.
+web_port_conflicts=""
 if [ "$viya_upgrade" -eq 0 ] && ! systemctl is-active --quiet "$legacy_service"; then
-  python3 - <<'PY'
+  web_port_conflicts=$(python3 - <<'PY'
+import errno
+import os
+import re
 import socket
-checks = [("TCP", "0.0.0.0", 80), ("TCP", "0.0.0.0", 443), ("UDP", "0.0.0.0", 443)]
-for protocol, host, port in checks:
-    kind = socket.SOCK_STREAM if protocol == "TCP" else socket.SOCK_DGRAM
-    sock = socket.socket(socket.AF_INET, kind)
+import subprocess
+
+PORTS = [
+    (socket.SOCK_STREAM, "TCP", 80),
+    (socket.SOCK_STREAM, "TCP", 443),
+    (socket.SOCK_DGRAM, "UDP", 443),
+]
+# Dual-stack: a listener bound only to [::] still blocks Caddy, and vice versa.
+FAMILIES = [
+    (socket.AF_INET, "0.0.0.0", "IPv4"),
+    (socket.AF_INET6, "::", "IPv6"),
+]
+
+
+def owner_via_ss(port, socktype):
+    flag = "-lntp" if socktype == socket.SOCK_STREAM else "-lnup"
     try:
-        sock.bind((host, port))
+        out = subprocess.run(
+            ["ss", "-H", flag], capture_output=True, text=True, timeout=5
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    found = []
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) < 4 or ":" not in fields[3]:
+            continue
+        if fields[3].rpartition(":")[2] != str(port):
+            continue
+        for name, pid in re.findall(r'\("([^"]*)",pid=(\d+)', line):
+            if (name, pid) not in found:
+                found.append((name, pid))
+    return found
+
+
+def owner_via_proc(port, socktype):
+    tables = ["/proc/net/tcp", "/proc/net/udp"]
+    if socket.has_ipv6:
+        tables += ["/proc/net/tcp6", "/proc/net/udp6"]
+    if socktype == socket.SOCK_DGRAM:
+        tables = [t for t in tables if t.endswith(("udp", "udp6"))]
+    else:
+        tables = [t for t in tables if "tcp" in t]
+    suffix = ":%04X" % port
+    inodes = set()
+    for table in tables:
+        try:
+            with open(table, encoding="utf-8") as handle:
+                rows = handle.read().splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            cols = row.split()
+            if len(cols) < 10 or not cols[1].endswith(suffix):
+                continue
+            if cols[9] != "0":
+                inodes.add(cols[9])
+    if not inodes:
+        return []
+    wanted = {"socket:[%s]" % inode for inode in inodes}
+    found = []
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            fds = os.listdir("/proc/%s/fd" % pid)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                target = os.readlink("/proc/%s/fd/%s" % (pid, fd))
+            except OSError:
+                continue
+            if target in wanted:
+                try:
+                    with open("/proc/%s/comm" % pid, encoding="utf-8") as handle:
+                        name = handle.read().strip()
+                except OSError:
+                    name = ""
+                found.append((name, pid))
+                break
+    return found
+
+
+def unit_of(pid):
+    try:
+        with open("/proc/%s/cgroup" % pid, encoding="utf-8") as handle:
+            text = handle.read()
     except OSError:
-        print("Warning: host port " + protocol + "/" + str(port) + " is already occupied. Viya can still install; choose another Web listener port or stop the conflicting service before adding a site.")
-    finally:
-        sock.close()
+        return ""
+    units = re.findall(r"([\w@.-]+\.service)", text)
+    return units[0] if units else ""
+
+
+def describe(found):
+    if not found:
+        return "an unidentified process"
+    parts = []
+    for name, pid in found[:3]:
+        unit = unit_of(pid)
+        parts.append("%s (pid %s%s)" % (name or "unknown", pid, ", " + unit if unit else ""))
+    return ", ".join(parts)
+
+
+for socktype, proto, port in PORTS:
+    busy = []
+    for family, host, label in FAMILIES:
+        if family == socket.AF_INET6 and not socket.has_ipv6:
+            continue
+        try:
+            sock = socket.socket(family, socktype)
+        except OSError:
+            continue
+        try:
+            sock.bind((host, port))
+        except OSError as exc:
+            # EADDRNOTAVAIL / EAFNOSUPPORT mean this host has no such address
+            # family, which is not a conflict; only EADDRINUSE is.
+            if exc.errno == errno.EADDRINUSE:
+                busy.append(label)
+        finally:
+            sock.close()
+    if not busy:
+        continue
+    found = owner_via_ss(port, socktype) or owner_via_proc(port, socktype)
+    print(
+        "Warning: %s port %d on %s is already in use by %s."
+        % (proto, port, "/".join(busy), describe(found))
+    )
+    print(
+        "  Viya still installs, but no proxy site can serve traffic until this "
+        "port is free or the Web listener is moved to another port."
+    )
 PY
+)
+  if [ -n "$web_port_conflicts" ]; then
+    printf '%s\n' "$web_port_conflicts" >&2
+  fi
 fi
 
 rollback_install() {
@@ -541,4 +678,18 @@ if getent group crpm >/dev/null 2>&1; then groupdel crpm >/dev/null 2>&1 || true
 systemctl daemon-reload
 systemctl --no-pager --full status viya.service
 if [ -s "$legacy_key" ]; then rm -f -- "$legacy_key"; fi
+
+# Re-state the port conflict at the very end: it is the one problem the operator
+# must fix before any site works, and the earlier warning has scrolled away.
+if [ -n "$web_port_conflicts" ]; then
+  echo "" >&2
+  echo "==================== ACTION REQUIRED ====================" >&2
+  printf '%s\n' "$web_port_conflicts" >&2
+  echo "" >&2
+  echo "The panel is reachable and sites are saved, but none of them can serve" >&2
+  echo "traffic until the ports above are released or the Web listener is moved." >&2
+  echo "Find the owner:  ss -lntp 'sport = :80'" >&2
+  echo "Move the port:   panel -> Web services -> listener ports" >&2
+  echo "========================================================" >&2
+fi
 

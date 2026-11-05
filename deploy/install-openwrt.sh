@@ -67,6 +67,68 @@ if [ ! -f /etc/init.d/viya ];then
   else echo 'Set VIYA_INSTALL_PORT to an available port and retry.' >&2;exit 1;fi
  done
 fi
+
+# Ports 80/443 belong to Caddy, but a fresh install has no sites yet, so a
+# conflict here does not break the panel: Caddy boots from an empty bootstrap
+# config, the readiness probe only checks the admin API, and the install
+# succeeds. The failure surfaces later, on the first config apply, as
+# "configuration not applied" while every site stays unreachable.
+#
+# On OpenWrt this is not an edge case: LuCI's uhttpd owns :80 by default, so the
+# default Web listener cannot bind unless LuCI moves aside. Report precisely who
+# owns the port and repeat it after the install instead of aborting.
+#
+# OpenWrt ships no python3 and no ss, so unlike install-debian.sh this probes
+# listening sockets with busybox netstat. A server port that is taken is by
+# definition in the LISTEN state, which makes netstat a faithful substitute.
+web_port_conflicts=""
+# Prints "<families>|<owners>" for a listening socket, or nothing when free.
+web_port_owner(){
+ case "$1" in
+  tcp) wpo_table=$(netstat -lntp 2>/dev/null || true);;
+  udp) wpo_table=$(netstat -lnup 2>/dev/null || true);;
+  *) return 1;;
+ esac
+ printf '%s\n' "$wpo_table" | awk -v want=":$2" '
+  {
+   if ($4 !~ (want "$")) next
+   # Dual stack: a socket bound only to [::] still blocks Caddy, and vice versa.
+   if (split($4, parts, ":") > 2) v6 = 1; else v4 = 1
+   for (i = 5; i <= NF; i++) {
+    if ($i ~ /^[0-9]+\//) {
+     split($i, kv, "/")
+     key = kv[1] " " kv[2]
+     if (!(key in seen)) { seen[key] = 1; list[++count] = key }
+    }
+   }
+  }
+  END {
+   if (!v4 && !v6) exit 1
+   fam = v4 ? "IPv4" : ""
+   if (v6) fam = (fam == "" ? "IPv6" : fam "/IPv6")
+   who = ""
+   for (i = 1; i <= count; i++) {
+    # netstat -p prints "PID/program", so the name is the second half.
+    split(list[i], kv, " ")
+    # No systemd units here; name the owning service explicitly instead.
+    tail = (kv[2] == "uhttpd") ? ", LuCI web interface" : ""
+    item = (kv[2] == "" ? "unknown" : kv[2]) " (pid " kv[1] tail ")"
+    who = (who == "" ? item : who ", " item)
+   }
+   if (who == "") who = "an unidentified process"
+   printf "%s|%s\n", fam, who
+  }'
+}
+if [ ! -f /etc/init.d/viya ] && command -v netstat >/dev/null 2>&1;then
+ for spec in 'tcp 80' 'tcp 443' 'udp 443';do
+  wpo_info=$(web_port_owner ${spec% *} ${spec#* } || true)
+  [ -n "$wpo_info" ] || continue
+  web_port_conflicts="${web_port_conflicts}Warning: $(printf '%s' "${spec% *}" | tr 'a-z' 'A-Z') port ${spec#* } on ${wpo_info%%|*} is already in use by ${wpo_info#*|}.
+  Viya still installs, but no proxy site can serve traffic until this port is free or the Web listener is moved to another port.
+"
+ done
+ if [ -n "$web_port_conflicts" ];then printf '%s\n' "$web_port_conflicts" >&2;fi
+fi
 mkdir -p /opt/viya/bin /etc/viya/secrets
 NEED=$(du -sk "$STAGE/$PKG/bin" | awk '{print $1}')
 if [ -d "$DATA_DIR" ];then NEED=$((NEED + $(du -sk "$DATA_DIR" | awk '{print $1}')));fi
@@ -117,3 +179,14 @@ SUCCESS=1
 echo '==> Viya installed, healthy and enabled at boot.'
 echo "==> Panel: http://<router-LAN-IP>:$PORT (existing custom service/listen configuration is preserved)."
 echo "==> Upgrade backup: $BACKUP"
+if [ -n "$web_port_conflicts" ];then
+ echo "==================== ACTION REQUIRED ====================" >&2
+ printf '%s\n' "$web_port_conflicts" >&2
+ echo "The panel is reachable and sites are saved, but none of them can serve" >&2
+ echo "traffic until the ports above are released or the Web listener is moved." >&2
+ echo "Find the owner:  netstat -lntp | grep ':80 '" >&2
+ echo "Free port 80:    uci set uhttpd.main.listen_http='0.0.0.0:8080' '[::]:8080'" >&2
+ echo "                 uci commit uhttpd && /etc/init.d/uhttpd restart" >&2
+ echo "Move Viya:       panel -> Web services -> listener ports" >&2
+ echo "========================================================" >&2
+fi
