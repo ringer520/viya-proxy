@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertTriangle, FolderUp, ChevronDown, Globe2 } from "@lucide/vue";
+import { AlertTriangle, FolderOpen, FolderUp, ChevronDown, Globe2, ShieldCheck } from "@lucide/vue";
 import { t } from "../i18n";
 import {
   advancedOpen,
@@ -9,6 +9,7 @@ import {
   domainParent,
   domainPrefix,
   editingID,
+  fileServiceType,
   form,
   openSiteFilesForForm,
   partialSave,
@@ -32,8 +33,10 @@ import { applyRetryVisible, certificates, error, providers, saving } from "../co
 import { retryApply } from "../composables/useApply";
 import SitePolicyFields from "./SitePolicyFields.vue";
 import SiteSecurityPolicy from "./SiteSecurityPolicy.vue";
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 const iconPickerOpen = ref(false);
+// File services have their own page; the type picker is replaced by a locked chip.
+const isFileService = computed(() => form.value.type === "files");
 watch(show, (open) => {
   if (!open) {
     error.value = "";
@@ -55,10 +58,24 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
       <div class="modal-top">
         <div>
           <span class="eyebrow">{{
-            editingID === null ? t("新建反代") : t("修改反代")
+            isFileService
+              ? editingID === null
+                ? t("新建文件服务")
+                : t("修改文件服务")
+              : editingID === null
+                ? t("新建反代")
+                : t("修改反代")
           }}</span>
           <h2>
-            {{ editingID === null ? t("添加代理站点") : t("编辑代理站点") }}
+            {{
+              isFileService
+                ? editingID === null
+                  ? t("添加文件服务")
+                  : t("编辑文件服务")
+                : editingID === null
+                  ? t("添加代理站点")
+                  : t("编辑代理站点")
+            }}
           </h2>
         </div>
         <button
@@ -77,9 +94,13 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
       </div>
       <p class="form-intro">
         {{
-          t(
-            "填写名称、域名与类型，再按需配置上游和证书；IP 规则、限速与安全响应头位于“访问控制与安全”。",
-          )
+          isFileService
+            ? t(
+                "填写名称与域名，再选择要共享的目录和访问方式；IP 规则、限速与安全响应头位于“访问控制与安全”。",
+              )
+            : t(
+                "填写名称、域名与类型，再按需配置上游和证书；IP 规则、限速与安全响应头位于“访问控制与安全”。",
+              )
         }}
       </p>
       <h3 class="form-section-title">{{ t("基本信息") }}</h3>
@@ -187,7 +208,19 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
           t("填写完整域名，不包含 http:// 或路径。")
         }}</small></label
       >
-      <div class="site-type-setting">
+      <div v-if="isFileService" class="site-type-setting">
+        <span class="field-label">{{ t("站点类型") }}</span>
+        <div class="site-type-locked" :style="{ '--tcolor': fileServiceType.color }">
+          <span class="site-type-icon"><FolderOpen :size="17" /></span>
+          <span class="site-type-text">
+            <strong>{{ t("文件服务") }}</strong>
+            <small>{{ t("共享目录 · WebDAV") }}</small>
+          </span>
+          <span class="site-type-locked-note">{{ t("在“文件服务”页单独管理") }}</span>
+        </div>
+        <small class="site-type-hint">{{ siteTypeHint }}</small>
+      </div>
+      <div v-else class="site-type-setting">
         <span class="field-label">{{ t("站点类型") }}</span>
         <div
           class="site-type-picker"
@@ -215,7 +248,7 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
         </div>
         <small class="site-type-hint">{{ siteTypeHint }}</small>
       </div>
-      <h3 class="form-section-title">{{ t("路由与上游") }}</h3>
+      <h3 class="form-section-title">{{ form.type === "files" ? t("共享目录与访问方式") : t("路由与上游") }}</h3>
       <template v-if="form.type === 'proxy'">
         <label
           >{{ t("上游地址")
@@ -246,6 +279,35 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
           >
         </div>
         <details class="site-upstream-options"><summary>{{t('上游请求头')}}</summary><SitePolicyFields v-model="siteFormPolicy" variant="upstream"/></details>
+        <details class="site-upstream-options">
+          <summary>{{ t("连接与流式选项") }}</summary>
+          <label
+            class="drawer-check-line"
+            :title="t('关闭响应缓冲，上游一写入就推送到浏览器；对话类与日志流服务必须开启')"
+          >
+            <input v-model="form.streaming" type="checkbox" />
+            <span>{{ t("流式响应（SSE / 逐字输出）") }}</span>
+          </label>
+          <p class="inline-help">{{ t("关闭响应缓冲，适合 AI 对话、日志流、Server-Sent Events。普通网页保持关闭即可。") }}</p>
+          <label
+            >{{ t("连接上游超时（选填）")
+            }}<input
+              v-model="form.dial_timeout"
+              placeholder="10s"
+              autocomplete="off"
+              spellcheck="false"
+            /><small>{{ t("建立到上游 TCP 连接的最长等待时间，例如 10s、500ms。留空使用 Caddy 默认值。") }}</small></label
+          >
+          <label
+            >{{ t("等待响应头超时（选填）")
+            }}<input
+              v-model="form.response_header_timeout"
+              placeholder="30s"
+              autocomplete="off"
+              spellcheck="false"
+            /><small>{{ t("从发出请求到收到上游响应头的最长等待时间。后端启动慢时调大它。") }}</small></label
+          >
+        </details>
       </template>
       <template v-else-if="form.type === 'static'">
         <button
@@ -272,6 +334,76 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
             )
           }}</small></label
         >
+      </template>
+      <template v-else-if="form.type === 'files'">
+        <button
+          v-if="editingID !== null"
+          type="button"
+          class="static-manage"
+          @click="openSiteFilesForForm()"
+        >
+            <span class="static-manage-icon"><FolderUp :size="20" /></span>
+            <span class="static-manage-text"><strong>{{ t("管理共享目录文件") }}</strong><small>{{ t("上传、删除共享目录里的文件") }}</small></span>
+            <span class="static-manage-cta">{{ t("打开") }} →</span>
+        </button>
+        <p v-else class="inline-help">{{ t("保存后可在“文件服务”页的卡片里上传共享目录的文件。") }}</p>
+        <label
+          >{{ t("共享目录（选填）")
+          }}<input
+            v-model="form.root_path"
+            :placeholder="t('留空自动使用托管目录')"
+            autocapitalize="none"
+            spellcheck="false"
+          /><small>{{
+            t(
+              "留空自动使用数据目录下的 sites/域名；也可填写服务器上已有的绝对路径。网页浏览与 WebDAV 共用这一个目录。",
+            )
+          }}</small></label
+        >
+        <div class="files-toggles">
+          <label
+            class="drawer-check-line"
+            :title="t('浏览器访问时显示文件列表，可点开下载')"
+            ><input v-model="form.browse" type="checkbox" /><span>{{
+              t("网页目录浏览")
+            }}</span></label
+          >
+          <label
+            class="drawer-check-line"
+            :title="t('文件客户端可通过同一地址连接并挂载该目录')"
+            ><input v-model="form.webdav" type="checkbox" /><span>{{
+              t("WebDAV")
+            }}</span></label
+          >
+        </div>
+        <p class="inline-help">
+          {{
+            t(
+              "两者共用同一个目录、同一个域名和同一套访问认证；未开启 Basic Auth 时任何知道地址的人都能访问。",
+            )
+          }}
+        </p>
+        <label
+          class="drawer-check-line files-write-toggle"
+          :class="{ 'is-muted': !form.webdav }"
+          :title="
+            form.webdav
+              ? t('允许 WebDAV 客户端上传、修改和删除文件')
+              : t('需先开启 WebDAV')
+          "
+          ><input
+            v-model="form.webdav_write"
+            type="checkbox"
+            :disabled="!form.webdav"
+          /><span>{{ t("允许 WebDAV 写入") }}</span></label
+        >
+        <p v-if="form.webdav_write" class="files-write-warning">
+          <AlertTriangle :size="14" />{{
+            t(
+              "已允许写入：WebDAV 客户端可以上传、修改和删除该目录下的任何文件，请务必同时配置访问认证。",
+            )
+          }}
+        </p>
       </template>
       <template v-else>
         <label
@@ -311,6 +443,23 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
         /><small>{{
           t("留空时整个域名都转发；填写路径后仅匹配该路径和它下面的子路径。")
         }}</small></label
+      >
+      <label
+        v-if="form.path"
+        class="drawer-check-line"
+        :title="t('例如访问路径为 /api 时，请求 /api/users 转发到上游会变成 /users')"
+      >
+        <input v-model="form.strip_prefix" type="checkbox" />
+        <span>{{ t("转发时剥离此前缀") }}</span>
+      </label>
+      <label
+        >{{ t("重写路径（选填）")
+        }}<input
+          v-model="form.rewrite_to"
+          placeholder="/new-path"
+          autocapitalize="none"
+          spellcheck="false"
+        /><small>{{ t("把匹配到的请求路径改写为目标路径；留空不重写，查询参数保持不变。") }}</small></label
       >
       <h3 class="form-section-title">{{ t("HTTPS 与证书") }}</h3>
       <label
@@ -409,24 +558,49 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
           t("启用此站点")
         }}</label
       >
-      <button
-        type="button"
-        class="advanced-toggle"
-        :aria-expanded="advancedOpen"
-        @click="advancedOpen = !advancedOpen"
-      >
-        <span class="advanced-toggle-copy"><strong>{{ t("访问控制与安全") }}</strong><small>{{ advancedSummary }}</small></span>
-        <ChevronDown class="advanced-chevron" :class="{ expanded: advancedOpen }" :size="18" aria-hidden="true" />
-      </button>
-      <div v-if="advancedOpen" class="advanced-fields">
-        <SiteSecurityPolicy v-model="siteFormPolicy" :domain="composedDomain"/>
-        <SitePolicyFields
-          v-model="siteFormPolicy"
-          v-model:password="form.basic_auth_password"
-          variant="local"
-          :editing="editingID !== null"
-        />
+      <h3 class="form-section-title">{{ t("站点状态") }}</h3>
+      <div class="maintenance-block">
+        <label
+          class="drawer-check-line maintenance-toggle"
+          :class="{ active: form.maintenance }"
+          :title="t('暂停向该站点转发，直接返回 503 维护页；安全策略与限速仍然生效')"
+        >
+          <input v-model="form.maintenance" type="checkbox" />
+          <span>{{ t("维护模式（暂停转发，返回 503）") }}</span>
+        </label>
+        <p v-if="form.maintenance" class="inline-help">
+          {{ t("访问者会看到维护页；关闭后立即恢复转发，无需重新部署。") }}
+        </p>
+        <label v-if="form.maintenance"
+          >{{ t("维护提示（选填）")
+          }}<input
+            v-model="form.maintenance_message"
+            :placeholder="t('服务正在维护，请稍后访问。')"
+            maxlength="500"
+          /><small>{{ t("显示在维护页上的说明文字，留空使用默认文案。") }}</small></label
+        >
       </div>
+      <section class="advanced-section" :class="{ open: advancedOpen }">
+        <button
+          type="button"
+          class="advanced-toggle"
+          :aria-expanded="advancedOpen"
+          @click="advancedOpen = !advancedOpen"
+        >
+          <span class="advanced-toggle-icon"><ShieldCheck :size="16" aria-hidden="true" /></span>
+          <span class="advanced-toggle-copy"><strong>{{ t("访问控制与安全") }}</strong><small>{{ advancedSummary }}</small></span>
+          <ChevronDown class="advanced-chevron" :class="{ expanded: advancedOpen }" :size="18" aria-hidden="true" />
+        </button>
+        <div v-if="advancedOpen" class="advanced-fields">
+          <SiteSecurityPolicy v-model="siteFormPolicy" :domain="composedDomain" />
+          <SitePolicyFields
+            v-model="siteFormPolicy"
+            v-model:password="form.basic_auth_password"
+            variant="local"
+            :editing="editingID !== null"
+          />
+        </div>
+      </section>
       <button
         v-if="applyRetryVisible"
         type="button"
@@ -436,7 +610,7 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
       >
         {{ saving ? t("正在应用…") : t("重新应用到 Caddy") }}
       </button>
-      <div class="site-save-summary"><strong>{{t("将发布")}} {{composedDomain||t("请填写域名")}}</strong><small>{{form.type==='static'?t("静态站点"):form.type==='redirect'?form.redirect_target:form.upstream}}</small></div>
+      <div class="site-save-summary"><strong>{{t("将发布")}} {{composedDomain||t("请填写域名")}}</strong><small>{{form.type==='static'?t("静态站点"):form.type==='files'?(form.root_path||t("共享目录")):form.type==='redirect'?form.redirect_target:form.upstream}}</small></div>
       <div class="modal-actions">
         <button type="button" class="secondary" @click="show = false">
           {{ t("取消") }}</button

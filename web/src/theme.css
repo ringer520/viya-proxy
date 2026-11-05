@@ -6,7 +6,7 @@
    redefines the tokens. Palettes are selected with data-palette on <html>,
    while data-theme keeps the legacy light/dark rules working.
 
-   Palettes: light · dark · aurora (极光) · ember (琥珀) · cyber (赛博)
+   Palettes: light · dark · aurora (极光) · ember (琥珀) · cyber (赛博) · clay (陶土)
    ========================================================================== */
 
 :root {
@@ -169,6 +169,37 @@ html[data-palette="cyber"] {
   --ring: rgba(196, 172, 242, 0.45);
 }
 
+/* ---- 陶土：暖米白底 + 赤陶橙（第二个浅色主题，补足明暗×冷暖的平衡） ---- */
+html[data-palette="clay"] {
+  --bg: #f7f3ed;
+  --bg-tint-1: #f2e3d5;
+  --bg-tint-2: #f4ede3;
+  --surface: #fffdfa;
+  --surface-2: #faf4ec;
+  --surface-3: #f2e9dd;
+  --line: #e9ddcf;
+  --line-strong: #d3c1ae;
+  --text: #2b2320;
+  --muted: #7e6d61;
+  --accent: #c25534;
+  --accent-2: #4a8079;
+  --accent-contrast: #fff8f3;
+  --accent-soft: rgba(194, 85, 52, 0.1);
+  --nav-bg: #2a201c;
+  --nav-bg-2: #382a25;
+  --nav-text: #ecdfd3;
+  --nav-active: #4b352d;
+  --glow: rgba(194, 85, 52, 0.15);
+  --shadow-card: 0 1px 2px rgba(62, 37, 24, 0.05), 0 12px 32px -20px rgba(62, 37, 24, 0.3);
+  --shadow-float: 0 20px 54px -14px rgba(62, 37, 24, 0.32);
+  --ring: rgba(194, 85, 52, 0.42);
+  --metric-cpu: #b4583a;
+  --metric-memory: #5d7d86;
+  --success: #2f7d52;
+  --warning: #a06a15;
+  --danger: #bf3f4a;
+}
+
 /* ---- 基础排版 ---- */
 html[data-palette] {
   color-scheme: light;
@@ -210,7 +241,6 @@ html[data-palette] body::before {
     radial-gradient(760px 460px at 96% 4%, var(--bg-tint-2) 0%, transparent 58%);
   opacity: 0.55;
 }
-html[data-palette] .app-shell,
 html[data-palette] main {
   position: relative;
   z-index: 1;
@@ -243,10 +273,6 @@ html[data-palette] .nav-label {
 }
 html[data-palette] code,
 html[data-palette] kbd,
-html[data-palette] .gauge-number,
-html[data-palette] .traffic-metrics strong,
-html[data-palette] .site-traffic strong,
-html[data-palette] .web-total-stats b,
 html[data-palette] time {
   font-variant-numeric: tabular-nums;
 }
@@ -289,12 +315,9 @@ html[data-palette] .brand strong {
 html[data-palette] .panel,
 html[data-palette] .engine-pill,
 html[data-palette] .stats article,
-html[data-palette] .overview-card,
 html[data-palette] .traffic-summary,
-html[data-palette] .panel-settings-popover,
 html[data-palette] .modal,
 html[data-palette] .site-log-tooltip,
-html[data-palette] .settings-card,
 html[data-palette] .site-group,
 html[data-palette] .revision-row {
   background: var(--surface);
@@ -318,25 +341,17 @@ html[data-palette] .domain-entry-mode {
 }
 html[data-palette] .host-row,
 html[data-palette] .panel-head,
-html[data-palette] .site-traffic,
 html[data-palette] .revision-row,
-html[data-palette] .settings-toggle,
 html[data-palette] .modal-actions,
 html[data-palette] .log-tabs {
   border-color: var(--line);
 }
-html[data-palette] .host-main strong:not(.entity-name),
-html[data-palette] .traffic-metrics strong,
-html[data-palette] .overview-card strong,
-html[data-palette] .panel-settings-heading strong,
-html[data-palette] .site-traffic strong {
+html[data-palette] .host-main strong:not(.entity-name) {
   color: var(--text);
 }
 html[data-palette] .host-main > span,
-html[data-palette] .overview-card p,
 html[data-palette] .traffic-summary p,
-html[data-palette] .revision-empty,
-html[data-palette] .traffic-metrics article > span {
+html[data-palette] .revision-empty {
   color: var(--muted);
 }
 
@@ -351,7 +366,6 @@ html[data-palette] .primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 88%, #fff);
 }
 html[data-palette] .secondary,
-html[data-palette] .theme-options button,
 html[data-palette] .icon-btn {
   background: var(--surface-2);
   border-color: var(--line);
@@ -365,13 +379,8 @@ html[data-palette] .icon-btn:hover:not(:disabled) {
 html[data-palette] .modal input:not([type="checkbox"]),
 html[data-palette] .modal select,
 html[data-palette] .modal textarea,
-html[data-palette] .settings-select select,
-html[data-palette] .settings-ports input,
 html[data-palette] .site-list-tools select,
-html[data-palette] .drawer-input-label input,
-html[data-palette] .list-search-input,
-html[data-palette] .transfer-fields input,
-html[data-palette] .transfer-fields select {
+html[data-palette] .drawer-input-label input {
   background: var(--surface-2);
   border-color: var(--line);
   color: var(--text);
@@ -517,6 +526,12 @@ html[data-palette] .page-header p {
 html[data-palette] .workspace-bar {
   margin-bottom: 10px;
   letter-spacing: 0.01em;
+  /* The breadcrumb is the only orientation cue on long pages; it must read. */
+  color: color-mix(in srgb, var(--muted) 78%, var(--text));
+  font-size: var(--fs-sm);
+}
+html[data-palette] .workspace-bar > span:first-child {
+  font-weight: 500;
 }
 html[data-palette] .workspace-toolbar {
   margin: 10px 0 22px;
@@ -524,65 +539,7 @@ html[data-palette] .workspace-toolbar {
 html[data-palette] .panel-head {
   padding: 20px 22px;
 }
-html[data-palette] .overview-card {
-  transition:
-    transform 0.2s var(--ease),
-    border-color 0.2s var(--ease),
-    box-shadow 0.2s var(--ease);
-}
-html[data-palette] .overview-telemetry {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 18px;
-  margin-bottom: 20px;
-  align-items: stretch;
-}
 /* ---- KPI 行：概览页的快速读数 ---- */
-html[data-palette] .kpi-row article {
-  position: relative;
-  overflow: hidden;
-  border-radius: 14px;
-  padding: 16px 18px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  transition:
-    border-color 0.2s var(--ease),
-    transform 0.2s var(--ease);
-}
-html[data-palette] .kpi-row article::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: linear-gradient(180deg, var(--accent), transparent 85%);
-  opacity: 0.7;
-}
-html[data-palette] .kpi-row article:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
-}
-html[data-palette] .kpi-row article > span {
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-}
-html[data-palette] .kpi-row strong {
-  font-family: var(--font-sans);
-  font-size: 27px;
-  font-weight: 720;
-  letter-spacing: -0.03em;
-  margin: 7px 0 4px;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-html[data-palette] .kpi-row strong.status-text {
-  font-size: 19px;
-}
-html[data-palette] .kpi-row small {
-  font-size: 11px;
-  color: var(--muted);
-}
 
 /* ---- 字体阶梯：标题更紧凑，正文更清晰 ---- */
 html[data-palette] .panel-head h2 {
@@ -593,8 +550,7 @@ html[data-palette] .panel-head h2 {
 html[data-palette] .host-main strong {
   font-size: 14.5px;
 }
-html[data-palette] .host-main > span,
-html[data-palette] .site-main > span {
+html[data-palette] .host-main > span {
   font-size: 12.5px;
 }
 html[data-palette] .nav {
@@ -612,19 +568,6 @@ html[data-palette] .badge {
 }
 html[data-palette] table {
   font-size: 12.5px;
-}
-@media (max-width: 760px) {
-  html[data-palette] .kpi-row {
-    grid-template-columns: 1fr;
-  }
-  html[data-palette] .kpi-row strong {
-    font-size: 22px;
-  }
-}
-html[data-palette] .overview-card:hover {
-  transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  box-shadow: 0 18px 40px -24px var(--glow);
 }
 html[data-palette] .engine-pill .dot,
 html[data-palette] .dot {
@@ -670,10 +613,6 @@ html[data-palette] .dot {
     margin-left: 0;
     justify-content: flex-start;
   }
-  html[data-palette] .workspace-toolbar .web-total-stats {
-    width: 100%;
-    justify-content: space-between;
-  }
   /* 日志表格：窄屏保留可读列宽并允许横向滚动，而不是把列压到看不见 */
   html[data-palette] .log-content .site-log-table {
     min-width: 560px;
@@ -717,6 +656,39 @@ html[data-palette] .dot {
   html[data-palette] .nav-menu {
     -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%);
     mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%);
+  }
+  /* 工作区栏：style.css 窄屏写死了 height:52px 且允许换行，
+     面包屑一长（如「配置历史」「SSL 证书」）徽标就被折到第二行并被裁切。
+     改为高度自适应 + 强制单行，面包屑超长时省略，引擎状态固定贴右。 */
+  html[data-palette] .workspace-bar {
+    height: auto;
+    min-height: 34px;
+    margin-bottom: 8px;
+    gap: 10px;
+    flex-wrap: nowrap;
+  }
+  html[data-palette] .workspace-bar > span:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  html[data-palette] .workspace-bar-actions {
+    flex: 0 0 auto;
+    margin-left: 0;
+  }
+  /* 徽标收到与底栏同高，去掉桌面端的悬浮阴影，避免像一颗独立按钮 */
+  html[data-palette] .workspace-bar .engine-pill {
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 4px 9px;
+    gap: 6px;
+    box-shadow: none;
+  }
+  /* 窄屏不再显示右侧刷新：空间让给面包屑，数据由自动刷新与各页面自身入口负责 */
+  html[data-palette] .workspace-bar .refresh-btn {
+    display: none;
   }
 }
 
@@ -838,8 +810,6 @@ html[data-palette] :is(.host-row, .site-list-row, .forward-row, .revision-row) {
 html[data-palette] :is(.site-list-row, .forward-row):hover { background: color-mix(in srgb, var(--accent) 3%, var(--surface)); }
 html[data-palette] :is(.site-icon, .forward-icon, .count-symbol) { box-shadow: inset 0 1px 0 #ffffff0a; }
 html[data-palette] .site-identity .site-icon { border-radius: 10px; }
-html[data-palette] .site-panel .site-name-link .entity-name { font-weight: 650; letter-spacing: -.015em; }
-html[data-palette] .site-panel .site-address { color: color-mix(in srgb, var(--text) 76%, var(--muted)); }
 html[data-palette] .site-panel .site-protocol { font-size: 9px; letter-spacing: .04em; background: var(--surface-2); border-color: var(--line); }
 html[data-palette] .site-panel .site-actions-buttons :is(.icon-btn, .site-log-trigger) { background: transparent; border: 1px solid transparent; }
 html[data-palette] .site-panel .site-actions-buttons :is(.icon-btn, .site-log-trigger):hover { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 18%, transparent); }
@@ -907,3 +877,81 @@ html[data-palette] .page-header .page-header-title { min-width:0; padding-right:
 html[data-palette] .page-header-tools .workspace-help { position:relative; inset:auto; margin:0; align-self:center; }
 html[data-palette] .page-header-tools .github-link { margin:0; }
 html[data-palette] .page-header-tools .workspace-help > div { max-width:calc(100vw - 40px); }
+
+/* ==========================================================================
+   Modern polish layer
+   --------------------------------------------------------------------------
+   Gradient accents, layered surfaces and deliberate motion. Everything here is
+   token-driven, so all six palettes (and the illustrated ones) inherit it
+   without any per-palette duplication.
+   ========================================================================== */
+html[data-palette] {
+  /* Two-stop accent ramp: solid on the left, cooler sibling on the right. */
+  --accent-grad: linear-gradient(
+    118deg,
+    var(--accent) 0%,
+    color-mix(in srgb, var(--accent) 62%, var(--accent-2)) 58%,
+    var(--accent-2) 100%
+  );
+  /* Barely-there top light that makes flat cards read as physical surfaces. */
+  --surface-sheen: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 5%, transparent) 0%,
+    transparent 38%
+  );
+}
+
+/* ---- Primary actions: gradient fill, fine top light, calm lift on hover ---- */
+html[data-palette] .primary {
+  background: var(--accent-grad);
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+  box-shadow: inset 0 1px 0 #ffffff2b, 0 7px 18px -13px var(--accent);
+}
+html[data-palette] .primary:hover:not(:disabled) {
+  background: var(--accent-grad);
+  filter: brightness(1.07) saturate(1.05);
+  box-shadow: inset 0 1px 0 #ffffff3d, 0 12px 26px -13px var(--accent);
+}
+html[data-palette] .primary:active:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+/* ---- Surfaces: sheen on top, accent-tinted border on hover ---- */
+html[data-palette] :is(.panel, .mission-card, .stats article, .overview-card) {
+  background-image: var(--surface-sheen);
+  transition:
+    border-color var(--duration-normal) var(--ease),
+    box-shadow var(--duration-normal) var(--ease);
+}
+html[data-palette] :is(.panel, .stats article, .overview-card):hover {
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--line));
+}
+
+/* ---- Palette switches fade instead of snapping ---- */
+html[data-palette] body,
+html[data-palette] .sidebar {
+  transition:
+    background-color 260ms var(--ease),
+    border-color 260ms var(--ease),
+    color 260ms var(--ease);
+}
+html[data-palette] :is(.panel, .workspace-bar, .modal, .settings-drawer, .stats article) {
+  transition:
+    background-color 260ms var(--ease),
+    background-image 260ms var(--ease),
+    border-color 260ms var(--ease),
+    box-shadow 260ms var(--ease);
+}
+
+/* ---- Focus ring: one consistent, high-contrast treatment ---- */
+html[data-palette] :is(button, a, summary, input, select, textarea):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 78%, transparent);
+  outline-offset: 2px;
+}
+
+/* ---- Respect reduced-motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  html[data-palette] :is(.panel, .stats article, .overview-card, .primary) {
+    transition: none;
+  }
+}

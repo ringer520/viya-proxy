@@ -40,6 +40,10 @@ export type Host = {
   rate_limit_window?: string;
   type: string;
   root_path?: string;
+  spa_fallback?: boolean;
+  browse?: boolean;
+  webdav?: boolean;
+  webdav_write?: boolean;
   redirect_target?: string;
   redirect_status?: number;
   redirect_keep_path?: boolean;
@@ -47,6 +51,13 @@ export type Host = {
   max_body_bytes?: number;
   allowed_methods?: string[];
   hide_server?: boolean;
+  strip_prefix?: boolean;
+  rewrite_to?: string;
+  streaming?: boolean;
+  dial_timeout?: string;
+  response_header_timeout?: string;
+  maintenance?: boolean;
+  maintenance_message?: string;
 };
 
 export type SiteGroup = { domain: string; hosts: Host[] };
@@ -167,7 +178,16 @@ export type UpstreamHealth = {
   failures: number;
 };
 
-export type Palette = "light" | "dark" | "aurora" | "ember" | "cyber" | "sakura" | "neon" | "lunar";
+export type Palette =
+  | "light"
+  | "clay"
+  | "dark"
+  | "aurora"
+  | "ember"
+  | "cyber"
+  | "sakura"
+  | "neon"
+  | "lunar";
 export type ThemeChoice = "system" | Palette;
 
 export type WebListener = {

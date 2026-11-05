@@ -22,3 +22,24 @@
 .provider-check-note.failed{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 35%,var(--line))}
 @media(max-width:1000px){.provider-panel .provider-row{grid-template-columns:1fr;gap:14px}.provider-verification{justify-items:start;padding-left:46px}.provider-actions-toolbar{justify-content:flex-start}.provider-check-note{max-width:540px}}
 @media(max-width:540px){.provider-panel .provider-row{padding:16px}.provider-verification{padding-left:0}.provider-actions-toolbar>input{max-width:none}.provider-details>strong{font-size:13px}}
+
+/* Tab rows, disclosures and inline messages share the panel-head gutter so no
+   control ever sits flush against the card border. */
+.panel > .op-tabs { padding: 0 22px; margin: 16px 0 14px; }
+.panel > .op-disclosure { padding: 13px 22px; }
+.op-tabs button { display: inline-flex; align-items: center; gap: 7px; }
+.op-tabs button > b { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 6px; font-size: 10px; font-weight: 650; font-variant-numeric: tabular-nums; background: color-mix(in srgb, currentColor 12%, transparent); }
+.op-tabs button[aria-selected="true"] > b { background: color-mix(in srgb, #fff 26%, transparent); }
+.log-workspace > .panel-head { margin-bottom: 0; }
+.log-workspace > .op-disclosure { margin-bottom: 0; }
+.log-workspace > .error,
+.log-workspace > .probe-ok { margin: 14px 22px 0; }
+
+@media (max-width: 600px) {
+  .panel > .op-tabs { padding: 0 16px; }
+  .panel > .op-disclosure { padding: 12px 16px; }
+  .log-tabs { padding: 2px 16px 12px; }
+  .log-content { padding: 16px; }
+  .log-workspace > .error,
+  .log-workspace > .probe-ok { margin: 12px 16px 0; }
+}

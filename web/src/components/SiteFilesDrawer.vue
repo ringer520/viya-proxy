@@ -45,6 +45,7 @@ type UploadResult = {
 const props = defineProps<{
   host: {
     id: number;
+    type?: string;
     domain: string;
     root_path?: string;
     tls_mode?: string;
@@ -73,6 +74,38 @@ const uploadProgress = ref<number | null>(null);
 const conflictPrompt = ref<{ items: UploadItem[]; conflicts: string[] } | null>(
   null,
 );
+
+const search = ref("");
+const visibleEntries = computed(() => entries.value.filter(e => e.name.toLowerCase().includes(search.value.toLowerCase())).sort((a,b) => Number(b.is_dir)-Number(a.is_dir) || a.name.localeCompare(b.name)));
+const preview = ref<{entry:Entry;content:string;original:string;version:string;editable:boolean;image?:string}|null>(null);
+const previewError=ref(""); const textBusy=ref(false); const textLoading=ref(false);
+const textDirty=computed(()=>!!preview.value && preview.value.content!==preview.value.original);
+function closePreview() {
+ if(textBusy.value || textLoading.value || (textDirty.value && !window.confirm(t("放弃文件的未保存修改？")))) return false;
+ if(preview.value?.image)URL.revokeObjectURL(preview.value.image);
+ preview.value=null; return true;
+}
+function closeDrawer(){if(closePreview()) emit("close");}
+async function previewFile(entry:Entry){
+ if(!closePreview())return;
+ preview.value={entry,content:"",original:"",version:"",editable:false};textLoading.value=true;previewError.value="";
+ try{
+ if(/\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(entry.name)){
+   if(entry.size>10*1024*1024)throw Error(t("图片预览最大支持 10 MiB"));
+   const r=await fetch(api(`/download?path=${encodeURIComponent(entry.path)}`));
+   if(!r.ok)throw Error(t("读取文件失败"));
+   const blob=await r.blob();
+   if(blob.size>10*1024*1024 || !/^image\/(png|jpeg|gif|webp|avif|bmp)$/i.test(blob.type))throw Error(t("不支持的图片格式，请下载后查看"));
+   preview.value.image=URL.createObjectURL(blob);return;
+ }
+ const r=await fetch(api(`/text?path=${encodeURIComponent(entry.path)}`));const b=await r.json();if(!r.ok)throw Error(b.error||t("读取文件失败"));preview.value={entry,content:b.content,original:b.content,version:b.version,editable:b.editable};}
+ catch(e){previewError.value=e instanceof Error?e.message:t("读取文件失败");}finally{textLoading.value=false;}
+}
+async function saveText(){
+ const d=preview.value;if(!d?.editable||textBusy.value)return;textBusy.value=true;previewError.value="";
+ try{const r=await fetch(api(`/text?path=${encodeURIComponent(d.entry.path)}`),{method:"PUT",headers:headers(true),body:JSON.stringify({content:d.content,version:d.version})});const b=await r.json();if(!r.ok)throw Error(b.error||t("保存失败"));d.original=d.content;d.version=b.version;note.value=t("文件已保存");await load();}
+ catch(e){previewError.value=e instanceof Error?e.message:t("保存失败");}finally{textBusy.value=false;}
+}
 
 const crumbs = computed(() => {
   const parts = path.value ? path.value.split("/").filter(Boolean) : [];
@@ -117,7 +150,7 @@ async function load() {
 }
 
 function enter(entry: Entry) {
-  if (!entry.is_dir) return;
+  if (!entry.is_dir) { void previewFile(entry); return; }
   path.value = entry.path;
   void load();
 }
@@ -380,6 +413,7 @@ function modifiedLabel(value: string) {
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key !== "Escape") return;
+  if(preview.value){event.stopImmediatePropagation();closePreview();return;}
   if (conflictPrompt.value) {
     conflictPrompt.value = null;
     return;
@@ -392,19 +426,21 @@ function onKeydown(event: KeyboardEvent) {
     cancelMkdir();
     return;
   }
-  emit("close");
+  closeDrawer();
 }
 
+function protectUnload(event: BeforeUnloadEvent) { if(textDirty.value){event.preventDefault();event.returnValue="";} }
 onMounted(() => {
+  window.addEventListener("beforeunload",protectUnload);
   document.addEventListener("keydown", onKeydown);
   requestAnimationFrame(() => drawer.value?.focus());
   void load();
 });
-onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
+onBeforeUnmount(() => {document.removeEventListener("keydown", onKeydown);window.removeEventListener("beforeunload",protectUnload);if(preview.value?.image)URL.revokeObjectURL(preview.value.image);});
 </script>
 
 <template>
-  <div class="sfd-backdrop" @click.self="emit('close')">
+  <div class="sfd-backdrop">
     <section
       ref="drawer"
       class="sfd-drawer"
@@ -416,7 +452,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
       <header class="sfd-header">
         <span class="sfd-title-icon"><FolderUp :size="22" /></span>
         <div class="sfd-heading">
-          <span class="eyebrow">{{ t("静态站点文件") }}</span>
+          <span class="eyebrow">{{ t("文件浏览器") }}</span>
           <h2 id="sfd-title">{{ host.domain }}</h2>
         </div>
         <a
@@ -431,9 +467,9 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
         <button
           type="button"
           class="icon-btn"
-          :disabled="busy"
+          :disabled="busy || textBusy || textLoading"
           :aria-label="t('关闭')"
-          @click="emit('close')"
+          @click="closeDrawer"
         >
           <X :size="20" />
         </button>
@@ -441,7 +477,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
 
       <p v-if="!writable" class="sfd-banner readonly">
         <AlertTriangle :size="16" />
-        {{ t("该站点目录由面板外部管理，这里只读。上传请放到服务器上的对应目录。") }}
+        {{ props.host.type === "files" ? t("外部共享目录：支持预览和管理员文本编辑；上传和删除请使用已授权的 WebDAV 或服务器工具。") : t("该站点目录由面板外部管理，这里只读。上传请放到服务器上的对应目录。") }}
       </p>
 
       <div class="sfd-toolbar">
@@ -466,6 +502,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
             </button>
           </template>
         </nav>
+        <input v-model="search" class="sfd-search" :placeholder="t('搜索当前目录')" :aria-label="t('搜索当前目录')" />
         <div class="sfd-actions">
           <button
             type="button"
@@ -565,7 +602,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
               </td>
             </tr>
             <template v-else>
-              <tr v-for="entry in entries" :key="entry.path">
+              <tr v-for="entry in visibleEntries" :key="entry.path">
                 <td>
                   <button
                     type="button"
@@ -602,7 +639,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
                   </button>
                 </td>
               </tr>
-              <tr v-if="!entries.length">
+              <tr v-if="!visibleEntries.length">
                 <td colspan="4" class="sfd-empty">{{ t("目录为空") }}</td>
               </tr>
             </template>
@@ -617,6 +654,15 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
         </div>
       </div>
 
+      <section v-if="preview" class="sfd-preview" :aria-label="t('文件预览与编辑')">
+        <header><strong>{{preview.entry.name}}</strong><small>{{preview.image?t('图片预览'):t('UTF-8 文本 · 最大 1 MiB')}}</small>
+          <button v-if="preview.editable" class="primary" :disabled="!textDirty || textBusy" @click="saveText">{{textBusy?t('正在保存…'):t('保存文件')}}</button>
+          <button class="secondary" :disabled="textBusy || textLoading" @click="closePreview">{{t('关闭预览')}}</button></header>
+        <p v-if="previewError" class="sfd-error" role="alert">{{previewError}}</p>
+        <p v-else-if="textLoading">{{t('加载中…')}}</p>
+        <img v-else-if="preview.image" :src="preview.image" :alt="preview.entry.name" class="sfd-image-preview" />
+        <textarea v-else v-model="preview.content" :readonly="!preview.editable || textBusy" spellcheck="false" :aria-label="t('文件内容')" />
+      </section>
       <footer class="sfd-footer">
         <p v-if="error" class="sfd-error" role="alert">
           <AlertTriangle :size="14" />{{ error }}
@@ -1210,4 +1256,10 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
     animation: none;
   }
 }
+.sfd-search { min-width:140px; flex:1; }
+.sfd-preview { padding:16px; border-top:1px solid var(--line); flex:0 1 55vh; min-height:150px; overflow:auto; }
+.sfd-preview header { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px; }
+.sfd-preview header strong { flex:1; overflow-wrap:anywhere; }
+.sfd-preview textarea { width:100%; min-height:320px; max-height:55vh; resize:vertical; font:13px/1.7 ui-monospace,monospace; tab-size:2; white-space:pre; }
+.sfd-image-preview {display:block; max-width:100%; max-height:50vh; object-fit:contain; margin:auto;}
 </style>

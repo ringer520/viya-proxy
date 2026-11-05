@@ -1,5 +1,4 @@
 import {refreshConfigStatus} from "./useConfigStatus";
-import {managedCertificates} from "./useState";
 import { apiFetch as fetch } from "../api";
 // Layer4 port forwards, DDNS tasks, DNS provider credentials, and IP bans.
 // Grouped here because they share the same "list + dialog + toggle" shape and

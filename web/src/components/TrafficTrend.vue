@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { t } from '../i18n'
-import { TrendingUp } from '@lucide/vue'
 import { formatBytes } from '../format'
 
 const props = defineProps<{ points: { hour: number; bytes: number }[]; granularity?: 'hour' | 'day'; period?: '24h' | '7d' | '30d'; embedded?: boolean }>()
@@ -28,9 +27,6 @@ function label(unix: number) {
     ? `${at.getMonth() + 1}/${at.getDate()}`
     : at.getHours().toString().padStart(2, '0') + ':00'
 }
-const peakLabel = computed(() =>
-  props.granularity === 'day' ? t('峰值日期') : t('峰值时段'),
-)
 function x(i: number) {
   const last = Math.max(1, props.points.length - 1)
   return PAD_X + (i / last) * (W - PAD_X * 2)

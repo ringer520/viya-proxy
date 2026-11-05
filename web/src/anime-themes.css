@@ -10,8 +10,8 @@ html[data-palette="sakura"] {
   --metric-cpu:#9b527d; --metric-memory:#8063a8; --success:#28765a; --warning:#94621c; --danger:#b93855;
   --shadow-card:0 5px 25px -14px #6c3d6738,inset 0 1px 0 #ffffffa8;
   --shadow-float:0 22px 65px -20px #4b274a66;
-  --scene-image:url('/themes/sakura.webp'); --scene-glass:#fff9fce8;
-  --scene-veil:#f3e7ef24; --scene-scrim:#f7edf25e; --scene-ink:#fff5fb;
+  --scene-image:url('/themes/sakura.webp'); --scene-glass:#fff9fcd9;
+  --scene-veil:#f3e7ef24; --scene-scrim:#f7edf25e; --scene-ink:#5d3a53;
 }
 html[data-palette="neon"] {
   color-scheme:dark;
@@ -24,7 +24,7 @@ html[data-palette="neon"] {
   --metric-cpu:#79d7ef; --metric-memory:#c2a2f4; --success:#85dfb6; --warning:#ebc78a; --danger:#f39cb3;
   --shadow-card:0 10px 35px -22px #0009,inset 0 1px 0 #85e8ff0a;
   --shadow-float:0 22px 65px -15px #000b;
-  --scene-image:url('/themes/neon.webp'); --scene-glass:#101c32e8;
+  --scene-image:url('/themes/neon.webp'); --scene-glass:#0f1b2fd6;
   --scene-veil:#060c2310; --scene-scrim:#080f2338; --scene-ink:#defcff;
 }
 html[data-palette="lunar"] {
@@ -38,16 +38,20 @@ html[data-palette="lunar"] {
   --metric-cpu:#a0bff3; --metric-memory:#c4b1ef; --success:#9edcc1; --warning:#e7c98c; --danger:#f1a0b1;
   --shadow-card:0 10px 35px -22px #0009,inset 0 1px 0 #e4d3a80e;
   --shadow-float:0 22px 65px -15px #000b;
-  --scene-image:url('/themes/lunar.webp'); --scene-glass:#18203be8;
+  --scene-image:url('/themes/lunar.webp'); --scene-glass:#151d35d6;
   --scene-veil:#10132d10; --scene-scrim:#10152c38; --scene-ink:#f8edcf;
 }
 
 .anime-backdrop { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; isolation:isolate; }
-.anime-wallpaper { position:absolute; inset:0; background:var(--scene-image) right top / cover no-repeat; }
+/* The artwork stays untouched — no grading, no zoom. A hair of transparency lets
+   the page base colour bleed through so the image sits inside the UI, not behind it. */
+.anime-wallpaper { position:absolute; inset:0; background:var(--scene-image) right top / cover no-repeat; opacity:.9; }
 .anime-atmosphere { position:absolute; inset:0; background:linear-gradient(90deg,var(--scene-scrim),var(--scene-veil) 65%,transparent); }
-.anime-signature { position:absolute; right:24px; bottom:28px; display:grid; gap:8px; width:180px; color:var(--scene-ink); text-shadow:0 2px 12px #0008; }
-.anime-signature > span { font-size:8px; letter-spacing:.2em; opacity:.85; }
-.anime-signature > strong { font-size:11px; letter-spacing:.15em; font-weight:500; line-height:1.8; }
+/* Signature reads as a print caption: hairline, spaced-out caps, quiet Chinese line. */
+.anime-signature { position:absolute; right:28px; bottom:32px; display:grid; justify-items:end; gap:6px; width:196px; color:var(--scene-ink); text-align:right; opacity:.9; }
+.anime-signature > i { width:44px; height:1px; margin-bottom:3px; background:linear-gradient(90deg,transparent,currentColor); opacity:.6; }
+.anime-signature > strong { font-size:10px; letter-spacing:.3em; font-weight:500; line-height:1.6; text-shadow:0 1px 14px #00000038; }
+.anime-signature > small { font-size:9.5px; letter-spacing:.24em; opacity:.72; text-shadow:0 1px 14px #00000038; }
 .anime-particles { position:absolute; inset:0; }
 .anime-particles i { position:absolute; left:calc(12% + var(--particle) * 8%); top:calc(7% + var(--particle) * 7%); width:3px; height:3px; border-radius:50%; background:var(--accent); opacity:0; animation:anime-drift calc(10s + var(--particle) * 1s) calc(var(--particle) * -2s) ease-in-out infinite; }
 html[data-palette="sakura"] .anime-particles i { width:7px; height:5px; border-radius:80% 0 80% 30%; background:#cf709b; }
@@ -58,24 +62,52 @@ html[data-palette="lunar"] .anime-particles i { box-shadow:0 0 7px #fff0ba; }
 
 html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .auth-screen { position:relative; z-index:1; background:transparent; }
 html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .auth-modal { background:var(--scene-glass); backdrop-filter:blur(16px); }
-html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) :is(.panel,.mission-card,.mission-counts,.system-observatory) { background:var(--scene-glass); backdrop-filter:blur(12px); box-shadow:var(--shadow-card); }
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) :is(.panel,.mission-card,.mission-counts,.system-observatory) { background:var(--scene-glass); backdrop-filter:blur(17px) saturate(1.08); box-shadow:var(--shadow-card); }
 html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .sidebar { background:linear-gradient(180deg,color-mix(in srgb,var(--nav-bg) 95%,transparent),color-mix(in srgb,var(--nav-bg-2) 95%,transparent)); backdrop-filter:blur(16px); }
-html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .workspace-bar { border-color:var(--line); }
+/* Toolbar floats on the artwork as a frosted capsule instead of bare text. */
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .workspace-bar {
+  height:48px; margin-bottom:26px; padding:0 15px;
+  border:1px solid color-mix(in srgb,var(--accent) 17%,var(--line));
+  border-radius:15px;
+  background:color-mix(in srgb,var(--scene-glass) 78%,transparent);
+  backdrop-filter:blur(18px) saturate(1.16);
+  box-shadow:0 16px 38px -30px #000000b8,inset 0 1px 0 color-mix(in srgb,var(--accent) 14%,transparent);
+  color:color-mix(in srgb,var(--text) 68%,transparent);
+}
+/* Page heading sits on a haze that fades out before reaching the portrait. */
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .page-header { position:relative; }
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .page-header::before {
+  content:''; position:absolute; z-index:-1; pointer-events:none;
+  inset:-15px -26px -13px -27px; border-radius:22px;
+  background:linear-gradient(96deg,color-mix(in srgb,var(--scene-glass) 74%,transparent) 0%,color-mix(in srgb,var(--scene-glass) 42%,transparent) 46%,transparent 76%);
+  backdrop-filter:blur(9px);
+  -webkit-mask-image:linear-gradient(92deg,#000 0 50%,transparent 86%);
+  mask-image:linear-gradient(92deg,#000 0 50%,transparent 86%);
+}
 html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .mission-intro > span { letter-spacing:.2em; }
 html[data-palette="neon"] .nav.active { box-shadow:inset 0 0 0 1px #79e6f138,0 0 24px -14px #79e6f1; }
 html[data-palette="lunar"] .mission-kicker { color:var(--accent); letter-spacing:.18em; }
+/* Hairline of accent light along each panel's top edge. */
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .panel { position:relative; }
+html:is([data-palette="sakura"],[data-palette="neon"],[data-palette="lunar"]) .panel::before {
+  content:''; position:absolute; z-index:2; inset:0 0 auto; height:1px; pointer-events:none;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 58%,transparent),color-mix(in srgb,var(--accent) 8%,transparent) 46%,transparent 74%);
+  opacity:.85;
+}
 
 .anime-theme-group > h4 { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px; }
 .anime-theme-group > h4 > small { font-size:10px; font-weight:400; color:var(--muted); }
-.anime-theme-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
-.anime-theme-grid > button { position:relative; display:grid; min-width:0; text-align:left; overflow:hidden; padding:0; border:1px solid var(--line); border-radius:12px; background:var(--surface-2); color:var(--text); cursor:pointer; transition:border-color .2s,box-shadow .2s; }
-.anime-theme-grid > button > img { width:100%; height:auto; aspect-ratio:16/9; display:block; object-fit:cover; }
-.anime-theme-grid > button:hover { border-color:var(--accent); }
-.anime-theme-grid > button.selected { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
-.anime-theme-card-label { display:grid; gap:5px; padding:11px 10px; }
+.anime-theme-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:11px; }
+.anime-theme-grid > button { --card-accent:var(--accent); position:relative; display:grid; min-width:0; text-align:left; overflow:hidden; padding:0; border:1px solid color-mix(in srgb,var(--line) 88%,transparent); border-radius:14px; background:var(--surface-2); color:var(--text); cursor:pointer; transition:border-color .22s,box-shadow .26s,transform .22s; }
+.anime-theme-grid > button > img { width:100%; height:auto; aspect-ratio:16/10; display:block; object-fit:cover; transition:transform .5s cubic-bezier(.22,.61,.36,1); }
+.anime-theme-grid > button:hover { border-color:color-mix(in srgb,var(--card-accent) 60%,var(--line)); transform:translateY(-2px); box-shadow:0 14px 28px -20px #000000a6; }
+.anime-theme-grid > button:hover > img { transform:scale(1.045); }
+.anime-theme-grid > button.selected { border-color:var(--card-accent); box-shadow:0 0 0 2px color-mix(in srgb,var(--card-accent) 34%,transparent),0 16px 32px -22px #000000b3; }
+.anime-theme-grid > button:focus-visible { outline:2px solid var(--card-accent); outline-offset:2px; }
+.anime-theme-card-label { display:grid; gap:4px; padding:10px 11px 12px; }
 .anime-theme-card-label > strong { font-size:12px; font-weight:600; }
-.anime-theme-card-label > small { font-size:9px; color:var(--muted); }
-.anime-theme-selected { position:absolute; top:7px; right:7px; display:grid; place-items:center; width:20px; height:20px; border-radius:50%; background:var(--accent); color:var(--accent-contrast); box-shadow:0 2px 8px #0003; }
+.anime-theme-card-label > small { font-size:9.5px; color:var(--muted); }
+.anime-theme-selected { position:absolute; top:8px; right:8px; display:grid; place-items:center; width:21px; height:21px; border-radius:50%; background:var(--card-accent); color:#fff; font-size:11px; box-shadow:0 3px 10px #00000059,0 0 0 2px #ffffff2e; }
 
 /* Leave the portrait visible beside the workspace on larger screens. */
 @media(min-width:1360px) {
@@ -131,6 +163,10 @@ html[data-palette="sakura"] :is(.panel,.mission-card,.mission-counts){border-rad
 html[data-palette="sakura"] .panel-head{background:linear-gradient(100deg,#f6e6efc9,#fff9fc80)}
 html[data-palette="sakura"] :is(.host-icon,.count-symbol,.settings-title-icon){border-radius:13px 6px 13px 6px}
 html[data-palette="sakura"] .settings-drawer-header{background:radial-gradient(ellipse at top right,#f0d9ec80,transparent 70%)}
+/* Light artwork needs dark ink and a light halo, not the shared dark shadow. */
+html[data-palette="sakura"] .anime-signature > strong,
+html[data-palette="sakura"] .anime-signature > small{text-shadow:0 1px 12px #ffffffa8}
+html[data-palette="sakura"] .anime-signature{opacity:.82}
 
 /* Neon: circuit geometry, luminous edge accents and a finite hover scan. */
 html[data-palette="neon"]{--theme-motif:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='none' stroke='%2379e6f1' stroke-width='1.6'%3E%3Cpath d='M2 7h10l5 5h13M2 25h10l5-5h13M8 7v18M23 12v8'/%3E%3Ccircle cx='8' cy='7' r='2.5' fill='%23111d33'/%3E%3Ccircle cx='23' cy='20' r='2.5' fill='%23111d33'/%3E%3C/svg%3E")}

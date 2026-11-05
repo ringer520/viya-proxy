@@ -3,7 +3,6 @@ import { apiFetch } from '../api'
 import { t } from '../i18n'
 import type {Host} from '../types'
 import {hosts,ddnsRecords,readOnly,csrfToken} from './useState'
-import {load} from './useRefresh'
 import {managedCertificates} from './useState'
 export async function saveSiteMetadata(host:Host,tags:string[]){if(readOnly.value)return;const r=await apiFetch(`/api/v1/proxy-hosts/${host.id}/metadata`,{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken.value},body:JSON.stringify({tags})});const d=await r.json();if(!r.ok)throw Error(d.error);Object.assign(host,{tags:d.tags})}
 export const detailID=ref<number|null>(null)

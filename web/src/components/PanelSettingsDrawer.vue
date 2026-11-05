@@ -19,6 +19,7 @@ const pauseHidden=defineModel<boolean>('pauseHidden',{required:true})
 const charts=defineModel<boolean>('charts',{required:true})
 const previewLimit=defineModel<number>('previewLimit',{required:true})
 const landing=defineModel<string>('landing',{required:true})
+const showFileServices=defineModel<boolean>('showFileServices',{required:true})
 const port=defineModel<number>('port',{required:true})
 const password=defineModel<{current:string;next:string;confirm:string}>('password',{required:true})
 const props=defineProps<{busy:boolean;loading:boolean;error:string;message:string;savedPort:number;accessAddress:string;accessPort:string;username:string;sessions:number|null;csrf:string;role:'admin'|'viewer';pages:{id:string;label:string}[]}>()
@@ -136,6 +137,7 @@ onBeforeUnmount(()=>{mounted=false;reads.abort();window.removeEventListener('bef
 const themeOptions=[
  {id:'system',label:t('跟随系统'),hint:t('随系统深浅切换'),base:'linear-gradient(135deg,#f4f6f9 0 50%,#10151e 50% 100%)',accent:'#91b4fb'},
  {id:'light',label:t('浅色'),hint:t('中性蓝灰'),base:'#f4f6f9',accent:'#416be0'},
+ {id:'clay',label:t('陶土'),hint:t('暖米白'),base:'#f7f3ed',accent:'#c25534'},
  {id:'dark',label:t('深色'),hint:t('午夜蓝'),base:'#10151e',accent:'#91b4fb'},
  {id:'aurora',label:t('极光'),hint:t('薄荷青绿'),base:'#101b1d',accent:'#80d9be'},
  {id:'ember',label:t('琥珀'),hint:t('暖炭金'),base:'#1c1916',accent:'#dfba7f'},
@@ -157,11 +159,12 @@ const themeOptions=[
           <div class="settings-section-heading"><h3>{{t('外观与显示')}}</h3><span>{{t('当前浏览器 · 即时生效')}}</span></div>
           <div class="settings-row"><span><strong>{{t('语言 / Language')}}</strong></span><LanguagePicker/></div>
           <div class="settings-group settings-theme-group"><h4>{{t('界面主题')}}</h4><div class="settings-theme-grid"><button v-for="item in themeOptions" :key="item.id" type="button" :class="{selected:theme===item.id}" :aria-pressed="theme===item.id" @click="theme=item.id"><span class="settings-theme-preview" :style="{background:item.base,'--swatch-accent':item.accent}"><i/><b/><em/></span><span class="settings-theme-label">{{item.label}}<small>{{item.hint}}</small></span><span v-if="theme===item.id" class="settings-theme-selected">✓</span></button></div></div>
-          <div class="settings-group anime-theme-group"><h4>{{t('二次元典藏')}}<small>{{t('原创人物 · 全景背景')}}</small></h4><div class="anime-theme-grid"><button v-for="item in animeThemes" :key="item.id" type="button" :class="{selected:theme===item.id}" :aria-pressed="theme===item.id" @click="theme=item.id"><img :src="'/themes/'+item.id+'-preview.webp'" alt="" width="480" height="270" loading="lazy"/><span class="anime-theme-card-label"><strong>{{t(item.label)}}</strong><small>{{t(item.hint)}}</small></span><span v-if="theme===item.id" class="anime-theme-selected" aria-hidden="true">✓</span></button></div></div>
+          <div class="settings-group anime-theme-group"><h4>{{t('二次元典藏')}}<small>{{t('原创人物 · 全景背景')}}</small></h4><div class="anime-theme-grid"><button v-for="item in animeThemes" :key="item.id" type="button" :class="{selected:theme===item.id}" :aria-pressed="theme===item.id" :style="{'--card-accent': item.accent}" @click="theme=item.id"><img :src="'/themes/'+item.id+'-preview.webp'" alt="" width="480" height="270" loading="lazy"/><span class="anime-theme-card-label"><strong>{{t(item.label)}}</strong><small>{{t(item.hint)}}</small></span><span v-if="theme===item.id" class="anime-theme-selected" aria-hidden="true">✓</span></button></div></div>
           <div class="settings-group settings-rows">
             <label class="settings-row"><span><strong>{{t('简洁显示模式')}}</strong><small>{{t('自动隐藏界面中的说明文字，让页面更简洁')}}</small></span><input v-model="simpleDisplay" class="settings-switch" type="checkbox" role="switch"/></label>
             <label class="settings-row"><span><strong>{{t('紧凑布局')}}</strong><small>{{t('减少站点和任务列表的留白')}}</small></span><input v-model="compact" class="settings-switch" type="checkbox" role="switch"/></label>
             <label class="settings-row"><span><strong>{{t('显示流量趋势图')}}</strong><small>{{t('关闭后保留请求数与流量统计')}}</small></span><input v-model="charts" class="settings-switch" type="checkbox" role="switch"/></label>
+            <label class="settings-row"><span><strong>{{t('显示文件服务')}}</strong><small>{{t('在侧边栏显示文件服务入口')}}</small></span><input v-model="showFileServices" class="settings-switch" type="checkbox" role="switch"/></label>
             <label class="settings-row"><span><strong>{{t('默认进入页面')}}</strong><small>{{t('未指定页面地址时使用')}}</small></span><select v-model="landing"><option v-for="page in pages" :key="page.id" :value="page.id">{{page.label}}</option></select></label>
           </div>
           <button class="settings-text-button" type="button" @click="emit('resetPreferences')">{{t('恢复浏览器默认偏好')}}</button>

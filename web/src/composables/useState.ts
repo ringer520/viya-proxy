@@ -3,7 +3,6 @@
 // imports the data refs and feedback channels it needs from here, and the big
 // `load()` fan-out lives here so a single refresh keeps all lists consistent.
 import { computed, ref } from "vue";
-import { t, tr } from "../i18n";
 import type {
   Certificate,
   ManagedCertificate,

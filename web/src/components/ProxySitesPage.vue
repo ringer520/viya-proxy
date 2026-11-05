@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ServiceTrafficCell from "./ServiceTrafficCell.vue";
-import { ArrowLeftRight, ArrowRight, CornerUpRight, Copy, ExternalLink, Folder, FolderUp, Globe2, MoreHorizontal, Pencil, Plus, ScrollText, Search, ShieldCheck, Trash2 } from "@lucide/vue";
+import { ArrowLeftRight, ArrowRight, Copy, CornerUpRight, ExternalLink, Folder, FolderUp, Globe2, MoreHorizontal, Pencil, Plus, ScrollText, Search, ShieldCheck, Trash2 } from "@lucide/vue";
 import {openSiteDetails} from "../composables/useSiteWorkspace";
 import { Activity } from "@lucide/vue";
 import { t } from "../i18n";
@@ -8,10 +8,10 @@ import { onMounted, onUnmounted, ref } from "vue";
 import type { Host } from "../types";
 import { formatBytes } from "../format";
 import AccessLogTable from "./AccessLogTable.vue";
-import { clearListFilters, hasListFilter, hosts, listSearch, readOnly, statusFilter, upstreamHealth } from "../composables/useState";
+import { clearListFilters, hasListFilter, listSearch, readOnly, statusFilter, upstreamHealth } from "../composables/useState";
 
 import { siteStats } from "../composables/useTraffic";
-import { cloneHost, hostContentStats, hostToggling, openCreate, openEdit, openListenerEditor, openSiteFiles, openSiteLogs, previewLayout, previewSite, remove, selectedListener, selectedPortState, selectListener, siteGroups, siteIconStyle, siteLogs, siteURL, toggleHost, toggleWebSearch, visibleHosts, webListeners, webSearchInput, webSearchOpen } from "../composables/useHosts";
+import { cloneHost, hostContentStats, hostToggling, openCreate, openEdit, openListenerEditor, openSiteFiles, openSiteLogs, previewLayout, previewSite, remove, selectedListener, selectedPortState, selectListener, siteGroups, siteIconStyle, siteLogs, siteURL, toggleHost, toggleWebSearch, visibleHosts, webHosts, webListeners, webSearchInput, webSearchOpen } from "../composables/useHosts";
 import { openSecurityDefaults, resolveSecurityPolicy } from "../composables/useSecurity";
 import { previewLimit } from "../composables/usePreferences";
 function hasSiteName(host: Host) { return !!host.name?.trim() && host.name.trim() !== host.domain; }
@@ -112,7 +112,7 @@ function certificateIssue(host: Host) {
             >
               {{ listener.protocol.toUpperCase() }} · {{ listener.port }}
               <b>{{
-                hosts.filter((host) => host.listener_id === listener.id).length
+                webHosts.filter((host) => host.listener_id === listener.id).length
               }}</b></button
             ><button :disabled="readOnly" @click="openListenerEditor(null)">
               <Plus :size="14" />{{ t("添加端口监听") }}
@@ -220,7 +220,10 @@ function certificateIssue(host: Host) {
                 </div>
                 <div class="site-route">
                   <span class="site-connection" aria-hidden="true"><Folder v-if="host.type === 'static'" :size="16" /><CornerUpRight v-else-if="host.type === 'redirect'" :size="16" /><ArrowLeftRight v-else :size="16" /></span>
-                  <div v-if="host.type === 'static'" class="static-path-row">
+                  <div
+                    v-if="host.type === 'static'"
+                    class="static-path-row"
+                  >
                     <button
                       class="static-upload-btn"
                       :class="{
@@ -356,7 +359,7 @@ function certificateIssue(host: Host) {
           <strong>{{
             hasListFilter
               ? t("未找到匹配站点")
-              : hosts.length
+              : webHosts.length
                 ? t("此监听下没有站点")
                 : t("还没有代理站点")
           }}</strong

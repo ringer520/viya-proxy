@@ -5,13 +5,14 @@ import { useMotionPreferences } from "./composables/useMotion";
 useMotionPreferences();
 
 import { t, tr } from "./i18n";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { Component } from "vue";
+import PageLoading from "./components/PageLoading.vue";
 import PanelSettingsDrawer from "./components/PanelSettingsDrawer.vue";
 import AnimeBackdrop from "./components/AnimeBackdrop.vue";
 import ThemeEmblem from "./components/ThemeEmblem.vue";
 import { animeThemes } from "./animeThemes";
 import SiteFilesDrawer from "./components/SiteFilesDrawer.vue";
-import LogWorkspace from "./components/LogWorkspace.vue";
 import LanguagePicker from "./components/LanguagePicker.vue";
 import ListenerEditorModal from "./components/ListenerEditorModal.vue";
 import BanModal from "./components/BanModal.vue";
@@ -26,14 +27,20 @@ import ProviderModal from "./components/ProviderModal.vue";
 import L4Modal from "./components/L4Modal.vue";
 import DDNSModal from "./components/DDNSModal.vue";
 import CertUploadModal from "./components/CertUploadModal.vue";
-import OverviewDashboard from "./components/OverviewDashboard.vue";
-import ProxySitesPage from "./components/ProxySitesPage.vue";
-import DnsProvidersPage from "./components/DnsProvidersPage.vue";
-import CertificatesPage from "./components/CertificatesPage.vue";
-import Layer4Page from "./components/Layer4Page.vue";
-import Ddnspage from "./components/Ddnspage.vue";
-import ConfigHistoryPage from "./components/ConfigHistoryPage.vue";
-import IpBansPage from "./components/IpBansPage.vue";
+// 页面级组件按需加载：首屏只下载当前页面，其余页面在切换时才加载对应 chunk。
+// delay 让极快的加载不闪占位图；timeout 防止慢网络下一直空白。
+const asyncPage = (loader: () => Promise<{ default: Component }>) =>
+  defineAsyncComponent({ loader, loadingComponent: PageLoading, delay: 150, timeout: 20000 });
+const OverviewDashboard = asyncPage(() => import("./components/OverviewDashboard.vue"));
+const ProxySitesPage = asyncPage(() => import("./components/ProxySitesPage.vue"));
+const FileManager = asyncPage(() => import("./components/FileManager.vue"));
+const DnsProvidersPage = asyncPage(() => import("./components/DnsProvidersPage.vue"));
+const CertificatesPage = asyncPage(() => import("./components/CertificatesPage.vue"));
+const Layer4Page = asyncPage(() => import("./components/Layer4Page.vue"));
+const Ddnspage = asyncPage(() => import("./components/Ddnspage.vue"));
+const ConfigHistoryPage = asyncPage(() => import("./components/ConfigHistoryPage.vue"));
+const IpBansPage = asyncPage(() => import("./components/IpBansPage.vue"));
+const LogWorkspace = asyncPage(() => import("./components/LogWorkspace.vue"));
 import TrafficSummary from "./components/TrafficSummary.vue";
 import {
   Plus,
@@ -46,11 +53,12 @@ import {
   ScrollText,
   Ban,
   Cable,
+  FolderOpen,
   LogOut,
   Settings,
 } from "@lucide/vue";
 
-import { authenticated, csrfToken, authChecked, setupRequired, panelUsername, panelRole, readOnly, error, saving, applyRetryVisible, hosts, online, refreshing, resolveDelete, listSearch, statusFilter } from "./composables/useState";
+import { authenticated, csrfToken, authChecked, setupRequired, panelUsername, panelRole, readOnly, error, saving, applyRetryVisible, online, refreshing, resolveDelete, listSearch, statusFilter } from "./composables/useState";
 import { load } from "./composables/useRefresh";
 import { retryApply } from "./composables/useApply";
 import { trafficRange, refreshTraffic } from "./composables/useTraffic";
@@ -68,6 +76,9 @@ import {
   openCreate,
   show as siteFormOpen,
   webSearchOpen,
+  webHosts,
+  fileSearch,
+  fileStatusFilter,
 } from "./composables/useHosts";
 import {
   openBan,
@@ -83,6 +94,7 @@ import {
   documentHidden,
   landingPage,
   pauseHidden,
+  showFileServices,
   previewLimit,
   refreshInterval,
   themeChoice,
@@ -104,6 +116,7 @@ function resetPanelPreferences() {
   trafficCharts.value = true;
   previewLimit.value = 5;
   landingPage.value = "overview";
+  showFileServices.value = false;
   panelSettingsError.value = "";
   panelSettingsMessage.value = t("浏览器偏好已恢复默认。");
 }
@@ -429,6 +442,13 @@ const navigationItems = [
     run: () => openL4(),
   },
   {
+    id: "file-services",
+    group: t("网络服务"),
+    label: t("文件服务"),
+    description: t("管理服务器上的文件，并配置 WebDAV 共享目录。"),
+    icon: FolderOpen,
+  },
+  {
     id: "ddns",
     group: t("网络服务"),
     label: t("动态 DNS"),
@@ -479,16 +499,23 @@ const navigationItems = [
     icon: History,
   },
 ];
+// File service stays hidden until the operator enables it in panel settings.
+const visibleNavigationItems = computed(() =>
+  showFileServices.value
+    ? navigationItems
+    : navigationItems.filter((item) => item.id !== "file-services"),
+);
 const groupedNavigation = computed(() =>
   navigationGroups.map((group) => ({
     group,
-    items: navigationItems.filter((item) => item.group === group),
+    items: visibleNavigationItems.value.filter((item) => item.group === group),
   })),
 );
 const currentPage = computed(
   () =>
-    navigationItems.find((item) => item.id === activeSection.value) ||
-    navigationItems[0]!,
+    visibleNavigationItems.value.find(
+      (item) => item.id === activeSection.value,
+    ) || visibleNavigationItems.value[0]!,
 );
 
 // ---- page instructions ----
@@ -502,6 +529,10 @@ const pageInstructions: Record<string, string[]> = {
     t("先选择 HTTP / HTTPS 监听，再添加域名；已有主域名可直接添加子域名；访问路径留空表示匹配整个域名。"),
     t("静态站点文件上传后立即对外生效、无需重启；开启目录浏览可公开文件列表。"),
     t("日志图标支持悬浮预览；克隆可复用配置；删除前会再次确认。"),
+  ],
+  "file-services": [
+    t("直接浏览与管理服务器上的文件：左侧目录树、右侧文件列表，支持上传、新建、编辑、预览、下载、重命名与删除。"),
+    t("右上角“WebDAV 设置”可把任意一个目录发布为带账号与读写权限的 WebDAV 共享。"),
   ],
   layer4: [
     t("填写 Debian 主机监听地址、端口和上游 host:port；选择 TCP、UDP 或两者。"),
@@ -544,11 +575,13 @@ function syncActiveSection() {
   listSearch.value = "";
   webSearchOpen.value = false;
   statusFilter.value = "all";
+  fileSearch.value = "";
+  fileStatusFilter.value = "all";
   let section = window.location.hash.slice(1);
   if (section === "dns-ddns") section = "dns-providers";
-  activeSection.value = navigationItems.some((item) => item.id === section)
+  activeSection.value = visibleNavigationItems.value.some((item) => item.id === section)
     ? section
-    : navigationItems.some((item) => item.id === landingPage.value)
+    : visibleNavigationItems.value.some((item) => item.id === landingPage.value)
       ? landingPage.value
       : "overview";
   if (section !== activeSection.value)
@@ -597,9 +630,19 @@ watch(
     trafficCharts,
     previewLimit,
     landingPage,
+    showFileServices,
   ],
   () => {
     applyPanelSettings();
+    // Hiding the file service must also leave its page.
+    if (!showFileServices.value && activeSection.value === "file-services") {
+      activeSection.value = visibleNavigationItems.value.some(
+        (item) => item.id === landingPage.value,
+      )
+        ? landingPage.value
+        : "overview";
+      history.replaceState(null, "", `#${activeSection.value}`);
+    }
     if (trafficTimer) restartTrafficTimer();
     synchronizeAutoRefresh();
   },
@@ -613,7 +656,7 @@ watch(showPanelSettings, (open) => {
 });
 
 onMounted(() => {
-  if (!navigationItems.some((item) => item.id === landingPage.value))
+  if (!visibleNavigationItems.value.some((item) => item.id === landingPage.value))
     landingPage.value = "overview";
   applyPanelSettings();
   syncActiveSection();
@@ -744,9 +787,11 @@ onBeforeUnmount(() => {
             ><component :is="item.icon" :size="18" /><span>{{
               item.label
             }}</span
-            ><span v-if="item.id === 'proxy-sites'" class="count">{{
-              hosts.length
-            }}</span><ThemeEmblem v-if="activeAnimeTheme && activeSection===item.id" class="nav-theme-emblem"/></a
+            ><span
+              v-if="item.id === 'proxy-sites'"
+              class="count"
+              >{{ webHosts.length }}</span
+            ><ThemeEmblem v-if="activeAnimeTheme && activeSection===item.id" class="nav-theme-emblem"/></a
           >
         </div>
       </nav>
@@ -789,6 +834,7 @@ onBeforeUnmount(() => {
       v-model:charts="trafficCharts"
       v-model:preview-limit="previewLimit"
       v-model:landing="landingPage"
+      v-model:show-file-services="showFileServices"
       v-model:port="panelListenPort"
       v-model:password="passwordForm"
       :saved-port="storedPanelPort"
@@ -803,7 +849,7 @@ onBeforeUnmount(() => {
       :csrf="csrfToken"
       :role="panelRole"
       :pages="
-        navigationItems.map((item) => ({ id: item.id, label: item.label }))
+        visibleNavigationItems.map((item) => ({ id: item.id, label: item.label }))
       "
       @close="showPanelSettings = false"
       @save-port="savePanelPort"
@@ -817,6 +863,7 @@ onBeforeUnmount(() => {
       v-if="siteFilesHost"
       :host="{
         id: siteFilesHost.id,
+        type: siteFilesHost.type,
         domain: siteFilesHost.domain,
         root_path: siteFilesHost.root_path,
         tls_mode: siteFilesHost.tls_mode,
@@ -931,6 +978,7 @@ onBeforeUnmount(() => {
       <div :key="activeSection" class="workspace-view">
       <OverviewDashboard v-if="activeSection === 'overview'" />
       <ProxySitesPage v-if="activeSection === 'proxy-sites'" />
+      <FileManager v-if="activeSection === 'file-services' && showFileServices" />
       <DnsProvidersPage v-if="activeSection === 'dns-providers'" />
       <CertificatesPage v-if="activeSection === 'certificates'" />
       <Layer4Page v-if="activeSection === 'layer4'" />

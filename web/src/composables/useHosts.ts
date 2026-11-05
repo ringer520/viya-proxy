@@ -9,7 +9,7 @@ import { emptySecurityHeaders, type SitePolicy } from "../policy";
 import type { Host, SiteGroup, WebListener } from "../types";
 import { applyRetryVisible, confirmDeletion, csrfToken, deleteConfirmOptionResult, error, guardWrite, hosts, listSearch, matchesSearch, matchesStatus, saving } from "./useState";
 import { load, performDelete } from "./useRefresh";
-import { ArrowRight, Folder, Globe2 } from "@lucide/vue";
+import { ArrowRight, Folder, FolderOpen, Globe2 } from "@lucide/vue";
 
 // The three site kinds, each with a stable theme-aware accent color so the
 // type picker (and the list rows) can tell them apart at a glance.
@@ -36,6 +36,26 @@ export const siteTypeOptions = [
     icon: ArrowRight,
   },
 ] as const;
+
+// File services live on their own page: a shared directory published for
+// browser browsing plus optional WebDAV, so they are not offered as a Web
+// service type any more.
+export const fileServiceType = {
+  value: "files",
+  label: t("文件服务"),
+  desc: t("共享目录 · WebDAV"),
+  color: "var(--metric-memory)",
+  icon: FolderOpen,
+} as const;
+
+/** Web services (proxy / static / redirect) — everything except file services. */
+export const webHosts = computed(() =>
+  hosts.value.filter((host) => host.type !== "files"),
+);
+/** Shared-directory services shown on the file-services page. */
+export const fileHosts = computed(() =>
+  hosts.value.filter((host) => host.type === "files"),
+);
 
 // ---- enable/disable toggle ----
 export const hostToggling = ref<Record<number, boolean>>({});
@@ -330,6 +350,22 @@ export async function deleteListener() {
     return;
   await persistListeners(webListeners.value.filter((_, i) => i !== index));
 }
+/** Hosts whose WebDAV address was just copied, so the row can confirm inline. */
+export const webdavCopied = ref<number | null>(null);
+export async function copyWebDAVURL(host: Host) {
+  const url = siteURL(host);
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    // Clipboard needs a secure context; fall back to a prompt on plain HTTP.
+    window.prompt(t("复制 WebDAV 地址"), url);
+    return;
+  }
+  webdavCopied.value = host.id;
+  window.setTimeout(() => {
+    if (webdavCopied.value === host.id) webdavCopied.value = null;
+  }, 1600);
+}
 export function siteURL(host: Host) {
   const protocol = host.tls_mode === "none" ? "http" : "https";
   const listener = webListeners.value.find(
@@ -342,7 +378,7 @@ export function siteURL(host: Host) {
 // ---- listing / grouping ----
 export const siteExposureFilter = ref<"all" | "https" | "http">("https");
 export const searchedHosts = computed(() =>
-  hosts.value.filter(
+  webHosts.value.filter(
     (host) =>
       matchesSearch(host.name, host.domain, host.upstream, host.path,...(host.tags||[])) &&
       matchesStatus(host.enabled),
@@ -355,7 +391,7 @@ export const visibleHosts = computed(() =>
   ),
 );
 export const siteRootDomains = computed(() => {
-  const owned = hosts.value.filter(
+  const owned = webHosts.value.filter(
     (host) =>
       host.listener_id === webListeners.value[selectedListener.value]?.id,
   );
@@ -391,6 +427,10 @@ export const siteGroups = computed<SiteGroup[]>(() =>
     }))
     .filter((group) => group.hosts.length),
 );
+
+// ---- file services page ----
+export const fileSearch = ref("");
+export const fileStatusFilter = ref<"all" | "enabled" | "disabled">("all");
 export function suggestedParentDomain() {
   const roots = siteRootDomains.value;
   if (!roots.length) return "";
@@ -466,6 +506,9 @@ export const form = ref({
   rate_limit_window: "1s",
   type: "proxy",
   root_path: "",
+  browse: false,
+  webdav: false,
+  webdav_write: false,
   redirect_target: "",
   redirect_status: 301,
   redirect_keep_path: true,
@@ -473,6 +516,13 @@ export const form = ref({
   max_body_bytes: 0,
   allowed_methods: [] as string[],
   hide_server: false,
+  strip_prefix: false,
+  rewrite_to: "",
+  streaming: false,
+  dial_timeout: "",
+  response_header_timeout: "",
+  maintenance: false,
+  maintenance_message: "",
 });
 
 // Collapsed summary so operators can see what is configured without expanding
@@ -496,6 +546,10 @@ export const siteTypeHint = computed(() => {
   switch (form.value.type) {
     case "static":
       return t("直接托管静态文件，上传后由 Caddy 实时对外服务。");
+    case "files":
+      return t(
+        "共享一个目录：浏览器可看文件列表，WebDAV 客户端可挂载同一地址。",
+      );
     case "redirect":
       return t("把访问者重定向到另一个地址，不转发请求。");
     default:
@@ -636,13 +690,14 @@ export async function refreshSiteStat(id: number) {
 }
 export function refreshStaticSiteStats() {
   for (const h of hosts.value) {
-    if (h.type === "static") void refreshSiteStat(h.id);
+    // Static sites and file services both serve a directory worth counting.
+    if (h.type === "static" || h.type === "files") void refreshSiteStat(h.id);
   }
 }
 export function closeSiteFiles() {
   const host = siteFilesHost.value;
   siteFilesHost.value = null;
-  if (host?.type === "static") void refreshSiteStat(host.id);
+  if (host?.type === "static" || host?.type === "files") void refreshSiteStat(host.id);
 }
 export function openSiteFilesForForm() {
   if (editingID.value === null) return;
@@ -654,7 +709,7 @@ export function openSiteFilesForForm() {
 }
 
 // ---- create / edit / clone / save / delete ----
-export function openCreate(parentDomain?: string) {
+export function openCreate(parentDomain?: string, type: Host["type"] = "proxy") {
   if (!guardWrite()) return;
   editingID.value = null;
   partialSave.value = false;
@@ -684,8 +739,11 @@ export function openCreate(parentDomain?: string) {
     ip_denylist: [] as string[],
     rate_limit_requests: 0,
     rate_limit_window: "1s",
-    type: "proxy",
+    type,
     root_path: "",
+    browse: type === "files",
+    webdav: false,
+    webdav_write: false,
     redirect_target: "",
     redirect_status: 301,
     redirect_keep_path: true,
@@ -693,6 +751,13 @@ export function openCreate(parentDomain?: string) {
     max_body_bytes: 0,
     allowed_methods: [] as string[],
     hide_server: false,
+    strip_prefix: false,
+    rewrite_to: "",
+    streaming: false,
+    dial_timeout: "",
+    response_header_timeout: "",
+    maintenance: false,
+    maintenance_message: "",
   };
   error.value = "";
   show.value = true;
@@ -735,6 +800,9 @@ export function openEdit(host: Host) {
     rate_limit_window: host.rate_limit_window || "1s",
     type: host.type || "proxy",
     root_path: host.root_path || "",
+    browse: !!host.browse,
+    webdav: !!host.webdav,
+    webdav_write: !!host.webdav_write,
     redirect_target: host.redirect_target || "",
     redirect_status: host.redirect_status || 301,
     redirect_keep_path: host.redirect_keep_path !== false,
@@ -746,6 +814,13 @@ export function openEdit(host: Host) {
     max_body_bytes: host.max_body_bytes || 0,
     allowed_methods: host.allowed_methods || [],
     hide_server: !!host.hide_server,
+    strip_prefix: !!host.strip_prefix,
+    rewrite_to: host.rewrite_to || "",
+    streaming: !!host.streaming,
+    dial_timeout: host.dial_timeout || "",
+    response_header_timeout: host.response_header_timeout || "",
+    maintenance: !!host.maintenance,
+    maintenance_message: host.maintenance_message || "",
   };
   error.value = "";
   show.value = true;
@@ -796,6 +871,9 @@ export function cloneHost(host: Host) {
     rate_limit_window: host.rate_limit_window || "1s",
     type: host.type || "proxy",
     root_path: host.root_path || "",
+    browse: !!host.browse,
+    webdav: !!host.webdav,
+    webdav_write: !!host.webdav_write,
     redirect_target: host.redirect_target || "",
     redirect_status: host.redirect_status || 301,
     redirect_keep_path: host.redirect_keep_path !== false,
@@ -807,6 +885,13 @@ export function cloneHost(host: Host) {
     max_body_bytes: host.max_body_bytes || 0,
     allowed_methods: host.allowed_methods || [],
     hide_server: !!host.hide_server,
+    strip_prefix: !!host.strip_prefix,
+    rewrite_to: host.rewrite_to || "",
+    streaming: !!host.streaming,
+    dial_timeout: host.dial_timeout || "",
+    response_header_timeout: host.response_header_timeout || "",
+    maintenance: !!host.maintenance,
+    maintenance_message: host.maintenance_message || "",
   };
   error.value = "";
   show.value = true;
@@ -920,8 +1005,12 @@ export async function save() {
 export async function remove(host: Host) {
   if (!guardWrite()) return;
   const staticSite = host.type === "static";
+  const fileService = host.type === "files";
+  const message = fileService
+    ? tr`确认删除文件服务“${host.domain}”？共享目录里的文件会保留。`
+    : tr`确认删除 Web 服务“${host.domain}”？`;
   if (!(await confirmDeletion(
-    tr`确认删除 Web 服务“${host.domain}”？`,
+    message,
     "确认删除",
     staticSite ? { label: "不要删除静态站点文件和文件夹", checked: false } : undefined,
   ))) return;
