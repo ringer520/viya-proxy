@@ -28,16 +28,21 @@ const refreshLabels: Record<string, string> = { '/api/v1/proxy-hosts': 'Web 服�
 
 // What each page actually reads. Loading only these keeps the first paint to
 // one request per data group instead of the whole console's worth of lists.
+// A page also needs the lists its dialogs offer. The site, DDNS and certificate
+// forms all pick from the DNS credentials, and the site form additionally picks
+// from the custom certificates, so those pages load them up front instead of
+// opening a dialog with an empty dropdown that claims nothing is configured.
 const sectionScopes: Record<string, Scope[]> = {
   overview: ["core", "sites", "layer4", "ddns", "certs", "dns", "bans"],
-  "proxy-sites": ["core", "sites"],
+  "proxy-sites": ["core", "sites", "dns", "certs"],
   "file-services": ["core", "sites"],
   layer4: ["core", "layer4"],
-  ddns: ["core", "ddns"],
-  certificates: ["core", "certs"],
+  ddns: ["core", "ddns", "dns"],
+  certificates: ["core", "certs", "dns"],
   "dns-providers": ["core", "dns"],
   "ip-bans": ["core", "bans"],
-  "access-logs": ["core"],
+  // The log table links each hit back to its ban rule.
+  "access-logs": ["core", "bans"],
   "config-history": ["core"],
 };
 const loadedScopes = new Set<Scope>();
@@ -105,17 +110,20 @@ export async function load() {
 }
 
 /** First visit to a page: fetch only the groups it renders and are still missing. */
-let sectionLoading = false;
+const loadingSections = new Set<string>();
 export async function loadSection(section: string) {
-  if (sectionLoading) return;
+  // Guard per page, not globally: a single flag made a quick A→B switch drop
+  // B's request entirely, leaving that page empty until the user navigated
+  // away and back.
+  if (loadingSections.has(section)) return;
   const scopes = sectionScopes[section] ?? ["core"];
   const list = targets.filter(target => scopes.includes(target.scope) && !loadedScopes.has(target.scope));
   if (!list.length) return;
-  sectionLoading = true;
+  loadingSections.add(section);
   try {
     await execute(list, true);
   } finally {
-    sectionLoading = false;
+    loadingSections.delete(section);
   }
 }
 
