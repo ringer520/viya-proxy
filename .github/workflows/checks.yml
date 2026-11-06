@@ -22,12 +22,16 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      - name: Translation catalog check
+        run: python3 scripts/check_i18n.py
       - name: Frontend lint, types and production build
         run: |
           pnpm --dir web install --frozen-lockfile
           pnpm --dir web lint
           pnpm --dir web typecheck
           pnpm --dir web build
+      - name: Frontend tests
+        run: pnpm --dir web test
       - name: Backend lint
         uses: golangci/golangci-lint-action@v8
         with:

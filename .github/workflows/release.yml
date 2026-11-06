@@ -42,6 +42,9 @@ jobs:
       - name: Stamp build identity
         run: echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
+      - name: Verify README version matches tag
+        run: python3 scripts/check_release_version.py "${{ github.ref_name }}"
+
       - name: Build frontend
         run: |
           pnpm --dir web install --frozen-lockfile
