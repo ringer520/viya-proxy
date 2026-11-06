@@ -17,7 +17,24 @@ async (page) => {
     await page.locator('aside a[href="#'+id+'"]').click()
     await page.locator('main').waitFor()
   }
+  // A page loads the lists its own dialogs pick from: the DDNS form needs the
+  // DNS credential list even though the page itself only renders records.
+  await page.goto(base+'/#ddns')
+  const seen=[]
+  page.on('request',r=>{ if(r.url().includes('/api/v1/'))seen.push(r.url()) })
+  await page.reload()
+  await page.getByText('动态 DNS',{exact:false}).first().waitFor()
+  await page.waitForTimeout(1500)
+  if(!seen.some(url=>url.includes('/api/v1/dns-providers')))
+    throw Error('DDNS page did not load the DNS credential list its dialog needs')
+  if(seen.some(url=>url.includes('/api/v1/ip-bans')))
+    throw Error('DDNS page loaded data no part of it renders')
   // A local list failure must not turn a healthy engine into "offline".
+  // The overview is the page that loads every data group, so the injected
+  // failure is actually requested there — a narrower page would never ask for
+  // dns-providers and the banner would never appear.
+  await page.locator('aside a[href="#overview"]').click()
+  await page.locator('main').waitFor()
   await page.route('**/api/v1/dns-providers',route=>route.fulfill({status:503,json:{error:'Smoke failure'}}))
   await page.reload()
   await page.getByText('引擎正常',{exact:true}).waitFor()
