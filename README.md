@@ -147,7 +147,7 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 固定版本安装：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.5.2 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.5.3 sh
 ```
 
 环境变量必须放在管道右侧。
@@ -235,7 +235,7 @@ uci commit uhttpd && /etc/init.d/uhttpd restart
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.5.2 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.5.3 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 需要 `curl` 或 `wget`、`tar`、`sha256sum`、`netstat`、UCI 与 HTTPS CA 证书（opkg 系安装 `ca-bundle`，apk 系安装 `ca-certificates`）。`/opt` 必须是持久化目录或已挂载的外部存储，下载解压还需 `/tmp` 约 128 MiB 可用空间。安装器不会自动开放 WAN 端口。小内存路由器建议挂外部存储或改用独立 Linux 主机。
@@ -293,6 +293,16 @@ go build ./cmd/viya
 ```
 
 前端产物输出到 `internal/web/dist/`，该目录由构建生成、不入库。请务必先执行 `pnpm --dir web build`，否则 `go build` 会因 `go:embed` 找不到文件而失败。
+
+改动后建议跑一遍：
+
+```sh
+go test ./...
+pnpm --dir web test        # vitest，覆盖按页加载与部分保存重试
+python3 scripts/check_i18n.py
+```
+
+三者都在 CI 的 `checks` 工作流里，漏翻的中文文案或未同步的英文词条会让构建失败。
 
 推送 `v*` 标签会触发 GitHub Actions，构建 amd64 / arm64 / armv7 安装包、SHA-256 文件与多架构 Docker 镜像；版本说明取自 `docs/releases/<tag>.md`。
 
