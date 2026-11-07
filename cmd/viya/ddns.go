@@ -408,6 +408,11 @@ func (a *App) saveDDNS(w http.ResponseWriter, r *http.Request, id int64, create 
 		v.ID = id
 	}
 	writeJSON(w, map[bool]int{true: 201, false: 200}[create], v)
+	// Saving a task is also an instruction to apply it: do not leave the
+	// operator waiting for the next one-minute tick after creating or editing.
+	if v.Enabled {
+		go a.runDDNSOnce(v.ID)
+	}
 }
 
 // sqlResult keeps mutation code small without exposing driver-specific result types.
@@ -508,11 +513,33 @@ func (a *App) runDDNSRecord(w http.ResponseWriter, r *http.Request) {
 func (a *App) beginDDNSRun(id int64) bool {
 	a.ddnsMu.Lock()
 	defer a.ddnsMu.Unlock()
+	if a.ddnsRunning == nil {
+		a.ddnsRunning = make(map[int64]bool)
+	}
 	if a.ddnsRunning[id] {
 		return false
 	}
 	a.ddnsRunning[id] = true
 	return true
+}
+
+// runDDNSOnce applies a saved task immediately, outside the request lifecycle.
+// It shares the in-flight guard with the minute ticker, so a save and a due
+// tick can never update the same record at once. The app context is used
+// instead of the request context: a completed HTTP request must not cancel a
+// DNS write that is still in flight.
+func (a *App) runDDNSOnce(id int64) {
+	if !a.beginDDNSRun(id) {
+		return
+	}
+	defer a.endDDNSRun(id)
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, err := a.executeDDNSRecord(ctx, id, false); err != nil {
+		slog.Warn("DDNS immediate update failed", "record_id", id, "error", err)
+	}
 }
 
 func (a *App) endDDNSRun(id int64) {
@@ -802,6 +829,10 @@ func (a *App) toggleDDNSEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"enabled": *input.Enabled})
+	// Re-enabling a task should publish the current address right away too.
+	if *input.Enabled {
+		go a.runDDNSOnce(id)
+	}
 }
 
 // trackDDNSOutcome raises one alert after two consecutive failures, so a single
