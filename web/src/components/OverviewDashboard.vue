@@ -34,7 +34,7 @@ const counts = computed(() => [
   { label:t('动态 DNS'), count:ddnsRecords.value.length, detail:tr`${ddnsRecords.value.filter(d=>d.enabled).length} 个自动更新`, href:'#ddns', icon:RefreshCw, color:'var(--success)' },
 ])
 const errorRate = computed(() => { const total=Object.values(traffic.value).reduce((n,s)=>n+s.recent.requests,0); return total ? Object.values(traffic.value).reduce((n,s)=>n+s.recent.errors,0)/total*100 : 0 })
-const periods = computed(() => [{id:'24h',label:t('24 小时')},{id:'7d',label:t('7 天')},{id:'30d',label:t('30 天')} ] as const)
+const periods = computed(() => [{id:'24h',label:t('24 小时')},{id:'7d',label:t('7 天')},{id:'30d',label:t('30 天')},{id:'90d',label:t('90 天')} ] as const)
 const ranking = computed(() => trafficRanking.value.slice(0,5))
 const rankingMax = computed(() => Math.max(1,...ranking.value.map(r=>r.bytes)))
 const events = computed(() => [

@@ -380,19 +380,39 @@ func (a *App) ingestTrafficFile(path string) error {
 	}
 	return tx.Commit()
 }
-func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
-	// hourly keeps the 24-hour shape the overview already renders; 7d and 30d
-	// aggregate by day. traffic_hours retains 90 days, so 30d is the ceiling.
+
+// trafficWindow resolves ?range= into an hour count. Presets cover 24h/7d/30d
+// plus days=N for 1-90 days; the hourly table retains 90 days, so that is the
+// real ceiling. Anything unrecognised falls back to the 24-hour view.
+func trafficWindow(r *http.Request) (string, int) {
 	window := strings.TrimSpace(r.URL.Query().Get("range"))
-	hours := 24
 	switch window {
 	case "7d":
-		hours = 24 * 7
+		return window, 24 * 7
 	case "30d":
-		hours = 24 * 30
-	default:
-		window = "24h"
+		return window, 24 * 30
+	case "90d":
+		return window, 24 * 90
 	}
+	if n, ok := parseDaysWindow(window); ok {
+		return window, 24 * n
+	}
+	return "24h", 24
+}
+
+func parseDaysWindow(raw string) (int, bool) {
+	if !strings.HasPrefix(raw, "days=") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(raw, "days="))
+	if err != nil || n < 1 || n > 90 {
+		return 0, false
+	}
+	return n, true
+}
+
+func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
+	window, hours := trafficWindow(r)
 	cutoff := time.Now().Unix()/3600*3600 - int64(hours-1)*3600
 	out := map[int64]*trafficSummary{}
 	summaryFor := func(id int64) *trafficSummary {
@@ -484,16 +504,7 @@ func addTraffic(to *trafficCounters, from trafficCounters) {
 // l4Traffic mirrors siteTraffic for layer4 rules. "requests" carries the
 // connection count so the panel can reuse the same rendering for both.
 func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
-	window := strings.TrimSpace(r.URL.Query().Get("range"))
-	hours := 24
-	switch window {
-	case "7d":
-		hours = 24 * 7
-	case "30d":
-		hours = 24 * 30
-	default:
-		window = "24h"
-	}
+	window, hours := trafficWindow(r)
 	cutoff := time.Now().Unix()/3600*3600 - int64(hours-1)*3600
 	out := map[int64]*trafficSummary{}
 	summaryFor := func(id int64) *trafficSummary {

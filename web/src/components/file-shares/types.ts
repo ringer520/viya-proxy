@@ -47,6 +47,11 @@ export function shareWarnings(share: FileShare): string[] {
   if (share.webdav && share.webdav_write && !share.auth_enabled) {
     warnings.push("write-no-auth");
   }
+  // A plain-HTTP share sends Basic Auth credentials in the clear, so it is
+  // worth flagging even when an account is configured.
+  if (share.tls_mode === "none") {
+    warnings.push("plaintext");
+  }
   if (!share.enabled) {
     warnings.push("disabled");
   }

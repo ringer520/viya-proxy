@@ -73,6 +73,15 @@ describe("shareWarnings", () => {
     expect(shareWarnings(share({ enabled: false }))).toEqual(["disabled"]);
   });
 
+  it("flags plain-HTTP shares even when authenticated", () => {
+    expect(shareWarnings(share({ tls_mode: "none" }))).toEqual(["plaintext"]);
+  });
+
+  it("reports both plaintext and anonymous access together", () => {
+    expect(shareWarnings(share({ tls_mode: "none", auth_enabled: false })))
+      .toEqual(["no-auth", "plaintext"]);
+  });
+
   it("does not flag a non-WebDAV static site as anonymous", () => {
     expect(shareWarnings(share({ type: "static", webdav: false, auth_enabled: false }))).toEqual([]);
   });

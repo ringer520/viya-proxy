@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { formatBytes } from '../format'
 
-const props = defineProps<{ points: { hour: number; bytes: number }[]; granularity?: 'hour' | 'day'; period?: '24h' | '7d' | '30d'; embedded?: boolean }>()
+const props = defineProps<{ points: { hour: number; bytes: number }[]; granularity?: 'hour' | 'day'; period?: '24h' | '7d' | '30d' | '90d'; embedded?: boolean }>()
 
 const W = 720
 const H = 190
@@ -68,7 +68,7 @@ const labels = computed(() => Array.from(new Set([0, .25, .5, .75, 1].map(r=>Mat
 const hovered = ref<number | null>(null)
 const hoverPoint = computed(() => hovered.value === null ? null : props.points[hovered.value] || null)
 const hoverX = computed(() => hovered.value === null ? 0 : x(hovered.value))
-const title = computed(() => props.period === '7d' ? t('7 天流量趋势') : props.period === '30d' ? t('30 天流量趋势') : t('24 小时流量趋势'))
+const title = computed(() => props.period === '90d' ? t('90 天流量趋势') : props.period === '30d' ? t('30 天流量趋势') : props.period === '7d' ? t('7 天流量趋势') : t('24 小时流量趋势'))
 function inspect(event: PointerEvent) {
   const bounds=(event.currentTarget as SVGSVGElement).getBoundingClientRect()
   const position=((event.clientX-bounds.left)/bounds.width*W-PAD_X)/(W-PAD_X*2)

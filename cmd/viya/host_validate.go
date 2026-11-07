@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -57,8 +59,17 @@ func validateHost(h *Host) error {
 		if !h.WebDAV {
 			h.WebDAVWrite = false
 		}
+		// An unauthenticated writable share lets anyone who reaches the address
+		// upload, overwrite and delete files. Read-only public sharing stays
+		// allowed on purpose: publishing a download directory is a real use case.
+		if h.WebDAVWrite && !h.BasicAuthEnabled {
+			return errors.New("允许 WebDAV 写入时必须先开启访问认证")
+		}
 		if strings.TrimSpace(h.RootPath) != "" {
 			if err := validateStaticRoot(h.RootPath); err != nil {
+				return err
+			}
+			if err := validateShareRoot(h.RootPath); err != nil {
 				return err
 			}
 		}
@@ -139,6 +150,39 @@ func validateHost(h *Host) error {
 	}
 	if h.CustomHeaders == nil {
 		h.CustomHeaders = map[string]string{}
+	}
+	return nil
+}
+
+// systemShareRoots are directories a WebDAV share must never publish. The
+// hardened unit hides most of them at the kernel level, but a panel-level
+// refusal names the mistake instead of surfacing a confusing 403 later.
+var systemShareRoots = map[string]string{
+	"/":             "系统根目录",
+	"/bin":          "系统程序目录",
+	"/boot":         "引导分区",
+	"/dev":          "设备节点",
+	"/etc":          "系统配置目录",
+	"/home":         "用户家目录",
+	"/lib":          "系统库目录",
+	"/lib64":        "系统库目录",
+	"/opt":          "第三方程序目录",
+	"/proc":         "内核接口",
+	"/root":         "root 家目录",
+	"/sbin":         "系统程序目录",
+	"/sys":          "内核接口",
+	"/usr":          "系统程序目录",
+	"/var/lib/viya": "面板数据目录",
+	"/var/log":      "系统日志目录",
+}
+
+// validateShareRoot rejects publishing a whole system tree over WebDAV. A share
+// must point at a dedicated data directory; the panel cannot sandbox a client
+// that was handed /etc or /home.
+func validateShareRoot(root string) error {
+	clean := path.Clean(filepath.ToSlash(strings.TrimSpace(root)))
+	if what, bad := systemShareRoots[clean]; bad {
+		return fmt.Errorf("不能把%s发布为共享，请改用专门的数据目录", what)
 	}
 	return nil
 }

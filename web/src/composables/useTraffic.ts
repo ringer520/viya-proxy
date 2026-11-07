@@ -127,16 +127,22 @@ export function hourlyTraffic(host: Host) {
 export function hourlyL4Traffic(rule: Layer4Rule) {
   return forwardHours24.value[rule.id]?.points || emptyHourPoints();
 }
-// Longer windows reuse the same card but aggregate by day: traffic_hours keeps
-// 90 days, so 30d is the widest honest window.
-export const trafficRange = ref<"24h" | "7d" | "30d">("24h");
-export const trafficLoadedRange = ref<"24h" | "7d" | "30d" | null>(null);
+// Longer windows reuse the same card but aggregate by day. traffic_hours keeps
+// 90 days of hourly rows, so 90d is the widest honest window.
+export const trafficRange = ref<"24h" | "7d" | "30d" | "90d">("24h");
+export const trafficLoadedRange = ref<"24h" | "7d" | "30d" | "90d" | null>(null);
 // The window is chosen by the backend, so the series has to be re-fetched.
 watch(trafficRange, () => {
   void refreshTraffic();
 });
 export const trafficDays = computed(() =>
-  trafficRange.value === "30d" ? 30 : trafficRange.value === "7d" ? 7 : 0,
+  trafficRange.value === "90d"
+    ? 90
+    : trafficRange.value === "30d"
+      ? 30
+      : trafficRange.value === "7d"
+        ? 7
+        : 0,
 );
 export const trafficDayStart = computed(() =>
   Math.floor(Date.now() / 86400000) * 86400,

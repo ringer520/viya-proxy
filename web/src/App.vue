@@ -533,7 +533,7 @@ const pageInstructions: Record<string, string[]> = {
   ],
   "file-services": [
     t("卡片集中展示静态站点与共享目录：目录位置、访问认证、读写权限与 WebDAV 地址一目了然。"),
-    t("点“管理文件”上传与编辑站点内容；右上角“WebDAV 设置”配置共享账号和读写权限。"),
+    t("点“管理文件”上传与编辑站点内容；右上角“新建共享”创建支持 HTTPS 与访问认证的 WebDAV 共享。"),
   ],
   layer4: [
     t("填写 Debian 主机监听地址、端口和上游 host:port；选择 TCP、UDP 或两者。"),

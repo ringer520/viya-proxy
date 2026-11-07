@@ -2167,5 +2167,19 @@
   "确需网页版文件管理器时，用独立容器限定挂载范围，避免扩大面板权限。": "If you do need a web file manager, run it in a separate container with limited mounts instead of widening the panel's privileges.",
   "读取共享列表失败": "Could not read the share list",
   "文件内容在「文件与共享」管理": "File contents are managed in Files & Shares",
-  "保存后可在「文件与共享」的卡片里上传共享目录的文件。": "After saving, upload files from the card in Files & Shares."
+  "保存后可在「文件与共享」的卡片里上传共享目录的文件。": "After saving, upload files from the card in Files & Shares.",
+  "90 天": "90 days",
+  "90 天流量趋势": "90-day traffic trend",
+  "WebDAV 设置已退役，请在「文件与共享」中新建文件服务站点": "WebDAV settings have been retired. Create a file service site in Files & Shares instead.",
+  "允许 WebDAV 写入时必须先开启访问认证": "WebDAV write access requires authentication",
+  "在 Apps 中单独开启 WebDAV 服务，记录监听端口": "Enable the WebDAV service in Apps and note the listening port",
+  "填 NAS 的 WebDAV 地址，例如 https://192.168.1.10:5006；自签名证书用内部签发": "Point it at the NAS WebDAV address, e.g. https://192.168.1.10:5006; use the internal CA for self-signed certificates",
+  "已有 NAS？直接反代它的 WebDAV": "Already have a NAS? Reverse proxy its WebDAV",
+  "控制面板 → 文件服务 → WebDAV，默认端口 5005 / 5006": "Control Panel → File Services → WebDAV, default ports 5005 / 5006",
+  "新建共享": "New share",
+  "明文 HTTP": "Plain HTTP",
+  "此共享走明文 HTTP、没有证书，账号密码可被中间人读取。": "This share runs over plain HTTP with no certificate, so credentials can be read by anyone in between.",
+  "点右上角“新建共享”发布一个目录，支持 HTTPS、访问认证与 WebDAV。": "Use New share in the top right to publish a directory with HTTPS, access authentication and WebDAV.",
+  "群晖、威联通、TrueNAS 都能开启 WebDAV。在「Web 服务」里新建反向代理指向它，就能复用面板的 HTTPS 证书、访问认证与限速，不需要额外进程或系统权限。": "Synology, QNAP and TrueNAS all offer WebDAV. Add a reverse proxy in Web services pointing at it to reuse the panel HTTPS certificate, access authentication and rate limits, with no extra process or system privilege.",
+  "点“管理文件”上传与编辑站点内容；右上角“新建共享”创建支持 HTTPS 与访问认证的 WebDAV 共享。": "Use Manage files to upload and edit site contents; New share in the top right creates a WebDAV share with HTTPS and access authentication."
 }
