@@ -185,7 +185,7 @@ const themeOptions=[
             <label class="settings-row"><span><strong>{{t('简洁显示模式')}}</strong><small>{{t('自动隐藏界面中的说明文字，让页面更简洁')}}</small></span><input v-model="simpleDisplay" class="settings-switch" type="checkbox" role="switch"/></label>
             <label class="settings-row"><span><strong>{{t('紧凑布局')}}</strong><small>{{t('减少站点和任务列表的留白')}}</small></span><input v-model="compact" class="settings-switch" type="checkbox" role="switch"/></label>
             <label class="settings-row"><span><strong>{{t('显示流量趋势图')}}</strong><small>{{t('关闭后保留请求数与流量统计')}}</small></span><input v-model="charts" class="settings-switch" type="checkbox" role="switch"/></label>
-            <label class="settings-row"><span><strong>{{t('显示文件服务')}}</strong><small>{{t('在侧边栏显示文件服务入口')}}</small></span><input v-model="showFileServices" class="settings-switch" type="checkbox" role="switch"/></label>
+            <label class="settings-row"><span><strong>{{t('显示文件与共享')}}</strong><small>{{t('在侧边栏显示文件与共享入口')}}</small></span><input v-model="showFileServices" class="settings-switch" type="checkbox" role="switch"/></label>
             <label class="settings-row"><span><strong>{{t('默认进入页面')}}</strong><small>{{t('未指定页面地址时使用')}}</small></span><select v-model="landing"><option v-for="page in pages" :key="page.id" :value="page.id">{{page.label}}</option></select></label>
           </div>
           <button class="settings-text-button" type="button" @click="emit('resetPreferences')">{{t('恢复浏览器默认偏好')}}</button>

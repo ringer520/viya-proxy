@@ -126,3 +126,5 @@ onMounted(loadSettings);
     </div>
   </div>
 </template>
+
+<style src="./webdav-modal.css"></style>

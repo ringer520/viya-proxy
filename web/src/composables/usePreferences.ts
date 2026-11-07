@@ -42,8 +42,9 @@ export const pauseHidden = ref(localStorage.getItem("viya-pause-hidden") !== "fa
 export const trafficCharts = ref(localStorage.getItem("viya-traffic-charts") !== "false");
 export const previewLimit = ref(storedNumber("viya-log-preview-limit", [3, 5, 10], 5));
 export const landingPage = ref(localStorage.getItem("viya-landing-page") || "overview");
-// File service is opt-in: hidden from the sidebar unless the operator turns it
-// on in panel settings.
+// Files & Shares is opt-in for now: hidden from the sidebar unless the operator
+// turns it on in panel settings. The storage key is kept for backwards
+// compatibility with existing installations.
 export const showFileServices = ref(localStorage.getItem("viya-show-file-services") === "true");
 export const documentHidden = ref(document.hidden);
 export const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");

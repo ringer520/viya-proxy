@@ -14,7 +14,7 @@
 
 <p align="center"><a href="https://viya.861010.xyz">Website · viya.861010.xyz</a></p>
 
-**Contents:** [Quick start](#quick-start) · [Security](#security) · [Features](#features) · [Screenshots](#screenshots) · [Installation](#installation) · [Backups](#backups-and-restore) · [Build from source](#build-from-source) · [Uninstall](#uninstall) · [File service reach](docs/文件服务权限.md)
+**Contents:** [Quick start](#quick-start) · [Security](#security) · [Features](#features) · [Screenshots](#screenshots) · [Installation](#installation) · [Backups](#backups-and-restore) · [Build from source](#build-from-source) · [Uninstall](#uninstall) · [Files & Shares](docs/文件服务权限.md)
 
 ## Quick start
 
@@ -80,7 +80,7 @@ sudo systemctl restart viya
 - **Keep the master key separate.** `/etc/viya/secrets/master.key` decides whether stored DNS credentials can be decrypted. Storing it next to the backup means the credentials are not encrypted at all.
 - **Exported configuration contains live credentials and certificates.** Do not share it.
 - **Any reverse proxy in front of the panel must be in `VIYA_TRUSTED_PROXIES`.** Otherwise every visitor looks like one address, which breaks login throttling, region bans and the audit log, and turns "force HTTPS" into a redirect loop.
-- **The server file service is read-only by default.** Its reach is decided by the run user and systemd restrictions; see the [file service reach notes](docs/文件服务权限.md) (Chinese).
+- **Always require authentication on shared folders.** A file service site without Basic Auth is reachable by anyone who knows the address, and enabling write access raises the risk further. See [Files & Shares](docs/文件服务权限.md) (Chinese) for the permission boundaries.
 
 ## Features
 
@@ -94,7 +94,7 @@ sudo systemctl restart viya
 | Access control | IP/CIDR bans, access rules, login throttling, automatic banning, security headers |
 | Operations | Resource monitoring, access and program logs, traffic trends, configuration history, backup and restore |
 | Accounts and UI | Administrator and read-only accounts, Chinese/English, six base themes plus three anime themes |
-| Files | Per-site file management (upload, edit, rename, delete); a read-only server file service, hidden by default |
+| Files & Shares | Static sites and shared folders in one hub (upload, edit, rename, delete), WebDAV shares with authentication status; entry hidden by default, enable it in panel settings |
 
 ## Screenshots
 

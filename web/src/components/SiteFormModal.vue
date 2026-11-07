@@ -260,7 +260,7 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
             <strong>{{ t("文件服务") }}</strong>
             <small>{{ t("共享目录 · WebDAV") }}</small>
           </span>
-          <span class="site-type-locked-note">{{ t("文件内容在文件服务页管理") }}</span>
+          <span class="site-type-locked-note">{{ t("文件内容在「文件与共享」管理") }}</span>
         </div>
         <small class="site-type-hint">{{ siteTypeHint }}</small>
       </div>
@@ -398,7 +398,7 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
             <span class="static-manage-text"><strong>{{ t("管理共享目录文件") }}</strong><small>{{ t("上传、删除共享目录里的文件") }}</small></span>
             <span class="static-manage-cta">{{ t("打开") }} →</span>
         </button>
-        <p v-else class="inline-help">{{ t("保存后可在“文件服务”页的卡片里上传共享目录的文件。") }}</p>
+        <p v-else class="inline-help">{{ t("保存后可在「文件与共享」的卡片里上传共享目录的文件。") }}</p>
         <label
           >{{ t("共享目录")
           }}<input

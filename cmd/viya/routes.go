@@ -55,17 +55,8 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/proxy-hosts/{id}/files/upload", a.requireAuth(http.HandlerFunc(a.uploadSiteFiles)))
 	mux.Handle("POST /api/v1/proxy-hosts/{id}/files/mkdir", a.requireAuth(http.HandlerFunc(a.mkdirSiteFile)))
 	mux.Handle("DELETE /api/v1/proxy-hosts/{id}/files", a.requireAuth(http.HandlerFunc(a.deleteSiteFile)))
-	// Server-wide file manager (rooted at VIYA_FILES_ROOT, default "/").
-	mux.Handle("GET /api/v1/files/browse", a.requireAuth(http.HandlerFunc(a.listServerFiles)))
-	mux.Handle("GET /api/v1/files/tree", a.requireAuth(http.HandlerFunc(a.serverFileTree)))
-	mux.Handle("POST /api/v1/files/mkdir", a.requireAuth(http.HandlerFunc(a.mkdirServerFile)))
-	mux.Handle("POST /api/v1/files/create", a.requireAuth(http.HandlerFunc(a.touchServerFile)))
-	mux.Handle("POST /api/v1/files/upload", a.requireAuth(http.HandlerFunc(a.uploadServerFiles)))
-	mux.Handle("GET /api/v1/files/content", a.requireAuth(http.HandlerFunc(a.serverFileText)))
-	mux.Handle("PUT /api/v1/files/content", a.requireAuth(http.HandlerFunc(a.serverFileText)))
-	mux.Handle("GET /api/v1/files/download", a.requireAuth(http.HandlerFunc(a.downloadServerFile)))
-	mux.Handle("POST /api/v1/files/rename", a.requireAuth(http.HandlerFunc(a.renameServerFile)))
-	mux.Handle("DELETE /api/v1/files", a.requireAuth(http.HandlerFunc(a.deleteServerFile)))
+	// Read-only inventory of static sites and file shares for the hub page.
+	mux.Handle("GET /api/v1/file-shares", a.requireAuth(http.HandlerFunc(a.listFileShares)))
 	// WebDAV share configuration (single files-type host).
 	mux.Handle("GET /api/v1/webdav-settings", a.requireAuth(http.HandlerFunc(a.getWebDAVSettings)))
 	mux.Handle("PUT /api/v1/webdav-settings", a.requireAuth(http.HandlerFunc(a.saveWebDAVSettings)))

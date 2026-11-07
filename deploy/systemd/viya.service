@@ -13,9 +13,9 @@ StartLimitIntervalSec=60
 [Service]
 Type=simple
 # Least privilege: the panel and its Caddy child run as an unprivileged user.
-# The file service is read-only by default; writes stay limited to the two
-# ReadWritePaths below. Unlock more (VIYA_FILES_READONLY=0 + extra
-# ReadWritePaths) only for a dedicated data directory, never for /.
+# Panel writes stay limited to the ReadWritePaths below. If a WebDAV share
+# needs write access outside the managed data dir, add only that dedicated
+# directory via a drop-in's ReadWritePaths, never /.
 User=viya
 Group=viya
 Environment=VIYA_LISTEN=0.0.0.0:8181

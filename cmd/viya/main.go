@@ -128,8 +128,6 @@ type App struct {
 	certProgressMu sync.RWMutex
 	certProgress   map[string]certificateProgress
 	dataDir        string
-	filesRoot      string
-	filesReadOnly  bool
 	failCounts     map[string][]time.Time
 	applyKick      chan struct{}
 	ddnsRunning    map[int64]bool
@@ -228,7 +226,7 @@ func main() {
 		slog.Error("invalid Caddy HTTP listener", "error", err)
 		os.Exit(1)
 	}
-	app := &App{db: db, adminURL: adminURL, adminListen: adminListen, httpListen: httpListen, caddyBin: env("VIYA_CADDY_BIN", filepath.Join("bin", "caddy")), secureCookies: secureCookies, trustedProxies: trustedProxies, ctx: runCtx, masterKey: masterKey, dataDir: dataDir, filesRoot: env("VIYA_FILES_ROOT", "/"), filesReadOnly: env("VIYA_FILES_READONLY", "1") != "0", failCounts: make(map[string][]time.Time), certProgress: make(map[string]certificateProgress), applyKick: make(chan struct{}, 1), ddnsRunning: make(map[int64]bool)}
+	app := &App{db: db, adminURL: adminURL, adminListen: adminListen, httpListen: httpListen, caddyBin: env("VIYA_CADDY_BIN", filepath.Join("bin", "caddy")), secureCookies: secureCookies, trustedProxies: trustedProxies, ctx: runCtx, masterKey: masterKey, dataDir: dataDir, failCounts: make(map[string][]time.Time), certProgress: make(map[string]certificateProgress), applyKick: make(chan struct{}, 1), ddnsRunning: make(map[int64]bool)}
 	app.configureProgramLogging()
 	app.loadApplicationJournal()
 	if err := app.initListenerSites(); err != nil {

@@ -1,0 +1,317 @@
+/* Files & Shares hub. Uses the global theme tokens so all palettes work. */
+.file-hub {
+  display: grid;
+  gap: 18px;
+  padding: 4px 2px 28px;
+}
+.hub-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.hub-head-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  color: var(--accent);
+}
+.hub-head-title h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+}
+.hub-head-title p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  max-width: 560px;
+}
+.hub-head-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hub-alert {
+  margin: 0;
+  padding: 10px 13px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #dc2626;
+  background: color-mix(in srgb, #dc2626 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, #dc2626 25%, transparent);
+}
+.hub-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 54px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.hub-empty strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.hub-spin {
+  animation: viya-spin 0.8s linear infinite;
+}
+
+.hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 14px;
+}
+.share-card {
+  display: grid;
+  gap: 11px;
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  min-width: 0;
+}
+.share-card.is-disabled {
+  opacity: 0.62;
+}
+.share-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.share-domain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--accent);
+}
+.share-domain strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-type {
+  flex: none;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-2, var(--accent)) 14%, var(--surface));
+  color: var(--accent-2, var(--accent));
+  border: 1px solid color-mix(in srgb, var(--accent-2, var(--accent)) 30%, transparent);
+}
+.share-type.static {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.share-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.share-path span {
+  flex: none;
+}
+.share-path code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--text);
+}
+.share-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.share-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.share-badge.ok {
+  color: #27814a;
+  background: color-mix(in srgb, #22a559 10%, var(--surface));
+  border-color: color-mix(in srgb, #22a559 26%, transparent);
+}
+.share-badge.warn {
+  color: #b45309;
+  background: color-mix(in srgb, #f59e0b 12%, var(--surface));
+  border-color: color-mix(in srgb, #f59e0b 30%, transparent);
+}
+.share-badge.off {
+  color: var(--muted);
+}
+.share-warning,
+.share-ok,
+.share-muted {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.share-warning {
+  color: #b45309;
+}
+.share-ok {
+  color: #27814a;
+}
+.share-muted {
+  color: var(--muted);
+}
+.share-address {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  min-width: 0;
+}
+.share-address code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--text);
+}
+.share-actions {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.share-actions .secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  padding: 6px 10px;
+  text-decoration: none;
+}
+.mount-list {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.mount-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.mount-label {
+  flex: none;
+  width: 60px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.mount-row code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--text);
+}
+.mount-note {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.hub-guide {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.hub-guide h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.hub-guide > p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.guide-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+.guide-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.guide-item strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.guide-item span {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.guide-command {
+  display: block;
+  overflow-x: auto;
+  padding: 9px 11px;
+  border-radius: 7px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 10.5px;
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .hub-grid {
+    grid-template-columns: 1fr;
+  }
+  .hub-head-actions {
+    width: 100%;
+  }
+}

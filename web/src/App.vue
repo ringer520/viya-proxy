@@ -33,7 +33,7 @@ const asyncPage = (loader: () => Promise<{ default: Component }>) =>
   defineAsyncComponent({ loader, loadingComponent: PageLoading, delay: 150, timeout: 20000 });
 const OverviewDashboard = asyncPage(() => import("./components/OverviewDashboard.vue"));
 const ProxySitesPage = asyncPage(() => import("./components/ProxySitesPage.vue"));
-const FileManager = asyncPage(() => import("./components/FileManager.vue"));
+const FileHub = asyncPage(() => import("./components/FileHub.vue"));
 const DnsProvidersPage = asyncPage(() => import("./components/DnsProvidersPage.vue"));
 const CertificatesPage = asyncPage(() => import("./components/CertificatesPage.vue"));
 const Layer4Page = asyncPage(() => import("./components/Layer4Page.vue"));
@@ -441,10 +441,12 @@ const navigationItems = [
     run: () => openL4(),
   },
   {
+    // Internal id stays "file-services" so saved landing pages and #bookmarks
+    // keep resolving after the server file manager was replaced by the hub.
     id: "file-services",
     group: t("网络服务"),
-    label: t("文件服务"),
-    description: t("管理服务器上的文件，并配置 WebDAV 共享目录。"),
+    label: t("文件与共享"),
+    description: t("查看站点文件与 WebDAV 共享目录、认证状态和连接地址。"),
     icon: FolderOpen,
   },
   {
@@ -498,7 +500,7 @@ const navigationItems = [
     icon: History,
   },
 ];
-// File service stays hidden until the operator enables it in panel settings.
+// Files & Shares stays hidden until the operator enables it in panel settings.
 const visibleNavigationItems = computed(() =>
   showFileServices.value
     ? navigationItems
@@ -530,8 +532,8 @@ const pageInstructions: Record<string, string[]> = {
     t("日志图标支持悬浮预览；克隆可复用配置；删除前会再次确认。"),
   ],
   "file-services": [
-    t("直接浏览与管理服务器上的文件：左侧目录树、右侧文件列表，支持上传、新建、编辑、预览、下载、重命名与删除。"),
-    t("右上角“WebDAV 设置”可把任意一个目录发布为带账号与读写权限的 WebDAV 共享。"),
+    t("卡片集中展示静态站点与共享目录：目录位置、访问认证、读写权限与 WebDAV 地址一目了然。"),
+    t("点“管理文件”上传与编辑站点内容；右上角“WebDAV 设置”配置共享账号和读写权限。"),
   ],
   layer4: [
     t("填写 Debian 主机监听地址、端口和上游 host:port；选择 TCP、UDP 或两者。"),
@@ -637,7 +639,7 @@ watch(
   ],
   () => {
     applyPanelSettings();
-    // Hiding the file service must also leave its page.
+    // Hiding Files & Shares must also leave its page.
     if (!showFileServices.value && activeSection.value === "file-services") {
       activeSection.value = visibleNavigationItems.value.some(
         (item) => item.id === landingPage.value,
@@ -965,7 +967,7 @@ onBeforeUnmount(() => {
       <div :key="activeSection" class="workspace-view">
       <OverviewDashboard v-if="activeSection === 'overview'" />
       <ProxySitesPage v-if="activeSection === 'proxy-sites'" />
-      <FileManager v-if="activeSection === 'file-services' && showFileServices" />
+      <FileHub v-if="activeSection === 'file-services' && showFileServices" />
       <DnsProvidersPage v-if="activeSection === 'dns-providers'" />
       <CertificatesPage v-if="activeSection === 'certificates'" />
       <Layer4Page v-if="activeSection === 'layer4'" />
