@@ -130,6 +130,11 @@ for item in shlex.split(environment):
     if "=" in item:
         key, value = item.split("=", 1)
         settings[key] = value
+# The installer deliberately defaults to a wildcard bind so a fresh server is
+# reachable from the LAN. This differs from the unconfigured binary's safe
+# 127.0.0.1 default; set VIYA_INSTALL_LISTEN=<LAN_IP>:8181 for a narrower
+# bind. Since v0.6.3 a concrete LAN bind automatically gains loopback listeners
+# in the same process, so local checks keep working without 0.0.0.0.
 listen = override or settings.get("VIYA_LISTEN") or settings.get("CRPM_LISTEN") or "0.0.0.0:8181"
 if listen.startswith("["):
     host, sep, port = listen[1:].partition("]:")

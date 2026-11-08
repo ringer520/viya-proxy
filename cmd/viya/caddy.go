@@ -75,7 +75,7 @@ func (a *App) superviseCaddy(configPath string, firstReady chan<- error) {
 		if readyErr == nil {
 			a.setCaddyReady(true)
 			if err := a.apply(a.ctx); err != nil {
-				slog.Error("saved proxy rules could not be applied; inspect configuration history")
+				slog.Error("saved proxy rules could not be applied; inspect the program logs")
 			} else {
 				slog.Info("saved proxy rules reconciled")
 			}

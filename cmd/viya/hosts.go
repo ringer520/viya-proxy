@@ -141,7 +141,7 @@ func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
 	}
 	h.ID, _ = res.LastInsertId()
 	if err := a.apply(r.Context()); err != nil {
-		slog.Error("Caddy proxy-host apply failed; inspect redacted configuration history")
+		slog.Error("Caddy proxy-host apply failed; inspect the program logs")
 		failSavedApplication(w)
 		return
 	}
@@ -235,7 +235,7 @@ func (a *App) updateHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.apply(r.Context()); err != nil {
-		slog.Error("Caddy proxy-host apply failed; inspect redacted configuration history")
+		slog.Error("Caddy proxy-host apply failed; inspect the program logs")
 		failSavedApplication(w)
 		return
 	}
@@ -333,7 +333,7 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.apply(r.Context()); err != nil {
-		slog.Error("Caddy proxy-host apply failed; inspect redacted configuration history")
+		slog.Error("Caddy proxy-host apply failed; inspect the program logs")
 		failSavedApplication(w)
 		return
 	}

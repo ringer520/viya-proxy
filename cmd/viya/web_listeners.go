@@ -83,7 +83,7 @@ func (a *App) listenerPortAvailable(ctx context.Context, port int, protocol stri
 	if port < 1 || port > 65535 {
 		return errors.New("端口范围为 1–65535")
 	}
-	for _, address := range []string{a.adminListen, env("VIYA_LISTEN", "127.0.0.1:8181")} {
+	for _, address := range []string{a.adminListen, env("VIYA_LISTEN", defaultPanelListen)} {
 		_, p, _ := net.SplitHostPort(address)
 		if p == strconv.Itoa(port) {
 			return errors.New("此端口被管理接口占用")

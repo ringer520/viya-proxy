@@ -147,7 +147,7 @@ With a host firewall enabled, allow the panel TCP port from your LAN as well as 
 Pin a release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.2 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.3 sh
 ```
 
 Environment variables must stay on the right side of the pipe.
@@ -164,6 +164,16 @@ sudo systemctl restart viya.service
 ```
 
 systemd installs can check for and apply updates from panel settings; Docker deployments update by pulling a new image.
+
+**Run only one panel instance.** An unconfigured binary defaults `VIYA_LISTEN` to `127.0.0.1:8181` (loopback only); the systemd unit overrides it with a LAN address. Since v0.6.3, binding to a concrete LAN IP makes **the same process** also listen on `127.0.0.1:<port>` (and `[::1]` when IPv6 is available). Local health checks, self-proxy sites and LAN clients therefore reach the same accounts and sites, without exposing the panel on any other interface. A wildcard or loopback bind already covers loopback, so no extra listener is created.
+
+```sh
+ss -lntp | grep 8181                                    # several lines are fine, but all must belong to the same viya.service PID
+sudo journalctl -u viya.service | grep 'Viya API listening'   # startup log includes addresses / data_dir / version / pid
+/opt/viya/bin/viya version                              # prints the build and exits; never starts the server
+```
+
+If a second listener belongs to a different PID, stop that process with `sudo kill <PID>`. Viya takes an instance lock on the data directory, so a duplicate start is refused with the directory in the error; it also warns when the panel port is already bound on another address. Running the bare binary without environment variables now fails immediately because its default loopback port is already owned by the service, instead of silently creating a second panel.
 
 </details>
 
@@ -235,7 +245,7 @@ Pin a version and port:
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.6.2 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.6.3 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 Requires `curl` or `wget`, `tar`, `sha256sum`, `netstat`, UCI and HTTPS CA certificates (`ca-bundle` on opkg systems, `ca-certificates` on apk systems). `/opt` must be persistent or an attached external volume, and downloads need roughly 128 MiB free in `/tmp`. The installer never opens WAN ports on its own. On low-memory routers, prefer external storage or a separate Linux host.

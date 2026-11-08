@@ -157,6 +157,11 @@ var domainRE = regexp.MustCompile(`(?i)^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a
 var headerNameRE = regexp.MustCompile(`^[A-Za-z0-9!#$%&'*+.^_` + "`" + `|~-]+$`)
 
 func main() {
+	// Never treat a stray argument as "start the server". `viya version` used
+	// to launch a full second panel with its own data directory.
+	if runCLI(os.Args[1:]) {
+		return
+	}
 	runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	dataDir := env("VIYA_DATA_DIR", "./data")
@@ -170,6 +175,13 @@ func main() {
 		slog.Error("create data dir", "error", err)
 		os.Exit(1)
 	}
+	releaseLock, lockErr := acquireInstanceLock(dataDir)
+	if lockErr != nil {
+		slog.Error("instance lock unavailable", "error", lockErr,
+			"hint", "stop the other Viya process using this data directory, or point VIYA_DATA_DIR at the intended one")
+		os.Exit(1)
+	}
+	defer releaseLock()
 	if err := migrateLegacyDatabaseFilename(dataDir); err != nil {
 		slog.Error("migrate legacy database filename", "error", err)
 		os.Exit(1)
@@ -256,7 +268,7 @@ func main() {
 	go app.watchBanExpiry()
 	go app.watchTraffic()
 	go app.applyWorker()
-	addr := env("VIYA_LISTEN", "127.0.0.1:8181")
+	addr := env("VIYA_LISTEN", defaultPanelListen)
 	if _, err := app.restoreExpiredPanelPort(runCtx); err != nil {
 		slog.Error("restore expired panel port", "error", err)
 		os.Exit(1)
@@ -269,8 +281,10 @@ func main() {
 		}
 	}
 	// Bind before announcing readiness: a port clash must fail loudly with an
-	// actionable message instead of logging "listening" and then dying.
-	listener, err := net.Listen("tcp", addr)
+	// actionable message instead of logging "listening" and then dying. The
+	// wildcard probe must run before our own loopback companions are bound.
+	warnOnSharedPanelPort(addr)
+	listeners, boundAddrs, err := openPanelListeners(addr)
 	if err != nil {
 		slog.Error("panel port unavailable",
 			"address", addr,
@@ -282,25 +296,35 @@ func main() {
 	go app.watchPanelConfirmation()
 	go app.watchAccessRules()
 	go app.watchRecoveryBackups()
-	slog.Info("Viya API listening", "address", addr)
+	slog.Info("Viya API listening", "address", addr, "addresses", boundAddrs, "data_dir", dataDir,
+		"version", version, "commit", buildCommit, "pid", os.Getpid())
+	warnLoopbackSelfProxies(runCtx, db, boundAddrs)
 	// WriteTimeout must stay above the slowest business operation (DDNS run 35s,
 	// configuration import 90s); otherwise Go truncates a response after the
 	// work already succeeded and operators retry the same import twice.
 	server := &http.Server{Handler: securityHeaders(logRequests(recoverPanic(app.panelAccessGuard(mux)))), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
-	serveErr := make(chan error, 1)
-	go func() { serveErr <- server.Serve(listener) }()
+	// Every listener shares this server (and therefore one handler, one set of
+	// sessions and one database). Shutdown closes all of them together.
+	serveErr := make(chan error, len(listeners))
+	for _, ln := range listeners {
+		go func(l net.Listener) { serveErr <- server.Serve(l) }(ln)
+	}
+	consumed := 0
 	select {
 	case err := <-serveErr:
+		consumed = 1
 		if !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("http server", "error", err)
 			os.Exit(1)
 		}
 	case <-runCtx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			slog.Warn("HTTP server shutdown", "error", err)
-		}
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Warn("HTTP server shutdown", "error", err)
+	}
+	for i := consumed; i < len(listeners); i++ {
 		if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Warn("HTTP server serve", "error", err)
 		}

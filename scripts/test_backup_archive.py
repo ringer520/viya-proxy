@@ -68,5 +68,12 @@ class BackupTests(unittest.TestCase):
         self.archive = self.data / 'backup.tar.gz'
         with self.assertRaises(ValueError): self.backup()
 
+    def test_instance_lock_is_runtime_state_not_backup_content(self):
+        (self.data / 'viya.lock').write_text('pid=1234\n')
+        self.backup()
+        target = self.root / 'restored'
+        verify(self.archive, target)
+        self.assertFalse((target / 'data/viya.lock').exists())
+
 
 if __name__ == '__main__': unittest.main()

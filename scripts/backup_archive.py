@@ -46,7 +46,10 @@ def create(args):
                 if p.is_symlink(): excluded.append(p.relative_to(root).as_posix()); directories.remove(name)
             for name in files:
                 p = Path(base) / name; rel = p.relative_to(root)
-                if name in ('master.key', 'viya.db', 'crpm.db') or name.startswith(('viya.db-', 'crpm.db-')) or p == key: continue
+                # viya.lock is a kernel-held instance lock, not persistent state:
+                # copying it into an archive (and restoring it elsewhere) makes
+                # no sense and could confuse a reader of the manifest.
+                if name in ('master.key', 'viya.db', 'crpm.db', 'viya.lock') or name.startswith(('viya.db-', 'crpm.db-')) or p == key: continue
                 if p.is_symlink() or not p.is_file() or name.startswith(('access', 'l4')) and '.log' in name:
                     excluded.append(rel.as_posix()); continue
                 dest = data / rel; dest.parent.mkdir(parents=True, exist_ok=True)
