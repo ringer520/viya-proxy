@@ -92,9 +92,9 @@ sudo systemctl restart viya
 | DNS 凭据 | Cloudflare、DNSPod、阿里云等；凭据用独立主密钥加密存储 |
 | TCP / UDP 转发 | 单协议或双协议规则，与 Web 服务分别统计近 30 天连接与流量 |
 | 访问安全 | IP/CIDR 封禁、访问控制、登录限流、自动封禁、安全响应头 |
-| 运行维护 | 资源监控、访问日志、程序日志、流量趋势、配置历史、备份与恢复 |
+| 运行维护 | 资源监控、访问日志、程序日志、流量趋势（最长 90 天）、配置历史、备份与恢复 |
 | 账户与界面 | 管理员与只读账号、中英文、六套基础主题与三套二次元主题 |
-| 文件与共享 | 静态站点与共享目录集中管理（上传、编辑、重命名、删除）、WebDAV 共享与认证状态；入口默认隐藏，可在面板设置里打开 |
+| 文件与共享 | 静态站点与共享目录集中管理（上传、编辑、重命名、删除）、WebDAV 共享（HTTPS、访问认证、读写开关）；入口默认隐藏，可在面板设置里打开 |
 
 ## 界面预览
 
@@ -147,7 +147,7 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 固定版本安装：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.5.3 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.1 sh
 ```
 
 环境变量必须放在管道右侧。
@@ -235,7 +235,7 @@ uci commit uhttpd && /etc/init.d/uhttpd restart
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.5.3 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.6.1 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 需要 `curl` 或 `wget`、`tar`、`sha256sum`、`netstat`、UCI 与 HTTPS CA 证书（opkg 系安装 `ca-bundle`，apk 系安装 `ca-certificates`）。`/opt` 必须是持久化目录或已挂载的外部存储，下载解压还需 `/tmp` 约 128 MiB 可用空间。安装器不会自动开放 WAN 端口。小内存路由器建议挂外部存储或改用独立 Linux 主机。

@@ -92,9 +92,9 @@ sudo systemctl restart viya
 | DNS credentials | Cloudflare, DNSPod, Alibaba Cloud and others; encrypted at rest with a separate master key |
 | TCP / UDP forwarding | Single- or dual-protocol rules with 30-day connection and traffic stats, counted separately from web traffic |
 | Access control | IP/CIDR bans, access rules, login throttling, automatic banning, security headers |
-| Operations | Resource monitoring, access and program logs, traffic trends, configuration history, backup and restore |
+| Operations | Resource monitoring, access and program logs, traffic trends up to 90 days, configuration history, backup and restore |
 | Accounts and UI | Administrator and read-only accounts, Chinese/English, six base themes plus three anime themes |
-| Files & Shares | Static sites and shared folders in one hub (upload, edit, rename, delete), WebDAV shares with authentication status; entry hidden by default, enable it in panel settings |
+| Files & Shares | Static sites and shared folders in one hub (upload, edit, rename, delete), WebDAV shares with HTTPS, authentication and a read/write switch; entry hidden by default, enable it in panel settings |
 
 ## Screenshots
 
@@ -147,7 +147,7 @@ With a host firewall enabled, allow the panel TCP port from your LAN as well as 
 Pin a release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.5.3 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.1 sh
 ```
 
 Environment variables must stay on the right side of the pipe.
@@ -235,7 +235,7 @@ Pin a version and port:
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.5.3 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.6.1 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 Requires `curl` or `wget`, `tar`, `sha256sum`, `netstat`, UCI and HTTPS CA certificates (`ca-bundle` on opkg systems, `ca-certificates` on apk systems). `/opt` must be persistent or an attached external volume, and downloads need roughly 128 MiB free in `/tmp`. The installer never opens WAN ports on its own. On low-memory routers, prefer external storage or a separate Linux host.

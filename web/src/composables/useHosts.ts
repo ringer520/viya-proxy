@@ -457,7 +457,10 @@ export function openCreate(parentDomain?: string, type: Host["type"] = "proxy") 
   if (!guardWrite()) return;
   editingID.value = null;
   partialSave.value = false;
-  advancedOpen.value = false;
+  // A file-service site requires authentication by default, and those inputs
+  // live in the advanced section. Opening it avoids a save failure the user
+  // cannot see the cause of.
+  advancedOpen.value = type === "files";
   upstreamCheck.value = null;
   applyRetryVisible.value = false;
   domainParent.value = parentDomain ?? suggestedParentDomain();
@@ -514,7 +517,8 @@ export function openEdit(host: Host) {
     Object.keys(host.custom_headers || {}).length > 0 ||
     host.ip_allowlist.length > 0 ||
     host.ip_denylist.length > 0 ||
-    host.rate_limit_requests > 0;
+    host.rate_limit_requests > 0 ||
+    host.basic_auth_enabled;
   upstreamCheck.value = null;
   applyRetryVisible.value = false;
   domainMode.value = "full";
@@ -581,7 +585,8 @@ export function cloneHost(host: Host) {
     Object.keys(host.custom_headers || {}).length > 0 ||
     host.ip_allowlist.length > 0 ||
     host.ip_denylist.length > 0 ||
-    host.rate_limit_requests > 0;
+    host.rate_limit_requests > 0 ||
+    host.basic_auth_enabled;
   upstreamCheck.value = null;
   applyRetryVisible.value = false;
   domainMode.value = parent ? "subdomain" : "full";
