@@ -112,7 +112,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
             </button>
           </div>
         </div>
-        <div v-else class="revision-empty">
+        <div v-else class="empty-state">
           {{
             hasListFilter
               ? t("未找到匹配的托管证书。")
@@ -201,7 +201,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
             </button>
           </div>
         </div>
-        <div v-else class="revision-empty">
+        <div v-else class="empty-state">
           {{
             t(
               "暂无独立申请的站点证书；匹配到的泛域名证书可在 Web 站点查看复用标记。",
@@ -254,7 +254,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
             </button>
           </div>
         </div>
-        <div v-else class="revision-empty">
+        <div v-else class="empty-state">
           {{
             hasListFilter
               ? t("未找到匹配项目，可清除筛选后重试。")

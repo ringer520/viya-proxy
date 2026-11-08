@@ -196,7 +196,7 @@ func (a *App) updateLogSettings(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Second)
 		defer cancel()
 		if _, err := a.db.ExecContext(ctx, `UPDATE panel_settings SET value=? WHERE key='log_settings'`, string(raw)); err != nil {
-			fail(w, 500, errors.New("日志设置恢复失败，请检查配置历史"))
+			fail(w, 500, errors.New("日志设置恢复失败，请查看程序日志"))
 			return
 		}
 		a.confirmRestoredApplication(ctx, nil)

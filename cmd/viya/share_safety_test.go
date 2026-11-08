@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -22,6 +24,16 @@ func TestShareRootRejectsSystemTrees(t *testing.T) {
 	for _, root := range allowed {
 		if err := validateShareRoot(root); err != nil {
 			t.Errorf("expected %q to be allowed, got %v", root, err)
+		}
+	}
+	// The login user's home holds SSH keys and cloud credentials, so the whole
+	// directory must be refused even though /home itself is only the parent.
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if err := validateShareRoot(home); err == nil {
+			t.Errorf("expected home directory %q to be rejected", home)
+		}
+		if err := validateShareRoot(filepath.Join(home, "share")); err != nil {
+			t.Errorf("expected a sub-directory of home to be allowed, got %v", err)
 		}
 	}
 }

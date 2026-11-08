@@ -36,7 +36,8 @@ func (a *App) archiveDailyCheckpoint() error {
 		}
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(names)))
-	for i := 7; i < len(names); i++ {
+	// Keep only the five most recent daily recovery points.
+	for i := 5; i < len(names); i++ {
 		if e = os.Remove(filepath.Join(a.dataDir, "recovery", names[i])); e != nil {
 			return e
 		}

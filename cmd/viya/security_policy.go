@@ -277,11 +277,11 @@ func (a *App) saveResolvedPolicy(w http.ResponseWriter, r *http.Request, domain 
 				restoreErr = writePanelSetting(ctx, a, key, old)
 			}
 			if restoreErr != nil {
-				fail(w, 500, errors.New("应用失败且策略恢复失败，请检查配置历史与存储状态"))
+				fail(w, 500, errors.New("应用失败且策略恢复失败，请查看程序日志与存储状态"))
 				return
 			}
 			if err := a.restoreLivePolicyConfig(ctx, liveConfig); err != nil {
-				fail(w, 502, errors.New("应用失败，已恢复原策略，但引擎恢复未确认，请检查配置历史。"))
+				fail(w, 502, errors.New("应用失败，已恢复原策略，但引擎恢复未确认，请查看程序日志。"))
 				return
 			}
 			fail(w, 502, errors.New("保存并应用失败，已恢复原策略和原引擎配置。"))

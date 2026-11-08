@@ -1,7 +1,7 @@
 import { apiFetch as fetch } from "../api";
 // Re-apply the whole Caddy config after a partial save (502). This lives in its
-// own module (not useCore) so useCore never has to import useNetwork — breaking
-// the useCore → useNetwork → useCore cycle that would otherwise trip a TDZ on
+// own module so useState never has to import useNetwork — breaking the
+// useState → useNetwork → useState cycle that would otherwise trip a TDZ on
 // useNetwork's module-level `watch` calls during native-ESM dev loading.
 import { t } from "../i18n";
 import { applyRetryVisible, csrfToken, error, hosts, l4Rules, saving } from "./useState";

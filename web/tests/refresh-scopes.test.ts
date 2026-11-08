@@ -30,8 +30,8 @@ describe("loadSection / per-page lazy loading", () => {
     const { loadSection } = await fresh();
     await loadSection("ddns");
 
-    // core(3) + ddns(1) + dns(1): the DDNS form picks from DNS credentials.
-    expect(calls.length).toBe(5);
+    // core(2) + ddns(1) + dns(1): the DDNS form picks from DNS credentials.
+    expect(calls.length).toBe(4);
     expect(calls).toContain("/api/v1/health");
     expect(calls).toContain("/api/v1/ddns-records");
     expect(calls).toContain("/api/v1/dns-providers");
@@ -43,7 +43,7 @@ describe("loadSection / per-page lazy loading", () => {
   it("does not refetch scopes already loaded by another page", async () => {
     const { loadSection } = await fresh();
     await loadSection("overview");
-    expect(calls.length).toBe(10);
+    expect(calls.length).toBe(9);
 
     calls.length = 0;
     await loadSection("ddns");

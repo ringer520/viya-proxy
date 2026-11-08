@@ -10,7 +10,6 @@ func migrateBaselineSchema(db *sql.DB) error {
 	var err error
 	if _, err = db.Exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
 	CREATE TABLE IF NOT EXISTS proxy_hosts(id INTEGER PRIMARY KEY, domain TEXT NOT NULL UNIQUE, upstream TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-	CREATE TABLE IF NOT EXISTS config_revisions(id INTEGER PRIMARY KEY, status TEXT NOT NULL, config_json TEXT NOT NULL, error_text TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 	CREATE TABLE IF NOT EXISTS dns_providers(id INTEGER PRIMARY KEY, name TEXT NOT NULL, provider_type TEXT NOT NULL, credentials_ciphertext BLOB NOT NULL, credentials_nonce BLOB NOT NULL, key_version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 	CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash BLOB NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 	CREATE TABLE IF NOT EXISTS sessions(token_hash BLOB PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, csrf_token TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`); err != nil {
@@ -33,15 +32,7 @@ func migrateBaselineSchema(db *sql.DB) error {
 		slog.Error("migrate login attempts", "error", err)
 		return err
 	}
-	// The service-monitor feature is gone, but its tables are still part of the
-	// configuration archive format. Creating them keeps archives exported before
-	// the removal importable; nothing reads them any more.
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS monitors(id INTEGER PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL,target TEXT NOT NULL,interval INTEGER NOT NULL DEFAULT 60,timeout INTEGER NOT NULL DEFAULT 5,enabled INTEGER NOT NULL DEFAULT 1,next_check INTEGER NOT NULL DEFAULT 0,last_check INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',latency REAL NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '');
-		CREATE TABLE IF NOT EXISTS monitor_samples(id INTEGER PRIMARY KEY,monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,ok INTEGER NOT NULL,latency REAL NOT NULL,at INTEGER NOT NULL);
-		CREATE INDEX IF NOT EXISTS idx_monitor_samples ON monitor_samples(monitor_id,id DESC)`); err != nil {
-		slog.Error("migrate legacy monitor tables", "error", err)
-		return err
-	}
+	// The service-monitor feature is gone and migration 2 drops its tables.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS layer4_rules(id INTEGER PRIMARY KEY, name TEXT NOT NULL, listen_address TEXT NOT NULL DEFAULT "0.0.0.0", listen_port INTEGER NOT NULL, upstream TEXT NOT NULL, protocol TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
 		slog.Error("migrate layer4 rules", "error", err)
 		return err

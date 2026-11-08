@@ -102,31 +102,6 @@ function hourIndexFor(summaries: Record<string, SiteTraffic>) {
 }
 export const trafficHourIndex = computed(() => hourIndexFor(traffic.value));
 export const l4HourIndex = computed(() => hourIndexFor(l4Traffic.value));
-// One shared fallback per clock hour instead of 24 fresh objects per call.
-let emptyHourCache: { hour: number; points: ({ hour: number } & Counters)[] } = {
-  hour: 0,
-  points: [],
-};
-function emptyHourPoints() {
-  const current = Math.floor(Date.now() / 3600000) * 3600;
-  if (emptyHourCache.hour !== current)
-    emptyHourCache = {
-      hour: current,
-      points: Array.from({ length: 24 }, (_, i) => ({
-        hour: current - (23 - i) * 3600,
-        ...ZERO_COUNTERS,
-      })),
-    };
-  return emptyHourCache.points;
-}
-const siteHours24 = computed(() => hourIndexFor(siteTrafficMonth.value));
-const forwardHours24 = computed(() => hourIndexFor(forwardTrafficMonth.value));
-export function hourlyTraffic(host: Host) {
-  return siteHours24.value[host.id]?.points || emptyHourPoints();
-}
-export function hourlyL4Traffic(rule: Layer4Rule) {
-  return forwardHours24.value[rule.id]?.points || emptyHourPoints();
-}
 // Longer windows reuse the same card but aggregate by day. traffic_hours keeps
 // 90 days of hourly rows, so 90d is the widest honest window.
 export const trafficRange = ref<"24h" | "7d" | "30d" | "90d">("24h");
@@ -213,22 +188,6 @@ export const trafficRanking = computed<TrafficRankRow[]>(() => {
   rows.sort((a, b) => b.bytes - a.bytes);
   return rows.slice(0, 6);
 });
-export function barHeight(host: Host, bytes: number) {
-  // Empty hours stay invisible so the sparkline reads as a chart instead of a
-  // dashed divider; the track itself draws the baseline.
-  if (bytes <= 0) return 0;
-  return Math.max(
-    3,
-    (bytes / Math.max(1, siteHours24.value[host.id]?.max || 0)) * 30,
-  );
-}
-export function l4BarHeight(rule: Layer4Rule, bytes: number) {
-  if (bytes <= 0) return 0;
-  return Math.max(
-    3,
-    (bytes / Math.max(1, forwardHours24.value[rule.id]?.max || 0)) * 30,
-  );
-}
 let trafficSequence = 0;
 export async function refreshTraffic() {
   if (!authenticated.value) return;

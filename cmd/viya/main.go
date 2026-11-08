@@ -307,11 +307,3 @@ func main() {
 	}
 }
 
-type Revision struct {
-	Summary   string `json:"summary"`
-	Actor     string `json:"actor,omitempty"`
-	ID        int64  `json:"id"`
-	Status    string `json:"status"`
-	Error     string `json:"error,omitempty"`
-	CreatedAt string `json:"created_at"`
-}

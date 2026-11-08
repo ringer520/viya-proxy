@@ -121,7 +121,7 @@ func TestAutomaticBackupRetention(t *testing.T) {
 			count++
 		}
 	}
-	if count != 7 {
+	if count != 5 {
 		t.Fatalf("retained %d backups", count)
 	}
 	if _, e := os.Stat(a.checkpointPath("previous")); e != nil {

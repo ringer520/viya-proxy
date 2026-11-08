@@ -6,7 +6,7 @@ import {registerRefreshTask} from "./useRefresh";
 import { apiFetch as fetch } from "../api";
 // Web services: reverse proxy, static sites, URL redirects. Owns the site
 // form/dialog, the HTTP(S) listener editor, static-site file management, and
-// per-site access-log preview. Depends on the shared store in useCore.
+// per-site access-log preview. Depends on the shared store in useState.
 import { computed, nextTick, ref } from "vue";
 import { t, tr } from "../i18n";
 import { emptySecurityHeaders, type SitePolicy } from "../policy";
@@ -56,10 +56,6 @@ export const fileServiceType = {
 export const webHosts = computed(() =>
   hosts.value.filter((host) => host.type !== "files"),
 );
-/** Shared-directory services shown on the file-services page. */
-export const fileHosts = computed(() =>
-  hosts.value.filter((host) => host.type === "files"),
-);
 
 // ---- enable/disable toggle ----
 export const hostToggling = ref<Record<number, boolean>>({});
@@ -96,21 +92,6 @@ export const domainMode = ref<"full" | "subdomain">("full");
 export const domainParent = ref("");
 export const domainPrefix = ref("");
 // ---- HTTP(S) listeners ----
-export const webdavCopied = ref<number | null>(null);
-export async function copyWebDAVURL(host: Host) {
-  const url = siteURL(host);
-  try {
-    await navigator.clipboard.writeText(url);
-  } catch {
-    // Clipboard needs a secure context; fall back to a prompt on plain HTTP.
-    window.prompt(t("复制 WebDAV 地址"), url);
-    return;
-  }
-  webdavCopied.value = host.id;
-  window.setTimeout(() => {
-    if (webdavCopied.value === host.id) webdavCopied.value = null;
-  }, 1600);
-}
 export function siteURL(host: Host) {
   const protocol = host.tls_mode === "none" ? "http" : "https";
   const listener = webListeners.value.find(

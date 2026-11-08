@@ -254,14 +254,14 @@ func (a *App) saveWebListeners(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if rollbackErr != nil {
-			fail(w, 500, errors.New("监听应用失败且无法恢复设置，请检查配置历史"))
+			fail(w, 500, errors.New("监听应用失败且无法恢复设置，请查看程序日志"))
 			return
 		}
 		if recoveryErr := a.applyLocked(recoveryCtx); recoveryErr != nil {
 			fail(w, 502, errors.New("监听保存失败，原设置已恢复但引擎尚未应用，请重新应用配置"))
 			return
 		}
-		fail(w, 502, errors.New("监听应用失败，已恢复原设置，请检查端口权限及配置历史"))
+		fail(w, 502, errors.New("监听应用失败，已恢复原设置，请检查端口权限及程序日志"))
 		return
 	}
 	writeJSON(w, 200, listeners)

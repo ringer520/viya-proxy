@@ -131,7 +131,7 @@ func (a *App) diagnoseSite(w http.ResponseWriter, r *http.Request) {
 			} else {
 				resp, err := client.Do(req)
 				if err != nil {
-					add("本机路由", "fail", "没有收到 HTTP 响应", "检查上游、访问策略和配置历史")
+					add("本机路由", "fail", "没有收到 HTTP 响应", "检查上游、访问策略和程序日志")
 				} else {
 					resp.Body.Close()
 					state := "pass"

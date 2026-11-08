@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -183,6 +184,14 @@ func validateShareRoot(root string) error {
 	clean := path.Clean(filepath.ToSlash(strings.TrimSpace(root)))
 	if what, bad := systemShareRoots[clean]; bad {
 		return fmt.Errorf("不能把%s发布为共享，请改用专门的数据目录", what)
+	}
+	// A home directory holds SSH keys and cloud credentials, so publishing the
+	// directory itself (rather than a sub-folder) hands them to anyone holding
+	// the share URL. /root is already listed; cover the login user's home too.
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if path.Clean(filepath.ToSlash(home)) == clean {
+			return errors.New("不能把整个用户家目录发布为共享，请改用专用的子目录")
+		}
 	}
 	return nil
 }

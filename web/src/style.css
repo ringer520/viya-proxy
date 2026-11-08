@@ -420,49 +420,7 @@ footer span {
     height: 7px;
   }
 }
-.revisions {
-  margin-top: 16px;
-  min-height: 0;
-}
-.revisions .panel-head h2 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.revision-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 20px;
-  border-bottom: 1px solid #f0f2f6;
-  font-size: 11px;
-}
-.revision-id {
-  color: #657187;
-  font-variant-numeric: tabular-nums;
-}
-.revision-state {
-  border-radius: 20px;
-  padding: 4px 8px;
-  background: #f2fbf5;
-  color: #27814a;
-}
-.revision-state.failed {
-  background: #fff3f2;
-  color: #a52626;
-}
-.revision-error {
-  flex: 1;
-  color: #a52626;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.revision-row time {
-  margin-left: auto;
-  color: #8792a4;
-}
-.revision-empty {
+.empty-state {
   padding: 18px 20px;
   color: #8792a4;
   font-size: 11px;
@@ -481,19 +439,6 @@ footer span {
   width: auto;
   margin: 0;
   accent-color: #2563eb;
-}
-@media (max-width: 760px) {
-  .revision-row {
-    flex-wrap: wrap;
-    gap: 7px;
-  }
-  .revision-row time {
-    width: 100%;
-    margin: 0;
-  }
-  .revision-error {
-    flex-basis: 100%;
-  }
 }
 .auth-screen {
   min-height: 100vh;
@@ -826,27 +771,18 @@ main {
   min-height: 0;
   overflow: hidden;
 }
-.provider-panel,
-.revisions {
+.provider-panel {
   margin-top: 0;
 }
 .host-row:last-child {
   border-bottom: 0;
 }
-.revision-empty {
+.empty-state {
   padding: 52px 22px;
   text-align: center;
 }
 footer {
   margin-top: 18px;
-}
-.revision-row {
-  padding: 14px 22px;
-}
-.revision-error {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  line-height: 1.6;
 }
 .nav:focus-visible {
   outline: 2px solid #69a2ff;
@@ -1258,8 +1194,7 @@ html[data-theme="dark"] .traffic-summary {
   color: #e5ebf5;
 }
 html[data-theme="dark"] .host-row,
-html[data-theme="dark"] .panel-head,
-html[data-theme="dark"] .revision-row {
+html[data-theme="dark"] .panel-head {
   border-color: #29364b;
 }
 html[data-theme="dark"] .host-main strong {
@@ -1316,7 +1251,7 @@ html[data-theme="dark"] .http-status.failed {
   background: #472523;
   color: #ff9b90;
 }
-html[data-theme="dark"] .revision-empty,
+html[data-theme="dark"] .empty-state,
 html[data-theme="dark"] footer {
   color: #9ba9bc;
 }

@@ -195,27 +195,12 @@ func TestIPv6FlagsAndStageStorage(t *testing.T) {
 		t.Fatal(stage)
 	}
 }
-func TestOperationSummaryExcludesPayload(t *testing.T) {
+func TestOperationSummaryFromRequest(t *testing.T) {
 	r := httptest.NewRequest("DELETE", "/api/v1/layer4-rules/4", nil)
 	r.SetPathValue("id", "4")
 	ctx := requestOperation(r, "admin")
 	value := ctx.Value(operationContextKey{}).(operationContext)
 	if value.Summary != "删除端口转发 #4" || value.Actor != "admin" {
 		t.Fatal(value)
-	}
-	a := stabilityApp(t)
-	a.recordRevision(ctx, []byte(`{"secret":"hidden"}`), "applied", nil)
-	var summary, actor string
-	a.db.QueryRow(`SELECT summary,actor FROM config_revisions ORDER BY id DESC LIMIT 1`).Scan(&summary, &actor)
-	if summary != value.Summary || actor != "admin" {
-		t.Fatal("operation identity lost")
-	}
-}
-
-func TestBusinessArchiveStripsAuditAccountIdentity(t *testing.T) {
-	tables := []tableDump{{Name: "config_revisions", Columns: []string{"id", "summary", "actor"}, Rows: [][]configCell{{{Type: "integer", Value: "1"}, {Type: "text", Value: "修改站点"}, {Type: "text", Value: "private-admin"}}}}}
-	stripArchiveActors(tables)
-	if tables[0].Rows[0][2].Value != "" || tables[0].Rows[0][1].Value != "修改站点" {
-		t.Fatal("business archive retained account identity or lost operation summary")
 	}
 }

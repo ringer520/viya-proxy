@@ -495,8 +495,8 @@ const navigationItems = [
   {
     id: "config-history",
     group: t("运行维护"),
-    label: t("配置历史"),
-    description: t("查看 Caddy 配置应用结果与错误详情。"),
+    label: t("备份与恢复"),
+    description: t("导出导入业务配置，使用自动恢复点回退。"),
     icon: History,
   },
 ];
@@ -564,8 +564,8 @@ const pageInstructions: Record<string, string[]> = {
     t("自动刷新可在左下角设置中暂停；手动刷新始终可用。"),
   ],
   "config-history": [
-    t("记录配置提交和 Caddy 应用结果；失败记录用于定位错误。"),
-    t("配置保存与生效是两个步骤；应用失败时请查看原因并重新应用。"),
+    t("导出配置文件会加密保存业务配置与浏览器偏好，不包含面板账号和密码。"),
+    t("自动恢复点每天保留一份可用配置，最多 5 份，可用来回退业务配置。"),
   ],
 };
 
@@ -595,7 +595,7 @@ function syncActiveSection() {
 }
 
 // ---- re-apply after a partial save ----
-// (retryApply lives in useCore and is imported above)
+// (retryApply lives in useApply and is imported above)
 
 // ---- timers + auto refresh ----
 let trafficTimer: ReturnType<typeof setInterval> | undefined;

@@ -139,7 +139,7 @@ func (a *App) saveLayer4Rule(w http.ResponseWriter, r *http.Request, id int64, c
 		id = result
 	}
 	if err := a.apply(r.Context()); err != nil {
-		writeJSON(w, 502, map[string]any{"id": id, "error": "配置已保存，但尚未生效。请重试应用或在配置历史中恢复。", "saved": true, "applied": false, "code": "configuration_pending"})
+		writeJSON(w, 502, map[string]any{"id": id, "error": "配置已保存，但尚未生效。请重试应用或使用恢复点恢复。", "saved": true, "applied": false, "code": "configuration_pending"})
 		return
 	}
 	v.ID = id

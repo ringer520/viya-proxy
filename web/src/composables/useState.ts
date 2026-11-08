@@ -1,7 +1,7 @@
 
-// useCore is the shared store + hub of the console. Every domain composable
-// imports the data refs and feedback channels it needs from here, and the big
-// `load()` fan-out lives here so a single refresh keeps all lists consistent.
+// useState is the shared store + hub of the console. Every domain composable
+// imports the data refs and feedback channels it needs from here; the fetch
+// fan-out lives in useRefresh so a single refresh keeps all lists consistent.
 import { computed, ref } from "vue";
 import type {
   Certificate,
@@ -13,7 +13,6 @@ import type {
   Layer4Rule,
   NetworkInterface,
   Provider,
-  Revision,
   UpstreamHealth,
 } from "../types";
 // ---- session state (owned here so every domain can gate on it) ----
@@ -40,7 +39,6 @@ export const applyRetryVisible = ref(false);
 
 // ---- data lists populated by load() ----
 export const hosts = ref<Host[]>([]);
-export const revisions = ref<Revision[]>([]);
 export const providers = ref<Provider[]>([]);
 export const l4Rules = ref<Layer4Rule[]>([]);
 export const ddnsRecords = ref<DDNSRecord[]>([]);

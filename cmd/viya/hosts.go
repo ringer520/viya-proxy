@@ -53,35 +53,9 @@ func (a *App) listHosts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, result)
 }
 
-func (a *App) listRevisions(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,status,error_text,created_at,summary,actor FROM config_revisions ORDER BY id DESC LIMIT 10`)
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	defer rows.Close()
-	out := []Revision{}
-	for rows.Next() {
-		var v Revision
-		if err := rows.Scan(&v.ID, &v.Status, &v.Error, &v.CreatedAt, &v.Summary, &v.Actor); err != nil {
-			fail(w, 500, err)
-			return
-		}
-		if created, e := time.Parse("2006-01-02 15:04:05", v.CreatedAt); e == nil {
-			v.CreatedAt = created.UTC().Format(time.RFC3339)
-		}
-		out = append(out, v)
-	}
-	if err := rows.Err(); err != nil {
-		fail(w, 500, err)
-		return
-	}
-	writeJSON(w, 200, out)
-}
-
 func (a *App) reapplyConfig(w http.ResponseWriter, r *http.Request) {
 	if err := a.apply(r.Context()); err != nil {
-		fail(w, http.StatusBadGateway, errors.New("Caddy 仍未接受当前配置，请检查配置历史中的错误"))
+		fail(w, http.StatusBadGateway, errors.New("Caddy 仍未接受当前配置，请查看程序日志排查"))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

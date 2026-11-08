@@ -10,7 +10,7 @@ const mode=ref<'export'|'import'>('export'),archive=ref<unknown>(null),busy=ref(
 const password=ref(''),passwordConfirm=ref(''),importPassword=ref(''),archiveEncrypted=ref(false)
 type Report={created:string;counts:Record<string,number>;files:number;preferences:number;encrypted?:boolean}
 const report=ref<Report|null>(null)
-const labels:Record<string,string>={dns_providers:t('DNS 凭据'),custom_certificates:t('上传证书'),managed_certificates:t('托管证书'),proxy_hosts:t('Web 站点'),layer4_rules:t('端口转发'),ddns_records:t('DDNS 任务'),ip_bans:t('IP 封禁'),panel_settings:t('面板与监听设置'),monitors:t('服务监控'),config_revisions:t('配置历史')}
+const labels:Record<string,string>={dns_providers:t('DNS 凭据'),custom_certificates:t('上传证书'),managed_certificates:t('托管证书'),proxy_hosts:t('Web 站点'),layer4_rules:t('端口转发'),ddns_records:t('DDNS 任务'),ip_bans:t('IP 封禁'),panel_settings:t('面板与监听设置')}
 const passwordValid=computed(()=>password.value.length>=8&&password.value===passwordConfirm.value)
 const awaitingPassword=computed(()=>mode.value==='import'&&archiveEncrypted.value&&!report.value)
 watch(mode,()=>{error.value='';message.value='';report.value=null;confirmed.value=false;archive.value=null;archiveEncrypted.value=false;importPassword.value=''})

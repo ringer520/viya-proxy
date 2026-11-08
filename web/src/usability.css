@@ -182,14 +182,7 @@ main {
 .host-icon {
   flex-shrink: 0;
 }
-.revision-row {
-  font-size: 13px;
-  gap: 14px;
-}
-.revision-row time {
-  font-size: 12px;
-}
-.revision-empty,
+.empty-state,
 .empty span {
   font-size: 13px;
   line-height: 1.8;
@@ -609,10 +602,6 @@ html[data-theme="dark"] .ddns-record-row .ddns-error {
   .ddns-record-row > .ddns-feedback {
     grid-column: 1 / -1;
     grid-row: 4;
-  }
-  .revision-row {
-    gap: 10px;
-    font-size: 12px;
   }
   .settings-drawer-backdrop .settings-drawer-tabs button {
     font-size: 12px;

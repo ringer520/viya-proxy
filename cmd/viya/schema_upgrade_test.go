@@ -69,3 +69,54 @@ func TestUpgradeAddsRoutingAndFileServiceColumns(t *testing.T) {
 		t.Fatalf("second startup failed: %v", err)
 	}
 }
+
+// A retired feature must leave nothing behind: a fresh install gets no empty
+// leftover tables, and an existing database loses the table on upgrade.
+func TestRetiredTablesAreNotCreatedAndGetDropped(t *testing.T) {
+	fresh, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "fresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh.SetMaxOpenConns(1)
+	defer fresh.Close()
+	if err := migrateSchema(fresh); err != nil {
+		t.Fatalf("fresh migration failed: %v", err)
+	}
+	for _, table := range []string{"config_revisions", "monitors", "monitor_samples"} {
+		var name string
+		err := fresh.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
+		if err == nil {
+			t.Fatalf("fresh install still creates retired table %s", table)
+		}
+		if err != sql.ErrNoRows {
+			t.Fatalf("probe %s failed: %v", table, err)
+		}
+	}
+
+	// A database upgraded from an older release can still carry the table the
+	// feature left behind; migration 6 must drop it rather than leave it empty.
+	legacy, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "legacy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy.SetMaxOpenConns(1)
+	defer legacy.Close()
+	if err := migrateBaselineSchema(legacy); err != nil {
+		t.Fatalf("legacy baseline failed: %v", err)
+	}
+	if _, err := legacy.Exec(`
+		CREATE TABLE IF NOT EXISTS config_revisions(id INTEGER PRIMARY KEY, status TEXT, config_json TEXT, error_text TEXT, created_at TEXT);
+		INSERT INTO config_revisions(id,config_json) VALUES(1,'{}');
+		CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+		INSERT INTO schema_migrations(version,name) VALUES
+			(1,'legacy baseline'),(2,'monitors'),(3,'journal'),(4,'deletions'),(5,'status');`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateSchema(legacy); err != nil {
+		t.Fatalf("upgrade failed on a database holding the retired table: %v", err)
+	}
+	var name string
+	if err := legacy.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='config_revisions'`).Scan(&name); err != sql.ErrNoRows {
+		t.Fatalf("retired table survived the upgrade (err=%v)", err)
+	}
+}

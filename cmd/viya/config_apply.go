@@ -19,7 +19,7 @@ func (a *App) applyLocked(ctx context.Context) (result error) {
 	a.setApplyStage("compiling", "正在生成配置")
 	defer func() {
 		if result != nil {
-			a.setApplyStage("failed", "存在未生效的配置，请重试应用或在配置历史中恢复")
+			a.setApplyStage("failed", "存在未生效的配置，请重试应用或使用恢复点恢复")
 			if body, err := a.compileConfig(ctx); err == nil {
 				a.journalApplication(body, false)
 			}
@@ -50,7 +50,6 @@ func (a *App) applyLocked(ctx context.Context) (result error) {
 	validate := exec.CommandContext(ctx, a.caddyBin, "validate", "--config", configFile.Name())
 	if output, err := validate.CombinedOutput(); err != nil {
 		cause := fmt.Errorf("caddy validate: %s: %w", strings.TrimSpace(string(output)), err)
-		a.recordRevision(ctx, body, "failed", cause)
 		return cause
 	}
 	a.setApplyStage("applying", "正在平滑加载配置")
@@ -76,7 +75,6 @@ func (a *App) applyLocked(ctx context.Context) (result error) {
 	client := http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		a.recordRevision(ctx, body, "failed", err)
 		return err
 	}
 	defer resp.Body.Close()
@@ -84,7 +82,6 @@ func (a *App) applyLocked(ctx context.Context) (result error) {
 		// Drain bounded error output for connection reuse, without exposing secrets.
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 		cause := fmt.Errorf("Caddy returned %s", resp.Status)
-		a.recordRevision(ctx, body, "failed", cause)
 		return cause
 	}
 	loaded = true
@@ -92,7 +89,6 @@ func (a *App) applyLocked(ctx context.Context) (result error) {
 	if err := a.cleanupDeletedSites(ctx); err != nil {
 		slog.Warn("deferred static file cleanup failed; will retry after next apply", "error", err)
 	}
-	a.recordRevision(ctx, body, "applied", nil)
 	if err := a.saveCheckpoint(ctx, body); err != nil {
 		a.setApplyStage("applied-warning", "配置已生效，但恢复点保存失败")
 		a.journalApplication(body, true)

@@ -6,7 +6,7 @@ import ErrorLocations from './ErrorLocations.vue'
 import AnimatedMetric from '../AnimatedMetric.vue'
 import SystemGauges from './SystemGauges.vue'
 import TrafficTrend from './TrafficTrend.vue'
-import { hosts, l4Rules, ddnsRecords, certExpiring, revisions, upstreamHealth, online } from '../composables/useState'
+import { hosts, l4Rules, ddnsRecords, certExpiring, upstreamHealth, online } from '../composables/useState'
 import { webHosts } from '../composables/useHosts'
 import { traffic, trafficLoadedRange, trafficRange, trafficTrend, trafficTotals, trafficRanking, trafficError } from '../composables/useTraffic'
 import { autoRefresh, pauseHidden, documentHidden, trafficCharts } from '../composables/usePreferences'
@@ -22,11 +22,10 @@ const rangeReady = computed(() => trafficRange.value === trafficLoadedRange.valu
 function showAttention() {attentionPanel.value?.scrollIntoView({behavior:reducedMotion.value?'instant':'smooth',block:'center'})}
 const activeSampling = computed(() => autoRefresh.value && (!pauseHidden.value || !documentHidden.value))
 const alerts = computed(() => [
-  ...(!online.value ? [{ key:'engine', title:t('引擎未就绪'), detail:t('检查引擎与配置应用状态'), href:'#config-history', host:undefined }] : []),
+  ...(!online.value ? [{ key:'engine', title:t('引擎未就绪'), detail:t('检查引擎与配置应用状态'), href:'#access-logs', host:undefined }] : []),
   ...hosts.value.filter(h => h.enabled && h.type === 'proxy' && upstreamHealth.value[String(h.id)]?.ok === false).map(h => ({ key:'site-'+h.id, title:h.name || h.domain, detail:t('上游无响应'), href:'#proxy-sites', host:h })),
   ...certExpiring.value.filter(c => c.expired || !hosts.value.some(h => (h.domain===c.domain || h.certificate_source?.domain===c.domain) && (h.tls_mode==='internal' || h.certificate_source?.kind==='internal'))).map(c => ({ key:'cert-'+c.domain, title:c.domain, detail:c.expired ? t('证书已过期') : tr`证书将在 ${c.days_left} 天后到期`, href:'#certificates', host:undefined })),
   ...ddnsRecords.value.filter(d => d.enabled && d.last_error).map(d => ({ key:'ddns-'+d.id, title:d.name, detail:t('DDNS 更新失败'), href:'#ddns', host:undefined })),
-  ...(revisions.value[0]?.status === 'failed' ? [{ key:'config',title:t('配置应用失败'),detail:revisions.value[0].error || t('查看配置历史'),href:'#config-history',host:undefined }] : []),
 ])
 const counts = computed(() => [
   { label:t('Web 服务'), count:webHosts.value.length, detail:tr`${webHosts.value.filter(h=>h.enabled).length} 个已启用`, href:'#proxy-sites', icon:Globe2, color:'var(--metric-cpu)' },
@@ -38,7 +37,6 @@ const periods = computed(() => [{id:'24h',label:t('24 小时')},{id:'7d',label:t
 const ranking = computed(() => trafficRanking.value.slice(0,5))
 const rankingMax = computed(() => Math.max(1,...ranking.value.map(r=>r.bytes)))
 const events = computed(() => [
-  ...revisions.value.map(r=>({key:'r'+r.id,title:r.summary?t(r.summary):tr`配置 #${r.id}`,detail:r.status==='applied'?t('已应用'):r.status==='failed'?t('应用失败'):t('已保存'),timestamp:new Date(r.created_at).getTime(),bad:r.status==='failed',href:'#config-history'})),
   ...ddnsRecords.value.filter(d=>d.last_run_at).map(d=>({key:'d'+d.id,title:d.name,detail:d.last_error?t('DDNS 更新失败'):t('DDNS 更新完成'),timestamp:d.last_run_at*1000,bad:!!d.last_error,href:'#ddns'})),
 ].filter(e=>Number.isFinite(e.timestamp)).sort((a,b)=>b.timestamp-a.timestamp).slice(0,5))
 </script>

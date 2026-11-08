@@ -75,14 +75,7 @@ func (a *App) saveCheckpoint(ctx context.Context, body []byte) error {
 	if e != nil {
 		return e
 	}
-	// Redacted engine revisions remain an independent audit trail.
-	filtered := payload.Tables[:0]
-	for _, table := range payload.Tables {
-		if table.Name != "config_revisions" {
-			filtered = append(filtered, table)
-		}
-	}
-	payload.Tables = filtered
+	// Recovery points hold portable service configuration only.
 	cp := checkpoint{Hash: hashJSON, Created: time.Now().UTC().Format(time.RFC3339), Payload: payload}
 	raw, e := json.Marshal(cp)
 	if e != nil {

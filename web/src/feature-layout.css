@@ -217,18 +217,7 @@
   height: 17px;
   accent-color: var(--accent);
 }
-@media (max-width: 1200px) {
-  .page-header:has(.web-total-stats) {
-    flex-wrap: wrap;
-  }
-  .page-header:has(.web-total-stats) .page-actions {
-    margin-left: auto;
-  }
-}
 @media (max-width: 760px) {
-  .page-header:has(.web-total-stats) .page-actions {
-    width: 100%;
-  }
   .site-panel .listener-workspace {
     padding: 15px 16px;
   }

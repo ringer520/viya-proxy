@@ -197,22 +197,3 @@ func TestCertificateMatchesDomainWildcardDepth(t *testing.T) {
 		t.Error("unrelated name must not match")
 	}
 }
-
-func TestFlattenJSONProducesStablePaths(t *testing.T) {
-	var value any
-	tree := `{"apps":{"http":{"servers":{"s":{"routes":[{"match":[{"host":["a.test"]}]}]}}}}}`
-	if err := json.Unmarshal([]byte(tree), &value); err != nil {
-		t.Fatal(err)
-	}
-	flat := map[string]string{}
-	if !flattenJSON("", value, flat) {
-		t.Fatal("flatten reported truncation on a tiny document")
-	}
-	want := "apps.http.servers.s.routes[0].match[0].host[0]"
-	if flat[want] != "a.test" {
-		t.Fatalf("expected %q to equal a.test, got %q (paths: %v)", want, flat[want], flat)
-	}
-	if len(flat) != 1 {
-		t.Fatalf("unexpected leaf count %d: %v", len(flat), flat)
-	}
-}

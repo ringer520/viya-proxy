@@ -86,9 +86,25 @@ func TestExportRequiresPasswordAndEncryptsArchive(t *testing.T) {
 	if report["encrypted"] != true {
 		t.Fatal("inspect did not report an encrypted archive")
 	}
+	if counts, ok := report["counts"].(map[string]any); !ok || counts["config_revisions"] != nil {
+		t.Fatalf("configuration history leaked into the archive: %v", report["counts"])
+	}
 	for _, wrong := range []string{"", "wrong-password"} {
 		if recorder = postJSON(t, a.inspectConfiguration, map[string]any{"archive": envelope, "password": wrong}); recorder.Code != http.StatusBadRequest {
 			t.Fatalf("inspect with password %q returned %d", wrong, recorder.Code)
 		}
+	}
+}
+
+func TestArchiveCompatDropsLegacyRevisionTable(t *testing.T) {
+	tables := []tableDump{
+		{Name: "proxy_hosts"},
+		{Name: "config_revisions"},
+		{Name: "monitors"},
+		{Name: "monitor_samples"},
+	}
+	active := activeArchiveTables(tables)
+	if len(active) != 1 || active[0].Name != "proxy_hosts" {
+		t.Fatalf("legacy configuration history was not filtered: %v", active)
 	}
 }

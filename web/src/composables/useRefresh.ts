@@ -1,6 +1,6 @@
 import { apiFetch as fetch } from "../api";
 import { t,tr } from "../i18n";
-import { refreshErrors,applyRetryVisible,authenticated,csrfToken,error,deleteBusy,ddnsRefreshSequence,refreshing,hosts,revisions,providers,l4Rules,ddnsRecords,certificates,ipBans,certExpiring,upstreamHealth,online,lastRefreshedAt } from "./useState";
+import { refreshErrors,applyRetryVisible,authenticated,csrfToken,error,deleteBusy,ddnsRefreshSequence,refreshing,hosts,providers,l4Rules,ddnsRecords,certificates,ipBans,certExpiring,upstreamHealth,online,lastRefreshedAt } from "./useState";
 
 // ---- request sequencing (cross-domain) ----
 type Scope = "core" | "sites" | "layer4" | "ddns" | "certs" | "dns" | "bans";
@@ -15,7 +15,6 @@ type Target = { url: string; scope: Scope; apply: (data: any) => void };
 const targets: Target[] = [
   { url: "/api/v1/health", scope: "core", apply: data => { online.value = !!(data.ok && data.caddy_ready) } },
   { url: "/api/v1/proxy-hosts", scope: "core", apply: data => { hosts.value = data } },
-  { url: "/api/v1/config/revisions", scope: "core", apply: data => { revisions.value = data.slice(0, 10) } },
   { url: "/api/v1/proxy-hosts/health", scope: "sites", apply: data => { upstreamHealth.value = data && typeof data === "object" ? data : {} } },
   { url: "/api/v1/layer4-rules", scope: "layer4", apply: data => { l4Rules.value = data } },
   { url: "/api/v1/ddns-records", scope: "ddns", apply: data => { ddnsRecords.value = data } },
@@ -24,7 +23,7 @@ const targets: Target[] = [
   { url: "/api/v1/dns-providers", scope: "dns", apply: data => { providers.value = data } },
   { url: "/api/v1/ip-bans", scope: "bans", apply: data => { ipBans.value = data } },
 ];
-const refreshLabels: Record<string, string> = { '/api/v1/proxy-hosts': 'Web 服务', '/api/v1/health': '引擎状态', '/api/v1/config/revisions': '配置历史', '/api/v1/dns-providers': 'DNS 凭据', '/api/v1/layer4-rules': '端口转发', '/api/v1/ddns-records': '动态 DNS', '/api/v1/custom-certificates': 'SSL 证书', '/api/v1/ip-bans': 'IP 封禁', '/api/v1/certificates/expiring?days=30': '证书到期状态', '/api/v1/proxy-hosts/health': '上游状态' };
+const refreshLabels: Record<string, string> = { '/api/v1/proxy-hosts': 'Web 服务', '/api/v1/health': '引擎状态', '/api/v1/dns-providers': 'DNS 凭据', '/api/v1/layer4-rules': '端口转发', '/api/v1/ddns-records': '动态 DNS', '/api/v1/custom-certificates': 'SSL 证书', '/api/v1/ip-bans': 'IP 封禁', '/api/v1/certificates/expiring?days=30': '证书到期状态', '/api/v1/proxy-hosts/health': '上游状态' };
 
 // What each page actually reads. Loading only these keeps the first paint to
 // one request per data group instead of the whole console's worth of lists.

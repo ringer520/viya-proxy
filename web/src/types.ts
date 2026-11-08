@@ -62,14 +62,6 @@ export type Host = {
 
 export type SiteGroup = { domain: string; hosts: Host[] };
 
-export type Revision = {
- summary?:string;actor?:string;
-  id: number;
-  status: string;
-  error?: string;
-  created_at: string;
-};
-
 export type Provider = {
  check_status?:string;check_message?:string;checked_at?:number;
   id: number;

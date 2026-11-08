@@ -22,7 +22,7 @@ import (
 
 const configFormat = "viya-config-v3"
 
-var configTables = []string{"dns_providers", "custom_certificates", "managed_certificates", "proxy_hosts", "layer4_rules", "ddns_records", "ip_bans", "panel_settings", "config_revisions"}
+var configTables = []string{"dns_providers", "custom_certificates", "managed_certificates", "proxy_hosts", "layer4_rules", "ddns_records", "ip_bans", "panel_settings"}
 var runtimeTables = []string{"sessions", "traffic_hours", "site_access_events", "ddns_runs"}
 
 type configCell struct {
@@ -491,7 +491,6 @@ func (a *App) exportConfiguration(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, errors.New("无法读取完整配置"))
 		return
 	}
-	stripArchiveActors(payload.Tables)
 	archive, err := sealConfiguration(payload, input.Password)
 	if err != nil {
 		fail(w, 400, err)

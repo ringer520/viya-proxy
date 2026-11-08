@@ -187,7 +187,7 @@ onBeforeUnmount(()=>{++sequence;request?.abort();clearInterval(timer);document.r
           <p>{{ event.msg }}<small v-if="event.error">{{ event.error }}</small></p>
         </article>
       </div>
-      <p v-else class="revision-empty">{{ t('暂无程序日志') }}</p>
+      <p v-else class="empty-state">{{ t('暂无程序日志') }}</p>
     </div>
 
     <div v-else-if="tab === 'audit'" class="log-content">
@@ -211,7 +211,7 @@ onBeforeUnmount(()=>{++sequence;request?.abort();clearInterval(timer);document.r
         </article>
       </div>
       <p v-else-if="loading" class="site-log-empty">{{ t('正在读取登录审计…') }}</p>
-      <p v-else class="revision-empty">{{ t('暂无登录审计记录') }}</p>
+      <p v-else class="empty-state">{{ t('暂无登录审计记录') }}</p>
     </div>
 
     <form v-else class="log-config-form" @submit.prevent="save"><p v-if="readOnly" class="auth-hint">{{t("只读账户可以查看日志配置，不能修改。")}}</p><fieldset class="op-fieldset" :disabled="readOnly||busy">

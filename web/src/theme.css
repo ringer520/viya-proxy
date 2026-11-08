@@ -346,12 +346,12 @@ html[data-palette] .modal-actions,
 html[data-palette] .log-tabs {
   border-color: var(--line);
 }
-html[data-palette] .host-main strong:not(.entity-name) {
+html[data-palette] .host-main strong {
   color: var(--text);
 }
 html[data-palette] .host-main > span,
 html[data-palette] .traffic-summary p,
-html[data-palette] .revision-empty {
+html[data-palette] .empty-state {
   color: var(--muted);
 }
 
@@ -826,8 +826,8 @@ html[data-palette] .settings-drawer-backdrop { background: #080e1d75; backdrop-f
 html[data-palette] .settings-drawer { animation: viya-drawer-in 300ms var(--ease) both; box-shadow: -20px 0 70px #0003; }
 html[data-palette] .settings-theme-grid > button { transition: border-color 160ms ease, box-shadow 160ms ease; }
 html[data-palette] .settings-theme-grid > button.selected { box-shadow: 0 0 0 2px var(--accent-soft); }
-html[data-palette] :is(.site-switch, .settings-switch, .ddns-switch, .forward-switch) { transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease; }
-html[data-palette] :is(.site-switch, .settings-switch, .ddns-switch, .forward-switch)::after { transition: transform 230ms cubic-bezier(.22,1,.36,1); }
+html[data-palette] :is(.site-switch, .settings-switch) { transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease; }
+html[data-palette] :is(.site-switch, .settings-switch)::after { transition: transform 230ms cubic-bezier(.22,1,.36,1); }
 .workspace-view { min-width: 0; }
 .workspace-enter-active { transition: opacity 200ms ease, transform 260ms var(--ease); }
 .workspace-leave-active { transition: opacity 100ms ease; }
@@ -913,13 +913,13 @@ html[data-palette] .primary:active:not(:disabled) {
 }
 
 /* ---- Surfaces: sheen on top, accent-tinted border on hover ---- */
-html[data-palette] :is(.panel, .mission-card, .stats article, .overview-card) {
+html[data-palette] :is(.panel, .mission-card, .stats article) {
   background-image: var(--surface-sheen);
   transition:
     border-color var(--duration-normal) var(--ease),
     box-shadow var(--duration-normal) var(--ease);
 }
-html[data-palette] :is(.panel, .stats article, .overview-card):hover {
+html[data-palette] :is(.panel, .stats article):hover {
   border-color: color-mix(in srgb, var(--accent) 20%, var(--line));
 }
 
@@ -947,7 +947,7 @@ html[data-palette] :is(button, a, summary, input, select, textarea):focus-visibl
 
 /* ---- Respect reduced-motion ---- */
 @media (prefers-reduced-motion: reduce) {
-  html[data-palette] :is(.panel, .stats article, .overview-card, .primary) {
+  html[data-palette] :is(.panel, .stats article, .primary) {
     transition: none;
   }
 }

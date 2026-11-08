@@ -103,7 +103,7 @@ func (a *App) forwardRuntimeStates(ctx context.Context, rules []Layer4Rule) {
 				state.Message = "停用尚未生效，旧监听仍在引擎中"
 			} else if v.Enabled {
 				state.State = "pending"
-				state.Message = "配置尚未加载，请检查配置历史"
+				state.Message = "配置尚未加载，请查看程序日志"
 				if matches && found == len(l4Protocols(v.Protocol)) {
 					state.State = "loaded"
 					state.Message = "引擎已加载，套接字尚未核实"

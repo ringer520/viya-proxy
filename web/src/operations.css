@@ -62,16 +62,6 @@
 .op-status.bad {
   color: var(--danger, #e56a75);
 }
-.op-revision-summary {
-  min-width: 100px;
-  flex: 1;
-  font-size: 12px;
-}
-.op-revision-summary small {
-  display: block;
-  color: var(--muted);
-  font-size: 10px;
-}
 .op-tabs {
   display: flex;
   gap: 6px;
