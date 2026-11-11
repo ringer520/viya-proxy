@@ -302,7 +302,7 @@ func main() {
 	// WriteTimeout must stay above the slowest business operation (DDNS run 35s,
 	// configuration import 90s); otherwise Go truncates a response after the
 	// work already succeeded and operators retry the same import twice.
-	server := &http.Server{Handler: securityHeaders(logRequests(recoverPanic(app.panelAccessGuard(mux)))), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	server := &http.Server{Handler: securityHeaders(requestIDMiddleware(recoverPanic(app.panelAccessGuard(mux)))), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	// Every listener shares this server (and therefore one handler, one set of
 	// sessions and one database). Shutdown closes all of them together.
 	serveErr := make(chan error, len(listeners))
@@ -328,6 +328,12 @@ func main() {
 		if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Warn("HTTP server serve", "error", err)
 		}
+	}
+	// A non-zero planned restart also works under Restart=on-failure, while
+	// Restart=always ignores the code. Shutdown above has already drained all
+	// in-flight requests before we hand over to the service manager.
+	if plannedRestart.Load() != 0 {
+		os.Exit(plannedRestartExitCode)
 	}
 }
 

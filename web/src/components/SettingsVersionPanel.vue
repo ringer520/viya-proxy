@@ -59,7 +59,15 @@ async function update(){
     let response:Response|undefined
     try {response=await apiFetch('/api/v1/version/update',{method:'POST',headers:{'X-CSRF-Token':props.csrf},signal:requests.signal})}
     catch(e){if(!(e instanceof TypeError)||!alive)throw e;restarting=true}
-    if(response){const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(t(data.error)||t('更新失败'))}
+    if(response){
+      const data=await response.json().catch(()=>({}))
+      if(!response.ok)throw Error(t(data.error)||t('更新失败'))
+      if(data.restart_required){
+        progress.value=100;stage.value=t('更新已完成')
+        message.value=t('新版本已安装，请在服务器上手动重启 Viya 后刷新页面')
+        return
+      }
+    }
     restarting=true;stage.value=t('正在等待服务重启');progress.value=Math.max(progress.value,95)
     if(!await waitForVersion(target))throw Error(t('服务尚未恢复，请稍后手动刷新页面'))
     if(!alive)return

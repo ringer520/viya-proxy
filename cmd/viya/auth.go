@@ -346,7 +346,12 @@ func (a *App) requireSession(next http.Handler, holdConfigLock bool) http.Handle
 				return
 			}
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(requestOperation(r, session.username), sessionContextKey{}, session)))
+		ctx := context.WithValue(requestOperation(r, session.username), sessionContextKey{}, session)
+		rec := &statusRecorder{ResponseWriter: w}
+		next.ServeHTTP(rec, r.WithContext(ctx))
+		// Only successful mutations become audit rows; the recorder sees the
+		// real status even when a handler writes it implicitly.
+		a.recordConfigAudit(ctx, session.username, r.Method, r.URL.Path, rec.status)
 	})
 }
 

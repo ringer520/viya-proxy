@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +68,13 @@ func (a *App) updatePanelPort(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, errors.New("请先确认当前端口变更或等待自动恢复"))
 		return
 	}
+	// Refuse the change when nothing will bring the process back: saving a new
+	// port and then exiting would leave the panel unreachable on bare installs.
+	supervised := supervisedRestart()
+	if !supervised {
+		fail(w, http.StatusConflict, errNoRestartSupervisor)
+		return
+	}
 	pending, _ := json.Marshal(panelConfirmation{OldPort: current, NewPort: itoa(input.Port), Deadline: time.Now().Add(90 * time.Second).Unix()})
 	tx, err := a.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -91,11 +97,7 @@ func (a *App) updatePanelPort(w http.ResponseWriter, r *http.Request) {
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
-	time.AfterFunc(2*time.Second, func() {
-		if process, err := os.FindProcess(os.Getpid()); err == nil {
-			_ = process.Signal(os.Interrupt)
-		}
-	})
+	_ = requestProcessRestartWith(supervised, "panel port change")
 }
 
 func (a *App) changeAdminPassword(w http.ResponseWriter, r *http.Request) {

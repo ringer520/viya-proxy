@@ -147,7 +147,7 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 固定版本安装：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.3 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.4 sh
 ```
 
 环境变量必须放在管道右侧。
@@ -174,6 +174,8 @@ sudo journalctl -u viya.service | grep 'Viya API listening'   # 启动日志含 
 ```
 
 如果出现不同 PID 的第二个监听，说明仍有独立实例，`sudo kill <PID>` 即可。Viya 对同一数据目录加实例锁，重复启动会被拒绝并打印具体目录；启动时若发现同端口已被其它地址占用也会告警。不带环境变量直接执行二进制时，其默认回环地址已被主服务占用，会直接启动失败，不会再悄悄生成第二套面板。
+
+**自动重启只在有服务管理器时执行。** 改监听端口、自更新与端口回滚需要先确认进程退出后会被拉起（systemd 系统单元或 OpenWrt procd）。容器、SSH 会话里手工启动的进程不会被主动关闭：改端口会返回明确错误，自更新仍安装新二进制但提示手动重启，避免面板从网页上把自己关到再也起不来。
 
 </details>
 
@@ -245,7 +247,7 @@ uci commit uhttpd && /etc/init.d/uhttpd restart
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.6.3 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.6.4 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 需要 `curl` 或 `wget`、`tar`、`sha256sum`、`netstat`、UCI 与 HTTPS CA 证书（opkg 系安装 `ca-bundle`，apk 系安装 `ca-certificates`）。`/opt` 必须是持久化目录或已挂载的外部存储，下载解压还需 `/tmp` 约 128 MiB 可用空间。安装器不会自动开放 WAN 端口。小内存路由器建议挂外部存储或改用独立 Linux 主机。

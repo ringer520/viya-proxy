@@ -26,6 +26,12 @@ func migrateBaselineSchema(db *sql.DB) error {
 		slog.Error("migrate login audit", "error", err)
 		return err
 	}
+	// One short row per successful configuration mutation. Never exported:
+	// audit data belongs to this installation, not to a portable backup.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS config_audit(id INTEGER PRIMARY KEY, username TEXT NOT NULL DEFAULT '', method TEXT NOT NULL DEFAULT '', path TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', status INTEGER NOT NULL DEFAULT 0, request_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT 0); CREATE INDEX IF NOT EXISTS idx_config_audit_created ON config_audit(created_at);`); err != nil {
+		slog.Error("migrate config audit", "error", err)
+		return err
+	}
 	// Login throttling state lives in SQLite so a service restart cannot be
 	// used by an attacker to reset the window and resume guessing passwords.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS login_attempts(ip TEXT PRIMARY KEY, window_start INTEGER NOT NULL DEFAULT 0, count INTEGER NOT NULL DEFAULT 0)`); err != nil {

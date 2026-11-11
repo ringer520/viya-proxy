@@ -2,7 +2,7 @@
 import { apiFetch as fetch } from "../api";
 
 import { ref, computed, onMounted, onBeforeUnmount,watch } from 'vue'
-import { ScrollText, Terminal, Settings, RefreshCw, ShieldCheck } from '@lucide/vue'
+import { ScrollText, Terminal, Settings, RefreshCw, ShieldCheck, History } from '@lucide/vue'
 import AccessLogTable from './AccessLogTable.vue'
 import { t } from '../i18n'
 import {hosts,readOnly} from '../composables/useState'
@@ -17,12 +17,23 @@ interface AuditEntry {
   reason: string
   created_at: number
 }
+interface ConfigAuditEntry {
+  id: number
+  username: string
+  method: string
+  path: string
+  summary: string
+  status: number
+  request_id: string
+  created_at: number
+}
 
 const props = defineProps<{ csrf: string; autoRefresh: boolean }>()
 const tab = ref('access'),
   events = ref<Record<string, any>[]>([]),
   program = ref<Record<string, any>[]>([]),
   audit = ref<AuditEntry[]>([]),
+  changes = ref<ConfigAuditEntry[]>([]),
   error = ref(''),
   message = ref(''),
   busy = ref(false),
@@ -40,6 +51,7 @@ const tabs = computed(() => [
   { id: 'access', name: t('访问日志'), icon: ScrollText },
   { id: 'program', name: t('程序日志'), icon: Terminal },
   { id: 'audit', name: t('登录审计'), icon: ShieldCheck },
+  { id: 'changes', name: t('配置变更'), icon: History },
   { id: 'settings', name: t('日志配置'), icon: Settings },
 ])
 const domain=ref(''),queryText=ref(''),status=ref('all'),from=ref(''),to=ref('')
@@ -51,6 +63,7 @@ function endpoint(which:string){
  if(which==='access'){params.set('domain',domain.value);params.set('status',status.value)}
  if(which==='program')params.set('level',filter.value)
  if(which==='audit')params.set('result',auditFilter.value)
+ if(which==='changes')return '/api/v1/config-audit?'+params
  return (which==='program'?'/api/v1/logs/program':which==='audit'?'/api/v1/auth/audit':'/api/v1/logs')+'?'+params
 }
 async function load(force=false){
@@ -58,7 +71,7 @@ async function load(force=false){
  request?.abort();const controller=new AbortController();request=controller
  loading.value=true;const selected=tab.value,current=++sequence
  try{const r=await fetch(endpoint(selected),{signal:controller.signal});const body=await r.json();if(!r.ok)throw Error(t(body.error)||t('读取失败'));if(current!==sequence||selected!==tab.value)return
- if(selected==='program')program.value=body;else if(selected==='audit')audit.value=Array.isArray(body)?body:[];else events.value=body;error.value=''
+ if(selected==='program')program.value=body;else if(selected==='audit')audit.value=Array.isArray(body)?body:[];else if(selected==='changes')changes.value=Array.isArray(body)?body:[];else events.value=body;error.value=''
  }catch(e){if(current===sequence&&!controller.signal.aborted)error.value=e instanceof Error?t(e.message):t('读取失败')}
  finally{if(current===sequence)loading.value=false}
 }
@@ -162,7 +175,7 @@ onBeforeUnmount(()=>{++sequence;request?.abort();clearInterval(timer);document.r
         <component :is="item.icon" :size="16" />{{ item.name }}
       </button>
     </nav>
-    <template v-if="tab!=='settings'"><details class="op-disclosure"><summary>{{t('筛选日志')}}</summary><form class="op-toolbar" @submit.prevent="load(true)"><label v-if="tab==='access'">{{t('站点')}}<select v-model="domain"><option value="">{{t('全部站点')}}</option><option v-for="host in hosts" :key="host.id" :value="host.domain">{{host.domain}}</option></select></label><label>{{t('关键词')}}<input v-model="queryText" maxlength="200"/></label><label>{{t('开始时间')}}<input v-model="from" type="datetime-local"/></label><label>{{t('结束时间')}}<input v-model="to" type="datetime-local"/></label><label v-if="tab==='access'">{{t('状态码')}}<select v-model="status"><option value="all">{{t('全部')}}</option><option value="errors">{{t('错误请求')}}</option><option value="blocked">{{t('403 / 429 拦截响应')}}</option><option v-for="code in ['2xx','3xx','4xx','5xx']" :key="code">{{code}}</option></select></label><button class="primary">{{t('应用筛选')}}</button></form><p class="auth-hint">{{tab==='audit'?t('在保留的登录审计中筛选，最多返回 200 条。'):t('在当前日志文件尾部最多 2 MiB 内筛选，返回最近 200 条匹配记录；不包含已轮转的归档。')}}</p></details></template>
+    <template v-if="tab!=='settings'"><details class="op-disclosure"><summary>{{t('筛选日志')}}</summary><form class="op-toolbar" @submit.prevent="load(true)"><label v-if="tab==='access'">{{t('站点')}}<select v-model="domain"><option value="">{{t('全部站点')}}</option><option v-for="host in hosts" :key="host.id" :value="host.domain">{{host.domain}}</option></select></label><label>{{t('关键词')}}<input v-model="queryText" maxlength="200"/></label><label>{{t('开始时间')}}<input v-model="from" type="datetime-local"/></label><label>{{t('结束时间')}}<input v-model="to" type="datetime-local"/></label><label v-if="tab==='access'">{{t('状态码')}}<select v-model="status"><option value="all">{{t('全部')}}</option><option value="errors">{{t('错误请求')}}</option><option value="blocked">{{t('403 / 429 拦截响应')}}</option><option v-for="code in ['2xx','3xx','4xx','5xx']" :key="code">{{code}}</option></select></label><button class="primary">{{t('应用筛选')}}</button></form><p class="auth-hint">{{tab==='audit'?t('在保留的登录审计中筛选，最多返回 200 条。'):tab==='changes'?t('在保留的配置变更审计中筛选，最多返回 200 条。'):t('在当前日志文件尾部最多 2 MiB 内筛选，返回最近 200 条匹配记录；不包含已轮转的归档。')}}</p></details></template>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="message" class="probe-ok" role="status">{{ message }}</p>
 
@@ -212,6 +225,22 @@ onBeforeUnmount(()=>{++sequence;request?.abort();clearInterval(timer);document.r
       </div>
       <p v-else-if="loading" class="site-log-empty">{{ t('正在读取登录审计…') }}</p>
       <p v-else class="empty-state">{{ t('暂无登录审计记录') }}</p>
+    </div>
+
+    <div v-else-if="tab === 'changes'" class="log-content">
+      <p class="auth-hint">{{ t('只记录成功的配置变更：账号、动作、请求路径与请求 ID，最多保留 2000 条 / 90 天。') }}</p>
+      <div v-if="changes.length" class="audit-list">
+        <article v-for="entry in changes" :key="entry.id" class="audit-row">
+          <time>{{ new Date(entry.created_at * 1000).toLocaleString() }}</time>
+          <b class="audit-result success">{{ entry.method }}</b>
+          <span class="audit-user">{{ entry.username || '—' }}</span>
+          <code class="audit-ip">{{ entry.path }}</code>
+          <span class="audit-reason">{{ entry.summary }}</span>
+          <span class="audit-agent" :title="entry.request_id">{{ entry.request_id || '—' }}</span>
+        </article>
+      </div>
+      <p v-else-if="loading" class="site-log-empty">{{ t('正在读取配置变更审计…') }}</p>
+      <p v-else class="empty-state">{{ t('暂无配置变更记录') }}</p>
     </div>
 
     <form v-else class="log-config-form" @submit.prevent="save"><p v-if="readOnly" class="auth-hint">{{t("只读账户可以查看日志配置，不能修改。")}}</p><fieldset class="op-fieldset" :disabled="readOnly||busy">

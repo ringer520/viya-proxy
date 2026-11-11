@@ -82,6 +82,7 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/auth/logout", a.requireAuth(http.HandlerFunc(a.logout)))
 	mux.Handle("GET /api/v1/auth/me", a.requireAuth(http.HandlerFunc(a.me)))
 	mux.Handle("GET /api/v1/auth/audit", a.requireAuth(http.HandlerFunc(a.listLoginAudit)))
+	mux.Handle("GET /api/v1/config-audit", a.requireAuth(http.HandlerFunc(a.listConfigAudit)))
 	mux.Handle("GET /api/v1/panel/settings", a.requireAuth(http.HandlerFunc(a.getPanelSettings)))
 	mux.Handle("GET /api/v1/panel/access", a.requireAuth(http.HandlerFunc(a.getPanelAccess)))
 	mux.Handle("PUT /api/v1/panel/access", a.requireAuth(http.HandlerFunc(a.putPanelAccess)))

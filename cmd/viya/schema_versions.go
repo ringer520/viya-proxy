@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 6
+const schemaVersion = 7
 
 // The baseline is idempotent so interrupted upgrades can safely resume. New
 // migrations are transactional and are recorded only after they complete.
@@ -43,6 +43,7 @@ UPDATE ddns_records SET last_changed_at=COALESCE((SELECT MAX(CAST(strftime('%s',
 CREATE TABLE access_rule_guards(id INTEGER PRIMARY KEY CHECK(id=1),ban_id INTEGER NOT NULL,before_json TEXT NOT NULL,deadline INTEGER NOT NULL,domain TEXT NOT NULL);
 CREATE TABLE provider_checks(provider_id INTEGER PRIMARY KEY REFERENCES dns_providers(id) ON DELETE CASCADE,status TEXT NOT NULL,message TEXT NOT NULL,checked_at INTEGER NOT NULL);`},
 		{6, "retire configuration history", `DROP TABLE IF EXISTS config_revisions;`},
+		{7, "configuration change audit", `CREATE TABLE IF NOT EXISTS config_audit(id INTEGER PRIMARY KEY, username TEXT NOT NULL DEFAULT '', method TEXT NOT NULL DEFAULT '', path TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', status INTEGER NOT NULL DEFAULT 0, request_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT 0); CREATE INDEX IF NOT EXISTS idx_config_audit_created ON config_audit(created_at);`},
 	}
 	for _, m := range migrations {
 		if m.version <= current {

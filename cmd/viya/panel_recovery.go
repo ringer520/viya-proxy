@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"time"
 )
 
@@ -57,8 +57,8 @@ func (a *App) watchPanelConfirmation() {
 			restored, e := a.restoreExpiredPanelPort(a.ctx)
 			a.configMu.Unlock()
 			if e == nil && restored {
-				if process, e := os.FindProcess(os.Getpid()); e == nil {
-					_ = process.Signal(os.Interrupt)
+				if err := requestProcessRestart("panel port rollback"); err != nil {
+					slog.Warn("port rollback requires a manual restart", "error", err)
 				}
 				return
 			}

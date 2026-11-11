@@ -12,7 +12,6 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"modernc.org/sqlite"
 )
@@ -136,14 +135,6 @@ func internalFailure(err error) bool {
 	}
 	message := err.Error()
 	return strings.HasPrefix(message, "sql: ") || strings.HasPrefix(message, "caddy validate:") || strings.Contains(message, "modernc.org/sqlite")
-}
-
-func logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		slog.Debug("request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
-	})
 }
 
 // recoverPanic keeps a panic in any handler from tearing down the connection

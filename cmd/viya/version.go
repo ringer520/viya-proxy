@@ -439,14 +439,17 @@ func (a *App) versionUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		fail(w, 502, err)
 		return
 	}
+	// Exiting without a supervisor would leave the freshly installed binary
+	// running nowhere. Keep the old process alive and ask the operator to
+	// restart it instead.
+	if !supervisedRestart() {
+		slog.Warn("self-update installed; manual restart required", "version", rel.Tag)
+		setVersionUpdateProgress("等待手动重启", 100, nil)
+		writeJSON(w, 200, map[string]any{"ok": true, "restarting": false, "restart_required": true, "version": rel.Tag})
+		return
+	}
 	slog.Info("self-update applied, restarting", "version", rel.Tag)
 	setVersionUpdateProgress("正在重启", 99, nil)
 	writeJSON(w, 200, map[string]any{"ok": true, "restarting": true, "version": rel.Tag})
-	// Give the response a moment to flush, then hand over to the service
-	// manager (systemd Restart=always / procd respawn) which starts the new
-	// binary.
-	go func() {
-		time.Sleep(700 * time.Millisecond)
-		os.Exit(0)
-	}()
+	_ = requestProcessRestartWith(true, "self-update")
 }

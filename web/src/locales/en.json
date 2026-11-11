@@ -1748,5 +1748,15 @@
   "存在未生效的配置，请重试应用或使用恢复点恢复": "Some configuration is not active. Retry the apply or restore from a recovery point.",
   "配置尚未加载，请查看程序日志": "Configuration is not loaded yet; check the program logs.",
   "检查上游、访问策略和程序日志": "Check the upstream, access policy and program logs.",
-  "不能把整个用户家目录发布为共享，请改用专用的子目录": "The whole home directory cannot be shared; use a dedicated sub-folder."
+  "不能把整个用户家目录发布为共享，请改用专用的子目录": "The whole home directory cannot be shared; use a dedicated sub-folder.",
+  "只记录成功的配置变更：账号、动作、请求路径与请求 ID，最多保留 2000 条 / 90 天。": "Only successful configuration changes are recorded: account, action, request path and request ID. The latest 2000 entries / 90 days are kept.",
+  "在保留的配置变更审计中筛选，最多返回 200 条。": "Filter the retained configuration audit; up to 200 entries are returned.",
+  "当前环境没有检测到服务管理器，无法自动重启；请在服务器上手动重启 Viya": "No service supervisor was detected, so Viya cannot restart itself. Restart it manually on the host.",
+  "新版本已安装，请在服务器上手动重启 Viya 后刷新页面": "The new version is installed. Restart Viya manually on the host, then refresh this page.",
+  "无法获取配置变更审计": "configuration audit unavailable",
+  "暂无配置变更记录": "No configuration changes recorded yet",
+  "更新已完成": "Update installed",
+  "正在读取配置变更审计…": "Loading configuration audit…",
+  "配置变更": "Config changes",
+  "等待手动重启": "Waiting for manual restart"
 }
