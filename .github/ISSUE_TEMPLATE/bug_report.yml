@@ -1,0 +1,86 @@
+name: 问题反馈 / Bug report
+description: 报告 Viya 面板的异常行为
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请先确认：
+        - 已升级到最新版本（旧版可能已修复）；
+        - 脱敏：请勿粘贴真实域名、公网 IP、账号密码、cookie、密钥或完整配置导出。
+        - **安全问题请勿用本模板**，见 [SECURITY.md](https://github.com/ringer520/viya-proxy/blob/main/SECURITY.md)。
+
+  - type: input
+    id: version
+    attributes:
+      label: Viya 版本
+      description: 面板「设置 → 版本与更新」里显示的版本号与 commit
+      placeholder: "v0.6.5 (d96ddaf)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: 部署方式
+      options:
+        - install.sh / systemd
+        - Docker / compose
+        - OpenWrt / procd
+        - 手工运行二进制
+        - 从源码构建
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: 架构与系统
+      options:
+        - linux/amd64 (Debian/Ubuntu 等)
+        - linux/arm64
+        - linux/armv7
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: 发生了什么
+      description: 期望行为 vs 实际行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 从哪一步开始、点了什么、是否能稳定复现
+      placeholder: |
+        1. 打开「文件与共享」
+        2. 新建一个 WebDAV 共享并绑定 HTTPS 监听器
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与报错
+      description: |
+        贴出相关的程序日志或浏览器控制台报错。可用
+        `journalctl -u viya.service -n 100 --no-pager` 获取。
+        请务必打码域名、IP、账号与凭据。
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 最近是否改过面板端口、导入过配置备份、升级过版本？
+    validations:
+      required: false

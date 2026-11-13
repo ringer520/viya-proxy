@@ -706,6 +706,21 @@
 .settings-version-details .settings-notice {
   margin-bottom: 8px;
 }
+.settings-version-details .settings-notice.update-warning {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  color: #b8791c;
+  background: #d9941f12;
+  border-color: #d9941f40;
+}
+.settings-version-details .update-warning .icon-btn {
+  flex: none;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
 .settings-update-action {
   display: flex;
   align-items: center;

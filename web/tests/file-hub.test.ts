@@ -28,14 +28,27 @@ function share(overrides: Partial<FileShare> = {}): FileShare {
 }
 
 describe("Files & Shares address helpers", () => {
-  it("uses the backend URL and falls back to the domain", () => {
+  it("uses the backend URL verbatim", () => {
     expect(shareAddress(share())).toBe("https://share.example.com");
-    expect(shareAddress(share({ url: "", path: "/docs" }))).toBe("https://share.example.com/docs");
   });
 
   it("keeps a non-default port in the address", () => {
     expect(shareAddress(share({ url: "https://nas.example.com:8443" })))
       .toBe("https://nas.example.com:8443");
+  });
+
+  it("keeps a plain-HTTP listener address", () => {
+    expect(shareAddress(share({ url: "http://nas.example.com:8080/docs" })))
+      .toBe("http://nas.example.com:8080/docs");
+  });
+
+  // A missing listener leaves the backend URL empty. Fabricating
+  // https://<domain> here used to produce four mount commands that could never
+  // work -- and could point at the wrong scheme or port.
+  it("does not invent an address when the listener URL is missing", () => {
+    expect(shareAddress(share({ url: "", path: "/docs" }))).toBe("");
+    expect(shareAddress(share({ url: "   " }))).toBe("");
+    expect(shareAddress(share({ url: "" }))).not.toContain("share.example.com");
   });
 });
 
@@ -52,6 +65,17 @@ describe("mountCommands", () => {
   it("uses a placeholder when no account is configured", () => {
     const cmds = mountCommands(share({ auth_user: "" }));
     expect(cmds[0].command).toContain("USERNAME");
+  });
+
+  it("returns no commands when the listener URL is missing", () => {
+    expect(mountCommands(share({ url: "", path: "/docs" }))).toEqual([]);
+    expect(mountCommands(share({ url: "   " }))).toEqual([]);
+  });
+
+  it("never falls back to the bare domain in a command", () => {
+    for (const cmd of mountCommands(share({ url: "", tls_mode: "none" }))) {
+      expect(cmd.command).not.toContain("https://share.example.com");
+    }
   });
 });
 

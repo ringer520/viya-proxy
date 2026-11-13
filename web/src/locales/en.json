@@ -1758,5 +1758,7 @@
   "更新已完成": "Update installed",
   "正在读取配置变更审计…": "Loading configuration audit…",
   "配置变更": "Config changes",
-  "等待手动重启": "Waiting for manual restart"
+  "等待手动重启": "Waiting for manual restart",
+  "主程序已更新，但 Caddy 引擎替换失败，当前仍在运行旧版引擎。请检查引擎路径与目录权限后手动替换并重启。": "The main binary was updated, but the Caddy engine could not be replaced and the old engine is still running. Check the engine path and directory permissions, then replace it and restart manually.",
+  "关闭提示": "Dismiss"
 }

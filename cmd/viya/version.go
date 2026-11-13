@@ -75,7 +75,12 @@ type versionUpdateProgress struct {
 	Stage   string `json:"stage"`
 	Percent int    `json:"percent"`
 	Error   string `json:"error,omitempty"`
+	Warning string `json:"warning,omitempty"`
 }
+
+// engineSwapWarning is a fixed, path-free message: the detailed error only
+// goes to the program log, never into an API response a viewer can read.
+const engineSwapWarning = "主程序已更新，但 Caddy 引擎替换失败，当前仍在运行旧版引擎。请检查引擎路径与目录权限后手动替换并重启。"
 
 func setVersionUpdateProgress(stage string, percent int, err error) {
 	if percent < 0 {
@@ -85,11 +90,38 @@ func setVersionUpdateProgress(stage string, percent int, err error) {
 		percent = 100
 	}
 	updateProgressMu.Lock()
-	updateProgress = versionUpdateProgress{Stage: stage, Percent: percent, Active: percent > 0 && percent < 100 && err == nil}
+	// A non-fatal engine warning must survive the later "restarting" stages.
+	warning := updateProgress.Warning
+	updateProgress = versionUpdateProgress{Stage: stage, Percent: percent, Active: percent > 0 && percent < 100 && err == nil, Warning: warning}
 	if err != nil {
 		updateProgress.Error = err.Error()
 	}
 	updateProgressMu.Unlock()
+}
+
+func setVersionUpdateWarning(warning string) {
+	updateProgressMu.Lock()
+	updateProgress.Warning = warning
+	updateProgressMu.Unlock()
+}
+
+func currentUpdateWarning() string {
+	updateProgressMu.RLock()
+	defer updateProgressMu.RUnlock()
+	return updateProgress.Warning
+}
+
+// swapEngineBinary installs the new Caddy binary. Unlike the main binary this
+// is best-effort: the panel restarts fine on the new build while the old engine
+// keeps serving, so a failure must be reported instead of silently discarded.
+// Returning a warning (rather than an error) keeps the update itself successful
+// while making the mismatch visible in the log, progress API and UI.
+func swapEngineBinary(path string, content []byte) string {
+	if err := replaceExecutable(path, content); err != nil {
+		slog.Warn("self-update: engine binary not replaced", "path", path, "error", err, "hint", engineSwapWarning)
+		return engineSwapWarning
+	}
+	return ""
 }
 
 func (a *App) versionUpdateProgressHandler(w http.ResponseWriter, r *http.Request) {
@@ -318,8 +350,12 @@ func (a *App) downloadAndSwap(tag string) error {
 		caddyPath = filepath.Join(filepath.Dir(selfPath), "caddy")
 	}
 	// Caddy is a subprocess, so a missing path is not fatal: the new binary
-	// can still come up and the user can fix the engine path later.
-	_ = replaceExecutable(caddyPath, caddyBin)
+	// can still come up and the engine can be fixed later. Previously the error
+	// was discarded and the UI reported a clean success while the old engine
+	// kept running; now surface it everywhere the operator will look.
+	if warning := swapEngineBinary(caddyPath, caddyBin); warning != "" {
+		setVersionUpdateWarning(warning)
+	}
 	setVersionUpdateProgress("正在重启", 97, nil)
 	return nil
 }
@@ -432,6 +468,7 @@ func (a *App) versionUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, errors.New("当前已是最新版本"))
 		return
 	}
+	setVersionUpdateWarning("")
 	setVersionUpdateProgress("准备更新", 1, nil)
 	slog.Info("self-update started", "from", version, "to", rel.Tag)
 	if err := a.downloadAndSwap(rel.Tag); err != nil {
@@ -439,17 +476,18 @@ func (a *App) versionUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		fail(w, 502, err)
 		return
 	}
+	warning := currentUpdateWarning()
 	// Exiting without a supervisor would leave the freshly installed binary
 	// running nowhere. Keep the old process alive and ask the operator to
 	// restart it instead.
 	if !supervisedRestart() {
 		slog.Warn("self-update installed; manual restart required", "version", rel.Tag)
 		setVersionUpdateProgress("等待手动重启", 100, nil)
-		writeJSON(w, 200, map[string]any{"ok": true, "restarting": false, "restart_required": true, "version": rel.Tag})
+		writeJSON(w, 200, map[string]any{"ok": true, "restarting": false, "restart_required": true, "version": rel.Tag, "warning": warning})
 		return
 	}
 	slog.Info("self-update applied, restarting", "version", rel.Tag)
 	setVersionUpdateProgress("正在重启", 99, nil)
-	writeJSON(w, 200, map[string]any{"ok": true, "restarting": true, "version": rel.Tag})
+	writeJSON(w, 200, map[string]any{"ok": true, "restarting": true, "version": rel.Tag, "warning": warning})
 	_ = requestProcessRestartWith(true, "self-update")
 }

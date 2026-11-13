@@ -209,4 +209,29 @@ if command -v hostname >/dev/null 2>&1; then
 else
   printf '      http://<server-LAN-IP>:%s\n' "$PANEL_PORT"
 fi
-printf '    The panel listens on all interfaces by default; restrict TCP %s to your LAN in the host firewall if needed.\n' "$PANEL_PORT"
+# Describe the address the unit was actually installed with. The bare binary
+# defaults to loopback, while the installer defaults to a wildcard bind; a
+# custom VIYA_INSTALL_LISTEN can be either, so a fixed "all interfaces" line
+# would be wrong for tunnel-only and single-LAN-IP installs.
+PANEL_BIND_HOST=$(python3 - <<'PY' 2>/dev/null || true
+import shlex, subprocess
+try:
+    env = subprocess.check_output(
+        ["systemctl", "show", "viya.service", "--property=Environment", "--value"],
+        text=True,
+    )
+    settings = dict(item.split("=", 1) for item in shlex.split(env) if "=" in item)
+    listen = settings.get("VIYA_LISTEN", "")
+    host = listen.rsplit(":", 1)[0] if ":" in listen else listen
+    print(host.strip("[]").lower())
+except Exception:
+    pass
+PY
+  )
+if [ "$PANEL_BIND_HOST" = "127.0.0.1" ] || [ "$PANEL_BIND_HOST" = "::1" ] || [ "$PANEL_BIND_HOST" = "localhost" ]; then
+  printf '    The panel is bound to loopback only; open it through an SSH tunnel.\n'
+elif [ "$PANEL_BIND_HOST" = "0.0.0.0" ] || [ "$PANEL_BIND_HOST" = "::" ] || [ -z "$PANEL_BIND_HOST" ]; then
+  printf '    The panel listens on all interfaces; restrict TCP %s to your LAN in the host firewall if needed.\n' "$PANEL_PORT"
+else
+  printf '    The panel is bound to %s; make sure that address is reachable from your LAN.\n' "$PANEL_BIND_HOST"
+fi

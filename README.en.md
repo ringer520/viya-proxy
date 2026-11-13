@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 Open `http://SERVER_IP:8181` afterwards and create the administrator account. systemd Linux and OpenWrt are supported, with amd64, arm64 and armv7 builds; see [Installation](#installation) for Docker.
 
 > [!IMPORTANT]
-> The panel listens on `0.0.0.0:8181` and the first administrator can be created from any IP that can reach it. **On a VPS or any machine reachable from the internet, read [Security](#security) before initialising.**
+> After installing with the script on this page or with Docker, the panel listens on `0.0.0.0:8181` (all interfaces) and the first administrator can be created from any IP that can reach it. **On a VPS or any machine reachable from the internet, read [Security](#security) before initialising.** An unconfigured binary has a different default: `127.0.0.1:8181` (loopback only). See [Installation](#installation) for the difference.
 
 ## Security
 
@@ -147,7 +147,7 @@ With a host firewall enabled, allow the panel TCP port from your LAN as well as 
 Pin a release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.4 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.5 sh
 ```
 
 Environment variables must stay on the right side of the pipe.
@@ -165,7 +165,7 @@ sudo systemctl restart viya.service
 
 systemd installs can check for and apply updates from panel settings; Docker deployments update by pulling a new image.
 
-**Run only one panel instance.** An unconfigured binary defaults `VIYA_LISTEN` to `127.0.0.1:8181` (loopback only); the systemd unit overrides it with a LAN address. Since v0.6.3, binding to a concrete LAN IP makes **the same process** also listen on `127.0.0.1:<port>` (and `[::1]` when IPv6 is available). Local health checks, self-proxy sites and LAN clients therefore reach the same accounts and sites, without exposing the panel on any other interface. A wildcard or loopback bind already covers loopback, so no extra listener is created.
+**Run only one panel instance.** The `VIYA_LISTEN` default depends on how Viya is deployed: a bare, unconfigured binary uses `127.0.0.1:8181` (loopback only), while the systemd installer and the Docker image both set `0.0.0.0:8181` (all interfaces). Pass `VIYA_INSTALL_LISTEN=<LAN_IP>:8181` at install time for a narrower bind. Since v0.6.3, binding to a concrete LAN IP makes **the same process** also listen on `127.0.0.1:<port>` (and `[::1]` when IPv6 is available). Local health checks, self-proxy sites and LAN clients therefore reach the same accounts and sites, without exposing the panel on any other interface. A wildcard or loopback bind already covers loopback, so no extra listener is created.
 
 ```sh
 ss -lntp | grep 8181                                    # several lines are fine, but all must belong to the same viya.service PID
@@ -247,7 +247,7 @@ Pin a version and port:
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.6.4 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.6.5 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 Requires `curl` or `wget`, `tar`, `sha256sum`, `netstat`, UCI and HTTPS CA certificates (`ca-bundle` on opkg systems, `ca-certificates` on apk systems). `/opt` must be persistent or an attached external volume, and downloads need roughly 128 MiB free in `/tmp`. The installer never opens WAN ports on its own. On low-memory routers, prefer external storage or a separate Linux host.

@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 安装完成后打开 `http://服务器IP:8181`，首次访问创建管理员账号。支持 systemd Linux 与 OpenWrt，提供 amd64 / arm64 / armv7 版本；Docker 见[安装](#安装)。
 
 > [!IMPORTANT]
-> 面板默认监听 `0.0.0.0:8181`，首个管理员可从任何能访问面板的 IP 创建。**在 VPS 或任何公网可达的机器上，先读[安全提示](#安全提示)再初始化。**
+> 按本页安装脚本或 Docker 部署后，面板默认监听 `0.0.0.0:8181`（所有网卡），首个管理员可从任何能访问面板的 IP 创建。**在 VPS 或任何公网可达的机器上，先读[安全提示](#安全提示)再初始化。** 直接运行未配置的二进制时默认值不同，只监听 `127.0.0.1:8181`；两种默认值的区别见[安装](#安装)一节。
 
 ## 安全提示
 
@@ -147,7 +147,7 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 固定版本安装：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.4 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.5 sh
 ```
 
 环境变量必须放在管道右侧。
@@ -165,7 +165,7 @@ sudo systemctl restart viya.service
 
 systemd 安装可在「面板设置」中检查并执行自更新；Docker 环境通过拉取新镜像更新。
 
-**只运行一个面板实例。** `VIYA_LISTEN` 在未配置的二进制里默认是 `127.0.0.1:8181`（仅本机），systemd 安装会用环境变量覆盖成局域网地址。v0.6.3 起，绑定到具体局域网 IP 时**同一个进程**会额外监听 `127.0.0.1:<端口>`（IPv6 可用时还有 `[::1]`）：本机健康检查、自反代站点与局域网访问指向同一套账号和站点，同时不会把面板暴露到其它网卡。`0.0.0.0` 和回环绑定本身已覆盖本机，不会重复创建监听。
+**只运行一个面板实例。** `VIYA_LISTEN` 的默认值取决于部署方式：直接运行未配置的二进制是 `127.0.0.1:8181`（仅本机）；systemd 安装脚本与 Docker 镜像都设为 `0.0.0.0:8181`（所有网卡），如需收窄可在安装时指定 `VIYA_INSTALL_LISTEN=<局域网IP>:8181`。v0.6.3 起，绑定到具体局域网 IP 时**同一个进程**会额外监听 `127.0.0.1:<端口>`（IPv6 可用时还有 `[::1]`）：本机健康检查、自反代站点与局域网访问指向同一套账号和站点，同时不会把面板暴露到其它网卡。`0.0.0.0` 和回环绑定本身已覆盖本机，不会重复创建监听。
 
 ```sh
 ss -lntp | grep 8181                                    # 可能有多行，但必须都属于同一个 viya.service 进程
@@ -247,7 +247,7 @@ uci commit uhttpd && /etc/init.d/uhttpd restart
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.6.4 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.6.5 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 需要 `curl` 或 `wget`、`tar`、`sha256sum`、`netstat`、UCI 与 HTTPS CA 证书（opkg 系安装 `ca-bundle`，apk 系安装 `ca-certificates`）。`/opt` 必须是持久化目录或已挂载的外部存储，下载解压还需 `/tmp` 约 128 MiB 可用空间。安装器不会自动开放 WAN 端口。小内存路由器建议挂外部存储或改用独立 Linux 主机。

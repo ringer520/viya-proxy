@@ -134,7 +134,7 @@ onMounted(() => void refreshFileShares());
           <ShieldCheck :size="14" /> {{ t("访问受账号保护：") }}{{ share.auth_user }}
         </p>
 
-        <div v-if="share.webdav && share.url" class="share-address">
+        <div v-if="share.webdav && shareAddress(share)" class="share-address">
           <code :title="shareAddress(share)">{{ shareAddress(share) }}</code>
           <button class="icon-btn" :title="t('复制地址')" @click="copy(shareAddress(share), 'addr-' + share.id)">
             <Check v-if="copied === 'addr-' + share.id" :size="14" />
@@ -147,15 +147,15 @@ onMounted(() => void refreshFileShares());
           <button class="secondary" @click="manage(share)">
             <FolderUp :size="14" /> {{ t("管理文件") }}
           </button>
-          <button v-if="share.webdav" class="secondary" @click="toggleCommands(share.id)">
+          <button v-if="share.webdav && shareAddress(share)" class="secondary" @click="toggleCommands(share.id)">
             <Terminal :size="14" /> {{ expanded === share.id ? t("收起挂载命令") : t("挂载命令") }}
           </button>
-          <a v-if="share.url" class="secondary" :href="share.url" target="_blank" rel="noopener noreferrer">
+          <a v-if="shareAddress(share)" class="secondary" :href="shareAddress(share)" target="_blank" rel="noopener noreferrer">
             <ExternalLink :size="14" /> {{ t("打开") }}
           </a>
         </div>
 
-        <div v-if="expanded === share.id && share.webdav" class="mount-list">
+        <div v-if="expanded === share.id && share.webdav && shareAddress(share)" class="mount-list">
           <div v-for="cmd in mountCommands(share)" :key="cmd.id" class="mount-row">
             <span class="mount-label">{{ cmd.label }}</span>
             <code>{{ cmd.command }}</code>

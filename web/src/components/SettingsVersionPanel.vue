@@ -7,7 +7,14 @@ const props=defineProps<{role:'admin'|'viewer';csrf:string;blocked:boolean}>()
 const emit=defineEmits<{busy:[value:boolean];reloadReady:[]}>()
 const identity=ref({commit:'',built_at:'',source:'',schema_version:0})
 const current=ref(''),latest=ref(''),available=ref(false),docker=ref(false),managed=ref(false),notes=ref(''),url=ref('')
-const checking=ref(false),updating=ref(false),expanded=ref(false),error=ref(''),message=ref(''),progress=ref(0),stage=ref('')
+const checking=ref(false),updating=ref(false),expanded=ref(false),error=ref(''),message=ref(''),warning=ref(''),progress=ref(0),stage=ref('')
+// A self-update restarts the process and reloads this page, so a non-fatal
+// engine warning has to survive the reload to remain visible.
+const WARNING_KEY='viya-update-warning'
+function rememberWarning(value:string){
+  warning.value=value?t(value):''
+  try { if(value) sessionStorage.setItem(WARNING_KEY,value); else sessionStorage.removeItem(WARNING_KEY) } catch { /* storage may be unavailable */ }
+}
 const canUpdate=computed(()=>props.role==='admin' && managed.value && !docker.value && available.value && !props.blocked)
 const requests=new AbortController()
 let alive=true,poll:ReturnType<typeof setInterval>|undefined,restarting=false,pollBusy=false
@@ -29,7 +36,11 @@ async function pollProgress(){
   if(pollBusy||!alive)return;pollBusy=true
   try {
     const response=await apiFetch('/api/v1/version/update/status',{signal:requests.signal});if(!response.ok)return
-    const data=await response.json();if(!alive||(!data.active&&!restarting))return
+    const data=await response.json();if(!alive)return
+    // Read the warning before the active check: once the update finishes the
+    // progress endpoint reports active=false, and the final poll would drop it.
+    if(data.warning)rememberWarning(data.warning)
+    if(!data.active&&!restarting)return
     progress.value=Math.max(progress.value,Math.min(100,Number(data.percent)||0))
     if(data.stage)stage.value=t(data.stage)
     if(data.stage==='正在重启')restarting=true
@@ -52,7 +63,7 @@ async function waitForVersion(target:string){
 }
 async function update(){
   if(!canUpdate.value||updating.value)return
-  updating.value=true;emit('busy',true);expanded.value=true;error.value='';message.value='';progress.value=0;stage.value=t('准备更新');restarting=false
+  updating.value=true;emit('busy',true);expanded.value=true;error.value='';message.value='';rememberWarning('');progress.value=0;stage.value=t('准备更新');restarting=false
   const target=latest.value
   poll=setInterval(()=>void pollProgress(),600)
   try {
@@ -62,6 +73,7 @@ async function update(){
     if(response){
       const data=await response.json().catch(()=>({}))
       if(!response.ok)throw Error(t(data.error)||t('更新失败'))
+      if(data.warning)rememberWarning(data.warning)
       if(data.restart_required){
         progress.value=100;stage.value=t('更新已完成')
         message.value=t('新版本已安装，请在服务器上手动重启 Viya 后刷新页面')
@@ -76,7 +88,10 @@ async function update(){
   }catch(e){if(alive)error.value=e instanceof Error?t(e.message):t('更新失败')}
   finally{clearInterval(poll);if(alive){updating.value=false;emit('busy',false)}}
 }
-onMounted(()=>void check())
+onMounted(()=>{
+  try { const saved=sessionStorage.getItem(WARNING_KEY); if(saved){rememberWarning(saved);expanded.value=true} } catch { /* storage may be unavailable */ }
+  void check()
+})
 onBeforeUnmount(()=>{alive=false;requests.abort();clearInterval(poll)})
 </script>
 <template>
@@ -89,6 +104,7 @@ onBeforeUnmount(()=>{alive=false;requests.abort();clearInterval(poll)})
     <div v-if="expanded||updating" id="settings-version-details" class="settings-version-details">
       <div v-if="updating" class="settings-update-progress" role="status"><div><span>{{stage}}</span><b>{{progress}}%</b></div><progress :value="progress" max="100">{{progress}}%</progress></div>
       <p v-if="error" class="settings-alert" role="alert">{{error}}</p><p v-if="message" class="settings-notice success" role="status">{{message}}</p>
+      <div v-if="warning" class="settings-notice update-warning" role="status"><span>{{warning}}</span><button type="button" class="icon-btn" :aria-label="t('关闭提示')" @click="rememberWarning('')">×</button></div>
       <p v-if="docker" class="drawer-field-help">{{t('检测到 Docker 环境：自动更新不可用，请拉取新镜像并重建容器。')}}</p>
       <p v-else-if="current&&!managed" class="drawer-field-help">{{t('当前环境不支持自动更新，请手动替换二进制。')}}</p>
       <p v-if="available&&role==='viewer'" class="drawer-field-help">{{t('只读账号不能执行更新，请联系管理员。')}}</p>
