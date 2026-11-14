@@ -8,7 +8,7 @@ import SystemGauges from './SystemGauges.vue'
 import TrafficTrend from './TrafficTrend.vue'
 import { hosts, l4Rules, ddnsRecords, certExpiring, upstreamHealth, online } from '../composables/useState'
 import { webHosts } from '../composables/useHosts'
-import { traffic, trafficLoadedRange, trafficRange, trafficTrend, trafficTotals, trafficRanking, trafficError } from '../composables/useTraffic'
+import { traffic, trafficLoadedRange, trafficRange, trafficTrend, trafficTotals, trafficLifetimeTotals, trafficRanking, trafficError } from '../composables/useTraffic'
 import { autoRefresh, pauseHidden, documentHidden, trafficCharts } from '../composables/usePreferences'
 import { openSiteDetails } from '../composables/useSiteWorkspace'
 import { formatBytes } from '../format'
@@ -54,6 +54,7 @@ const events = computed(() => [
         <header class="mission-card-head"><div><span v-if="showKicker" class="mission-kicker">NETWORK ACTIVITY</span><h2>{{t('流量分析')}}</h2></div><div class="mission-periods" role="group" :aria-label="t('统计周期')"><button v-for="period in periods" :key="period.id" :class="{selected:trafficRange===period.id}" :aria-pressed="trafficRange===period.id" @click="trafficRange=period.id">{{period.label}}</button></div></header>
         <p v-if="trafficError" class="mission-data-error" role="alert">{{trafficError}} · {{t('以下为上次采样')}}</p>
         <div class="mission-traffic-kpis"><div><small>{{t('请求 / 连接')}}</small><strong><AnimatedMetric :value="trafficTotals.requests"/></strong></div><div><small>{{t('上行流量')}}</small><strong><AnimatedMetric :value="trafficTotals.upload" format="bytes"/></strong></div><div><small>{{t('下行流量')}}</small><strong><AnimatedMetric :value="trafficTotals.download" format="bytes"/></strong></div><button type="button" class="web-error-trigger" :class="{bad:errorRate>5}" :aria-label="t('查看 Web 错误站点')" @click="errorsOpen=true" :title="t('仅统计 Web 请求的 4xx / 5xx 比例')"><small>{{t('Web 错误率')}}</small><strong><AnimatedMetric :value="errorRate" format="decimal"/><em>%</em></strong></button></div>
+        <div class="mission-traffic-lifetime" :title="t('累计值来自数据库，重启或升级不会清零；超过保留期的历史会被清理')"><span class="lifetime-label">{{t('保留期内累计')}}<small>{{t('重启 / 升级不清零')}}</small></span><span><small>{{t('请求 / 连接')}}</small><b>{{trafficLifetimeTotals.requests.toLocaleString()}}</b></span><span><small>{{t('上行')}}</small><b>{{formatBytes(trafficLifetimeTotals.upload)}}</b></span><span><small>{{t('下行')}}</small><b>{{formatBytes(trafficLifetimeTotals.download)}}</b></span></div>
         <TrafficTrend v-if="trafficCharts && rangeReady" :points="trafficTrend" :granularity="trafficRange==='24h'?'hour':'day'" :period="trafficRange" embedded/>
         <div v-else-if="trafficCharts" class="mission-chart-loading" role="status"><span v-if="!trafficError"/>{{trafficError?t('当前周期数据不可用'):t('正在加载统计')}}</div>
         <button v-if="!trafficCharts" class="inline-action" type="button" @click="trafficCharts=true">{{t('显示流量趋势图')}}</button>

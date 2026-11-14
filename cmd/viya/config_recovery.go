@@ -242,7 +242,7 @@ func (a *App) rollbackConfiguration(w http.ResponseWriter, r *http.Request) {
 
 // Preserve samples and logs for objects that still exist after recovery.
 func restoreRecoveryRuntime(ctx context.Context, tx *sql.Tx, tables []tableDump) error {
-	refs := map[string][2]string{"traffic_hours": {"site_id", "proxy_hosts"}, "site_access_events": {"site_id", "proxy_hosts"}, "ddns_runs": {"ddns_record_id", "ddns_records"}}
+	refs := map[string][2]string{"traffic_hours": {"site_id", "proxy_hosts"}, "layer4_traffic_hours": {"rule_id", "layer4_rules"}, "site_access_events": {"site_id", "proxy_hosts"}, "ddns_runs": {"ddns_record_id", "ddns_records"}}
 	filtered := make([]tableDump, 0, len(tables))
 	for _, table := range tables {
 		ref, has := refs[table.Name]

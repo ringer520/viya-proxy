@@ -45,6 +45,12 @@ button.mission-count{border:0;text-align:left;font-family:inherit;background:tra
 .mission-traffic-kpis strong{font-size:20px;letter-spacing:-.04em;font-weight:650;white-space:nowrap;font-variant-numeric:tabular-nums;line-height:1.4}
 .mission-traffic-kpis em{font-size:11px;font-style:normal;margin-left:2px;color:var(--muted)}
 .mission-traffic-kpis .bad strong{color:#e65776}
+.mission-traffic-lifetime{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;padding:9px 12px;margin:-2px 0 10px;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--accent) 4%,var(--surface));font-size:11px}
+.mission-traffic-lifetime>span{display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap}
+.mission-traffic-lifetime small{color:var(--muted);font-size:10px}
+.mission-traffic-lifetime b{font-variant-numeric:tabular-nums;font-weight:600}
+.mission-traffic-lifetime .lifetime-label{color:var(--muted)}
+.mission-traffic-lifetime .lifetime-label small{padding:2px 6px;border-radius:5px;background:color-mix(in srgb,var(--success) 14%,transparent);color:var(--success)}
 .mission-chart-note{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:9px;margin-top:5px}
 .mission-chart-note>span:last-child{margin-left:auto}
 .mission-legend{height:5px;width:14px;border-radius:5px;background:linear-gradient(90deg,var(--accent-2),var(--accent))}

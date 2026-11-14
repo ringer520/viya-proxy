@@ -447,12 +447,29 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 	if logErr != nil {
 		return nil, logErr
 	}
-	config["logging"] = map[string]any{"logs": map[string]any{"default": map[string]any{"level": logConfig.Level}, "viya_access": map[string]any{"level": "INFO", "writer": map[string]any{"output": "file", "filename": filepath.Join(a.dataDir, "access.log"), "roll_size_mb": logConfig.AccessMB, "roll_keep": logConfig.Backups, "roll_keep_days": logConfig.Days, "roll_compression": "gzip"}, "encoder": map[string]any{"format": "json"}}, "layer4": map[string]any{"level": "DEBUG", "writer": map[string]any{"output": "file", "filename": filepath.Join(a.dataDir, "l4-access.log"), "roll_size_mb": logConfig.AccessMB, "roll_keep": logConfig.Backups, "roll_keep_days": logConfig.Days, "roll_compression": "gzip"}, "encoder": map[string]any{"format": "json"}}}}
+	config["logging"] = loggingConfig(a.dataDir, logConfig)
 	body, err := json.Marshal(config)
 	if err != nil {
 		return nil, err
 	}
 	return body, nil
+}
+
+// loggingConfig splits Caddy's custom logs by logger namespace. Caddy sends
+// every entry to every custom log unless include narrows it; without that
+// filter both files carried the same HTTP access events and the same startup
+// line, which made ingestion cursors collide and double-counted traffic as
+// soon as both files were readable. include values are namespace prefixes, so
+// a single "http.log.access" covers every per-listener access logger.
+func loggingConfig(dataDir string, cfg LogSettings) map[string]any {
+	httpWriter := map[string]any{"output": "file", "filename": filepath.Join(dataDir, "access.log"), "roll_size_mb": cfg.AccessMB, "roll_keep": cfg.Backups, "roll_keep_days": cfg.Days, "roll_compression": "gzip"}
+	l4Writer := map[string]any{"output": "file", "filename": filepath.Join(dataDir, "l4-access.log"), "roll_size_mb": cfg.AccessMB, "roll_keep": cfg.Backups, "roll_keep_days": cfg.Days, "roll_compression": "gzip"}
+	jsonEncoder := map[string]any{"format": "json"}
+	return map[string]any{"logs": map[string]any{
+		"default":     map[string]any{"level": cfg.Level},
+		"viya_access": map[string]any{"level": "INFO", "include": []string{"http.log.access"}, "writer": httpWriter, "encoder": jsonEncoder},
+		"layer4":      map[string]any{"level": "DEBUG", "include": []string{"layer4"}, "writer": l4Writer, "encoder": jsonEncoder},
+	}}
 }
 
 // A site imported onto another HTTPS listener is still the same TLS subject.

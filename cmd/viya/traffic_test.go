@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -155,4 +156,216 @@ func TestLayer4ConnectionStatsIngest(t *testing.T) {
 	if zero != 0 {
 		t.Fatalf("udp rule 2 should have no rows, got %d", zero)
 	}
+}
+
+// Regression for the v0.6.5 field failure: Caddy wrote the same startup line
+// into both custom logs. A rotated l4 file and the active access.log therefore
+// shared one generation; once the rotated file was marked complete, every
+// subsequent HTTP access line was silently skipped.
+func TestTrafficCursorIsPerFile(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err = db.Exec(`PRAGMA foreign_keys=ON; CREATE TABLE proxy_hosts(id INTEGER PRIMARY KEY,domain TEXT,listener_id TEXT NOT NULL DEFAULT '');INSERT INTO proxy_hosts(id,domain) VALUES(1,'app.test');CREATE TABLE layer4_rules(id INTEGER PRIMARY KEY,name TEXT,listen_port INTEGER,protocol TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{db: db, ctx: context.Background(), dataDir: t.TempDir()}
+	if err = a.initTraffic(); err != nil {
+		t.Fatal(err)
+	}
+	startup := []byte(`{"level":"info","ts":1793894026.5,"logger":"tls.cache.maintenance","msg":"started background certificate maintenance"}` + "\n")
+	event := func(ts int64) []byte {
+		return []byte(fmt.Sprintf(`{"ts":%d,"status":200,"bytes_read":1,"size":2,"request":{"host":"app.test","uri":"/"}}`, ts) + "\n")
+	}
+	count := func() int {
+		t.Helper()
+		if err := a.ingestTraffic(); err != nil {
+			t.Fatal(err)
+		}
+		var n int
+		if err := db.QueryRow(`SELECT COALESCE(SUM(requests),0) FROM traffic_hours`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	path := filepath.Join(a.dataDir, "access.log")
+	initial := append(append([]byte{}, startup...), event(1793318400)...)
+	if err = os.WriteFile(path, initial, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("initial ingest = %d, want 1", got)
+	}
+	archive, err := os.Create(filepath.Join(a.dataDir, "l4-access-rotated.log.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	z := gzip.NewWriter(archive)
+	if _, err = z.Write(startup); err != nil {
+		t.Fatal(err)
+	}
+	z.Close()
+	archive.Close()
+	if got := count(); got != 1 {
+		t.Fatalf("after rotation = %d, want 1", got)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Write(event(1793318401))
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := count(); got != 2 {
+		t.Fatalf("after append = %d, want 2 (active access.log was skipped)", got)
+	}
+}
+
+// An old shared generation cursor can point past the end of the current file.
+// Repairing it must not replay history that is already stored, while new lines
+// appended afterwards must still be ingested.
+func TestTrafficCursorPastEOFDoesNotReplayHistory(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err = db.Exec(`PRAGMA foreign_keys=ON; CREATE TABLE proxy_hosts(id INTEGER PRIMARY KEY,domain TEXT,listener_id TEXT NOT NULL DEFAULT '');INSERT INTO proxy_hosts(id,domain) VALUES(1,'app.test');CREATE TABLE layer4_rules(id INTEGER PRIMARY KEY,name TEXT,listen_port INTEGER,protocol TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{db: db, ctx: context.Background(), dataDir: t.TempDir()}
+	if err = a.initTraffic(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(a.dataDir, "access.log")
+	line := []byte(`{"ts":1793318400,"status":200,"bytes_read":1,"size":2,"request":{"host":"app.test","uri":"/"}}` + "\n")
+	if err = os.WriteFile(path, line, 0600); err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		t.Helper()
+		if err := a.ingestTraffic(); err != nil {
+			t.Fatal(err)
+		}
+		var n int
+		if err := db.QueryRow(`SELECT COALESCE(SUM(requests),0) FROM traffic_hours`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("initial ingest = %d, want 1", got)
+	}
+	if _, err = db.Exec(`UPDATE traffic_files SET offset=? WHERE path=?`, 1<<20, path); err != nil {
+		t.Fatal(err)
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("cursor repair replayed %d extra requests", got-1)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Write([]byte(`{"ts":1793318401,"status":200,"bytes_read":1,"size":2,"request":{"host":"app.test","uri":"/next"}}` + "\n"))
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := count(); got != 2 {
+		t.Fatalf("after append = %d, want 2", got)
+	}
+}
+
+// The two custom logs must never receive the same entries again, otherwise
+// traffic is counted twice and their first lines collide into one generation.
+func TestLoggingConfigSplitsCustomLogs(t *testing.T) {
+	dir := t.TempDir()
+	logs := loggingConfig(dir, LogSettings{Level: "INFO", AccessMB: 100, ProgramMB: 20, Backups: 5, Days: 30})["logs"].(map[string]any)
+	web := logs["viya_access"].(map[string]any)
+	l4 := logs["layer4"].(map[string]any)
+	include := func(m map[string]any) []string {
+		got, ok := m["include"].([]string)
+		if !ok {
+			t.Fatalf("custom log has no include filter: %+v", m)
+		}
+		return got
+	}
+	if inc := include(web); len(inc) != 1 || inc[0] != "http.log.access" {
+		t.Fatalf("web include = %v, want [http.log.access]", inc)
+	}
+	if inc := include(l4); len(inc) != 1 || inc[0] != "layer4" {
+		t.Fatalf("l4 include = %v, want [layer4]", inc)
+	}
+	if got := web["writer"].(map[string]any)["filename"]; got != filepath.Join(dir, "access.log") {
+		t.Fatalf("web writer filename = %v", got)
+	}
+	if got := l4["writer"].(map[string]any)["filename"]; got != filepath.Join(dir, "l4-access.log") {
+		t.Fatalf("l4 writer filename = %v", got)
+	}
+	if _, ok := logs["default"].(map[string]any)["include"]; ok {
+		t.Fatal("the default log must keep accepting the remaining entries")
+	}
+}
+
+// Restoring a configuration point deletes proxy_hosts/layer4_rules, which
+// cascades into the traffic tables. The L4 hourly rows must be captured and
+// written back for rules that still exist instead of disappearing forever.
+func TestRecoveryRuntimeKeepsLayer4Traffic(t *testing.T) {
+	if !containsString(runtimeTables, "layer4_traffic_hours") {
+		t.Fatal("layer4_traffic_hours is not captured before a configuration restore")
+	}
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err = db.Exec(`PRAGMA foreign_keys=OFF;
+		CREATE TABLE layer4_rules(id INTEGER PRIMARY KEY);
+		INSERT INTO layer4_rules(id) VALUES(1);
+		CREATE TABLE layer4_traffic_hours(rule_id INTEGER NOT NULL,hour INTEGER NOT NULL,connections INTEGER NOT NULL,upload INTEGER NOT NULL,download INTEGER NOT NULL,PRIMARY KEY(rule_id,hour));
+		INSERT INTO layer4_traffic_hours VALUES(1,100,3,10,20),(1,101,2,5,7),(99,100,1,1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dumps, err := captureTables(ctx, db, []string{"layer4_traffic_hours"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = restoreRecoveryRuntime(ctx, tx, dumps); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var kept, orphaned int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM layer4_traffic_hours WHERE rule_id=1`).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow(`SELECT COUNT(*) FROM layer4_traffic_hours WHERE rule_id=99`).Scan(&orphaned); err != nil {
+		t.Fatal(err)
+	}
+	if kept != 2 || orphaned != 0 {
+		t.Fatalf("kept=%d orphaned=%d, want 2/0", kept, orphaned)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

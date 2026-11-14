@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,12 +75,73 @@ func (a *App) initTraffic() error {
 	_, err := a.db.Exec(`CREATE TABLE IF NOT EXISTS traffic_hours(site_id INTEGER NOT NULL REFERENCES proxy_hosts(id) ON DELETE CASCADE,hour INTEGER NOT NULL,requests INTEGER NOT NULL,errors INTEGER NOT NULL,upload INTEGER NOT NULL,download INTEGER NOT NULL,PRIMARY KEY(site_id,hour));
 	CREATE INDEX IF NOT EXISTS idx_traffic_hours_hour ON traffic_hours(hour);
 	CREATE TABLE IF NOT EXISTS traffic_cursors(generation TEXT PRIMARY KEY,offset INTEGER NOT NULL,complete INTEGER NOT NULL DEFAULT 0);
-	CREATE TABLE IF NOT EXISTS traffic_files(path TEXT PRIMARY KEY,size INTEGER NOT NULL,mtime INTEGER NOT NULL,offset INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0);
+	CREATE TABLE IF NOT EXISTS traffic_files(path TEXT PRIMARY KEY,size INTEGER NOT NULL,mtime INTEGER NOT NULL,offset INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0,generation TEXT NOT NULL DEFAULT '');
 	CREATE TABLE IF NOT EXISTS site_access_events(id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES proxy_hosts(id) ON DELETE CASCADE,event TEXT NOT NULL);
 	CREATE INDEX IF NOT EXISTS idx_site_access_events ON site_access_events(site_id,id DESC);
 	CREATE TABLE IF NOT EXISTS layer4_traffic_hours(rule_id INTEGER NOT NULL REFERENCES layer4_rules(id) ON DELETE CASCADE,hour INTEGER NOT NULL,connections INTEGER NOT NULL,upload INTEGER NOT NULL,download INTEGER NOT NULL,PRIMARY KEY(rule_id,hour));
 	CREATE INDEX IF NOT EXISTS idx_layer4_traffic_hours_hour ON layer4_traffic_hours(hour);`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Traffic tables are created here rather than in the versioned migration
+	// chain, so upgrade existing databases explicitly. Older traffic_files rows
+	// have no generation; ingestion treats an empty value as "unknown identity".
+	probe, probeErr := a.db.Query(`SELECT generation FROM traffic_files LIMIT 0`)
+	if probeErr == nil {
+		probe.Close()
+	} else {
+		if !strings.Contains(probeErr.Error(), "no such column") {
+			return probeErr
+		}
+		if _, err = a.db.Exec(`ALTER TABLE traffic_files ADD COLUMN generation TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	return a.seedTrafficCursors()
+}
+
+// seedTrafficCursors records the current end of each active log under its
+// content identity. If Caddy rotates a log while the panel is starting (for
+// example when the logging config changes on upgrade), the rotated copy then
+// inherits this offset instead of being replayed from byte zero, which would
+// double-count traffic already stored in traffic_hours.
+func (a *App) seedTrafficCursors() error {
+	for _, name := range []string{"access.log", "l4-access.log"} {
+		path := filepath.Join(a.dataDir, name)
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		first, readErr := bufio.NewReader(f).ReadBytes('\n')
+		info, statErr := f.Stat()
+		f.Close()
+		if readErr != nil || statErr != nil || len(first) == 0 {
+			continue
+		}
+		if _, err := a.db.Exec(`INSERT INTO traffic_cursors(generation,offset,complete) VALUES(?,?,0)
+			ON CONFLICT(generation) DO UPDATE SET offset=MAX(traffic_cursors.offset,excluded.offset)`,
+			trafficGeneration(path, first), info.Size()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// trafficGeneration identifies the *content* of a log so the same stream can
+// be followed through rename and gzip rotation. The log family is part of the
+// identity: Caddy writes the same startup line to every custom log, which used
+// to make access.log and a rotated l4-access file share one generation. That
+// marked an active file complete and silently stopped ingestion forever.
+func trafficGeneration(path string, first []byte) string {
+	family := "http"
+	if strings.HasPrefix(filepath.Base(path), "l4") {
+		family = "l4"
+	}
+	h := sha256.New()
+	_, _ = h.Write([]byte(family))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(first)
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 func normalizedLogHost(host string) string {
 	if name, _, err := net.SplitHostPort(host); err == nil {
@@ -164,12 +224,23 @@ func (a *App) ingestTrafficFile(path string) error {
 	if err != nil {
 		return err
 	}
-	// Rotated logs never change once complete; skip them without paying for a
-	// gzip header decompression every two seconds.
-	var indexedSize, indexedMtime int64
-	var indexedComplete int
-	if err := a.db.QueryRowContext(a.ctx, `SELECT size,mtime,complete FROM traffic_files WHERE path=?`, path).Scan(&indexedSize, &indexedMtime, &indexedComplete); err == nil {
-		if indexedComplete != 0 && indexedSize == info.Size() && indexedMtime == info.ModTime().UnixNano() {
+	// Offset and completion belong to the path, not to the shared content
+	// identity. traffic_cursors is consulted only when a log appears under a
+	// new name after rotation, or when an existing path changes identity.
+	var (
+		offset         int64
+		complete       int
+		indexedSize    int64
+		indexedMtime   int64
+		fileGeneration string
+		haveFileCursor bool
+	)
+	if err := a.db.QueryRowContext(a.ctx, `SELECT size,mtime,offset,complete,generation FROM traffic_files WHERE path=?`, path).
+		Scan(&indexedSize, &indexedMtime, &offset, &complete, &fileGeneration); err == nil {
+		haveFileCursor = true
+		// Rotated logs never change once complete; skip them without paying for a
+		// gzip header decompression every two seconds.
+		if complete != 0 && indexedSize == info.Size() && indexedMtime == info.ModTime().UnixNano() {
 			return nil
 		}
 	}
@@ -195,16 +266,31 @@ func (a *App) ingestTrafficFile(path string) error {
 	if err != nil {
 		return err
 	}
-	// Content identity follows the same log through rename and gzip rotation.
-	generation := fmt.Sprintf("%x", sha256.Sum256(first))
-	var offset int64
-	var complete int
-	err = a.db.QueryRowContext(a.ctx, `SELECT offset,complete FROM traffic_cursors WHERE generation=?`, generation).Scan(&offset, &complete)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
+	generation := trafficGeneration(path, first)
+	// A changed first line on an existing path means the file was truncated or
+	// recreated (rotation / config reload). A brand-new path is usually a log
+	// that was renamed after rotation. In both cases resume from the content
+	// cursor so already-consumed bytes are never counted twice.
+	if !haveFileCursor || (fileGeneration != "" && fileGeneration != generation) {
+		var inherited int64
+		if err := a.db.QueryRowContext(a.ctx, `SELECT offset FROM traffic_cursors WHERE generation=?`, generation).Scan(&inherited); err != nil {
+			inherited = 0
+		}
+		offset = inherited
+		complete = 0
 	}
 	if complete != 0 {
 		return nil
+	}
+	// For .gz files info.Size() is the compressed size while offset is a
+	// position in the decompressed stream, so the two are not comparable.
+	if !strings.HasSuffix(path, ".gz") && offset > info.Size() {
+		// A cursor past EOF comes from a truncated file or from an old shared
+		// generation cursor. Those bytes were already accounted for; replaying
+		// them would double-count traffic, so resume at the current end and let
+		// the next append be ingested normally.
+		slog.Warn("traffic log cursor past EOF; skipping already ingested bytes", "path", filepath.Base(path), "offset", offset, "size", info.Size())
+		offset = info.Size()
 	}
 	if offset > 0 {
 		if offset < int64(len(first)) {
@@ -372,10 +458,11 @@ func (a *App) ingestTrafficFile(path string) error {
 			return err
 		}
 	}
-	if _, err = tx.ExecContext(a.ctx, `INSERT INTO traffic_cursors(generation,offset,complete) VALUES(?,?,?) ON CONFLICT(generation) DO UPDATE SET offset=excluded.offset,complete=excluded.complete`, generation, offset, complete); err != nil {
+	// A shorter reader must never move the shared content cursor backwards.
+	if _, err = tx.ExecContext(a.ctx, `INSERT INTO traffic_cursors(generation,offset,complete) VALUES(?,?,?) ON CONFLICT(generation) DO UPDATE SET offset=MAX(traffic_cursors.offset,excluded.offset),complete=MAX(traffic_cursors.complete,excluded.complete)`, generation, offset, complete); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(a.ctx, `INSERT INTO traffic_files(path,size,mtime,offset,complete) VALUES(?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,offset=excluded.offset,complete=excluded.complete`, path, info.Size(), info.ModTime().UnixNano(), offset, complete); err != nil {
+	if _, err = tx.ExecContext(a.ctx, `INSERT INTO traffic_files(path,size,mtime,offset,complete,generation) VALUES(?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,offset=excluded.offset,complete=excluded.complete,generation=excluded.generation`, path, info.Size(), info.ModTime().UnixNano(), offset, complete, generation); err != nil {
 		return err
 	}
 	return tx.Commit()

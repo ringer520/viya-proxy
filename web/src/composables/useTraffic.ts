@@ -43,6 +43,17 @@ export const trafficTotals = computed(() => {
     addCounter(sum, item.recent);
   return sum;
 });
+// `total` is a full-table sum from SQLite: unlike the sliding `recent` window
+// it does not shrink after a restart or when the selected range changes. The
+// panel used to render only `recent`, which made persisted history look lost.
+// History older than the configured retention (90 days by default) is pruned,
+// so this is a "retained lifetime" total rather than a true all-time counter.
+export const trafficLifetimeTotals = computed(() => {
+  const sum = emptyCounters();
+  for (const item of Object.values(traffic.value)) addCounter(sum, item.total || ZERO_COUNTERS);
+  for (const item of Object.values(l4Traffic.value)) addCounter(sum, item.total || ZERO_COUNTERS);
+  return sum;
+});
 function addCounter(sum: Counters, from: Counters) {
   sum.requests += from.requests;
   sum.errors += from.errors;

@@ -23,7 +23,7 @@ import (
 const configFormat = "viya-config-v3"
 
 var configTables = []string{"dns_providers", "custom_certificates", "managed_certificates", "proxy_hosts", "layer4_rules", "ddns_records", "ip_bans", "panel_settings"}
-var runtimeTables = []string{"sessions", "traffic_hours", "site_access_events", "ddns_runs"}
+var runtimeTables = []string{"sessions", "traffic_hours", "layer4_traffic_hours", "site_access_events", "ddns_runs"}
 
 type configCell struct {
 	Type  string `json:"type"`
