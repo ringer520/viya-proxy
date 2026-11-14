@@ -234,10 +234,13 @@
   background: transparent;
   color: var(--text);
   font: inherit;
-  cursor: pointer;
 }
-.error-location-row:hover {
-  background: var(--accent-soft);
+.error-location-row b {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
 }
 .error-location-row span {
   min-width: 0;

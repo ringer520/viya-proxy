@@ -162,13 +162,17 @@ func TestApplyJournalSurvivesRestartAndStages(t *testing.T) {
 		t.Fatal("formatting changed config identity")
 	}
 }
-func TestRetentionPreservesConfigAndLimitsEventsPerSite(t *testing.T) {
+func TestRetentionPrunesOnlyExpiredStatistics(t *testing.T) {
 	a := stabilityApp(t)
-	_, err := a.db.Exec(`INSERT INTO proxy_hosts(id,domain,upstream) VALUES(1,'one.test','http://localhost'),(2,'two.test','http://localhost'); INSERT INTO panel_settings VALUES('retention','{"traffic_days":30,"access_events":1}'); INSERT INTO site_access_events(site_id,event) VALUES(1,'old'),(1,'new'),(2,'other');`)
+	_, err := a.db.Exec(`INSERT INTO proxy_hosts(id,domain,upstream) VALUES(1,'one.test','http://localhost'),(2,'two.test','http://localhost'); INSERT INTO panel_settings VALUES('retention','{"traffic_days":30}');`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = a.db.Exec(`INSERT INTO traffic_hours VALUES(1,?,1,0,0,0),(1,?,1,0,0,0)`, time.Now().Add(-60*24*time.Hour).Unix(), time.Now().Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.db.Exec(`INSERT INTO site_error_hours VALUES(1,?,502,3),(1,?,404,1)`, time.Now().Add(-60*24*time.Hour).Unix()/3600*3600, time.Now().Unix()/3600*3600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,15 +184,15 @@ func TestRetentionPreservesConfigAndLimitsEventsPerSite(t *testing.T) {
 	if n != 1 {
 		t.Fatal("retention did not prune old hours")
 	}
-	a.db.QueryRow(`SELECT COUNT(*) FROM site_access_events`).Scan(&n)
-	if n != 2 {
-		t.Fatal("event cap was not per site")
+	a.db.QueryRow(`SELECT COUNT(*) FROM site_error_hours`).Scan(&n)
+	if n != 1 {
+		t.Fatal("retention did not prune old error buckets")
 	}
 	a.db.QueryRow(`SELECT COUNT(*) FROM proxy_hosts`).Scan(&n)
 	if n != 2 {
 		t.Fatal("cleanup removed sites")
 	}
-	for _, v := range []retentionSettings{{29, 1}, {30, -1}, {366, 100}, {90, 101}} {
+	for _, v := range []retentionSettings{{29}, {366}, {0}} {
 		if validRetention(v) {
 			t.Fatal("accepted unsafe retention", v)
 		}

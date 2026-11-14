@@ -98,7 +98,7 @@ sudo systemctl restart viya
 
 ## Screenshots
 
-The overview shows server resources, traffic trends over a selectable range and the services that need attention; clicking the web error rate breaks recent errors down by site and status code.
+The overview shows server resources, traffic trends over a selectable range and the services that need attention; clicking the web error rate breaks errors down by site and status code (aggregate counts only — individual requests are not stored).
 
 ![Viya overview](docs/screenshots/02-overview.webp)
 
@@ -147,7 +147,7 @@ With a host firewall enabled, allow the panel TCP port from your LAN as well as 
 Pin a release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.7 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.8 sh
 ```
 
 Environment variables must stay on the right side of the pipe.
@@ -247,7 +247,7 @@ Pin a version and port:
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.6.7 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.6.8 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 Requires `curl` or `wget`, `tar`, `sha256sum`, `netstat`, UCI and HTTPS CA certificates (`ca-bundle` on opkg systems, `ca-certificates` on apk systems). `/opt` must be persistent or an attached external volume, and downloads need roughly 128 MiB free in `/tmp`. The installer never opens WAN ports on its own. On low-memory routers, prefer external storage or a separate Linux host.

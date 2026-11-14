@@ -38,11 +38,14 @@ const emptyCounters = (): Counters => ({
 // "requests / connections" once both sources are merged.
 export const trafficTotals = computed(() => {
   const sum = emptyCounters();
-  for (const item of Object.values(traffic.value)) addCounter(sum, item.recent);
-  for (const item of Object.values(l4Traffic.value))
-    addCounter(sum, item.recent);
+  addCounter(sum, trafficWebTotals.value);
+  addCounter(sum, trafficForwardTotals.value);
   return sum;
 });
+// The error rate above only describes web requests, so the two halves are
+// exposed separately instead of being summed into one ambiguous number.
+export const trafficWebTotals = computed(() => sumRecent(traffic.value));
+export const trafficForwardTotals = computed(() => sumRecent(l4Traffic.value));
 // `total` is a full-table sum from SQLite: unlike the sliding `recent` window
 // it does not shrink after a restart or when the selected range changes. The
 // panel used to render only `recent`, which made persisted history look lost.
@@ -130,9 +133,12 @@ export const trafficDays = computed(() =>
         ? 7
         : 0,
 );
-export const trafficDayStart = computed(() =>
-  Math.floor(Date.now() / 86400000) * 86400,
-);
+// Local midnight, matching the backend's day buckets. Using epoch modulo
+// 86400 here would put requests made before 08:00 in UTC+8 on the prior day.
+export const trafficDayStart = computed(() => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+});
 // Whole-network series for the overview trend card: web sites plus forwards.
 export const trafficTrend = computed(() => {
   const days = trafficDays.value;
@@ -162,11 +168,22 @@ export const trafficTrend = computed(() => {
       if (index >= 0 && index < days)
         totals[index] += point.upload + point.download;
     }
-  return totals.map((bytes, i) => ({
+  const points = totals.map((bytes, i) => ({
     hour: trafficDayStart.value - (days - 1 - i) * 86400,
     bytes,
   }));
+  // A 90-day window on a young install is mostly empty slots; start the axis at
+  // the first day with data so the trend stays readable instead of hugging the
+  // baseline for most of the card.
+  const first = points.findIndex((point) => point.bytes > 0);
+  return first > 0 ? points.slice(first) : points;
 });
+// How much of the selected window actually contains data. The overview shows
+// this so an identical 30d/90d total does not look like a broken range switch.
+export const trafficTrendSpan = computed(() => ({
+  window: trafficDays.value || 24,
+  points: trafficTrend.value.length,
+}));
 // Sites and forwards ranked by the volume inside the selected window. The
 // kind field lets the range bar tag forwards so they read apart from domains.
 export const trafficRanking = computed<TrafficRankRow[]>(() => {

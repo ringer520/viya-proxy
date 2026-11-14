@@ -52,7 +52,7 @@ func TestResetTrafficPreservesConfigurationAndDoesNotRecountOldLogs(t *testing.T
 	if value != "configuration" {
 		t.Fatal("configuration changed")
 	}
-	for _, table := range []string{"traffic_hours", "layer4_traffic_hours", "site_access_events"} {
+	for _, table := range []string{"traffic_hours", "layer4_traffic_hours", "site_error_hours"} {
 		var n int
 		db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n)
 		if n != 0 {

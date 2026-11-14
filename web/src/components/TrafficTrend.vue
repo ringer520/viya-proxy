@@ -15,7 +15,17 @@ onMounted(() => {
   requestAnimationFrame(() => (drawn.value = true))
 })
 
-const max = computed(() => Math.max(1, ...props.points.map((p) => p.bytes)))
+// One day of bulk transfer can be a hundred times larger than a typical day.
+// Scaling against that maximum flattens every other point into the baseline, so
+// the axis is capped near p90 and the overflow keeps its real value in the
+// header, the peak marker and the hover tooltip.
+const scaleMax = computed(() => {
+  const values = props.points.map((p) => p.bytes).filter((v) => v > 0).sort((a, b) => a - b)
+  if (!values.length) return 1
+  return Math.max(1, values[Math.min(values.length - 1, Math.floor((values.length - 1) * 0.9))])
+})
+const peakValue = computed(() => props.points.reduce((best, p) => Math.max(best, p.bytes), 0))
+const clipped = computed(() => peakValue.value > scaleMax.value)
 const total = computed(() => props.points.reduce((sum, p) => sum + p.bytes, 0))
 const peak = computed(() => props.points.reduce((best, p) => (p.bytes > best.bytes ? p : best), props.points[0] || { hour: 0, bytes: 0 }))
 const hasData = computed(() => props.points.some((p) => p.bytes > 0))
@@ -33,7 +43,7 @@ function x(i: number) {
 }
 function y(bytes: number) {
   const usable = H - PAD_TOP - PAD_BOTTOM
-  return PAD_TOP + (1 - bytes / max.value) * usable
+  return PAD_TOP + (1 - Math.min(bytes, scaleMax.value) / scaleMax.value) * usable
 }
 
 // Catmull-Rom → cubic bezier keeps the line smooth without overshooting the
@@ -86,13 +96,14 @@ watch(()=>props.period,()=>{hovered.value=null})
   <section class="traffic-trend" :class="{embedded}" :aria-label="title">
     <header v-if="!embedded"><h2>{{title}}</h2><strong>{{formatBytes(total)}}</strong></header>
     <div class="trend-chart">
-      <span class="chart-ceiling">{{formatBytes(max)}}</span>
+      <span class="chart-ceiling">{{formatBytes(scaleMax)}}</span>
+      <span v-if="clipped" class="chart-clip-note">{{t('峰值')}} {{formatBytes(peakValue)}}<template v-if="granularity === 'day'"> · {{label(peak.hour)}}</template></span>
       <svg :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" role="img" tabindex="0" :aria-label="title" @pointermove="inspect" @pointerleave="hovered=null" @keydown="inspectKey" @blur="hovered=null">
         <defs><linearGradient id="mission-trend-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity=".32"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/></linearGradient><linearGradient id="mission-trend-line" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="var(--accent-2)"/><stop offset="100%" stop-color="var(--accent)"/></linearGradient></defs>
         <g class="chart-grid"><line v-for="n in 5" :key="n" :x1="PAD_X" :x2="W-PAD_X" :y1="PAD_TOP+(H-PAD_TOP-PAD_BOTTOM)/4*(n-1)" :y2="PAD_TOP+(H-PAD_TOP-PAD_BOTTOM)/4*(n-1)"/></g>
         <path :key="'area-'+period" :d="areaPath" fill="url(#mission-trend-area)" class="chart-area"/>
         <path :key="'line-'+period" :d="linePath" fill="none" stroke="url(#mission-trend-line)" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round" pathLength="1" class="chart-line"/>
-        <g v-if="peakPoint && !hoverPoint"><circle :cx="peakPoint.x" :cy="peakPoint.y" r="8" class="chart-halo"/><circle :cx="peakPoint.x" :cy="peakPoint.y" r="3" class="chart-dot"/></g>
+        <g v-if="peakPoint && !hoverPoint"><circle :cx="peakPoint.x" :cy="peakPoint.y" r="8" :class="clipped?'chart-halo clipped':'chart-halo'"/><circle :cx="peakPoint.x" :cy="peakPoint.y" r="3" :class="clipped?'chart-dot clipped':'chart-dot'"/></g>
         <g v-if="hoverPoint"><line :x1="hoverX" :x2="hoverX" :y1="PAD_TOP" :y2="H-PAD_BOTTOM" class="chart-crosshair"/><circle :cx="hoverX" :cy="y(hoverPoint.bytes)" r="8" class="chart-halo"/><circle :cx="hoverX" :cy="y(hoverPoint.bytes)" r="4" class="chart-dot"/></g>
       </svg>
       <div class="trend-axis"><span v-for="axis in labels" :key="axis.i" :style="{left:x(axis.i)/W*100+'%'}">{{axis.text}}</span></div>
@@ -102,5 +113,5 @@ watch(()=>props.period,()=>{hovered.value=null})
   </section>
 </template>
 <style scoped>
-.traffic-trend{min-width:0;padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:16px}.traffic-trend.embedded{border:0;border-radius:0;padding:0;background:transparent}header{display:flex;justify-content:space-between;align-items:center}h2{font-size:15px}.trend-chart{position:relative;height:200px;padding-top:8px}.trend-chart>svg{width:100%;height:100%;display:block;overflow:visible;outline-offset:3px}.chart-ceiling{position:absolute;top:0;left:7px;color:var(--muted);font-size:9px}.chart-grid line{stroke:var(--line);stroke-dasharray:2 6;opacity:.6}.chart-line{stroke-dasharray:1;stroke-dashoffset:0;animation:mission-line-reveal 1.3s cubic-bezier(.22,1,.36,1) both;filter:drop-shadow(0 3px 5px var(--accent-soft))}.chart-area{animation:mission-area-reveal 1.2s ease both}.chart-halo{fill:var(--accent);opacity:.15}.chart-dot{fill:var(--accent);stroke:var(--surface);stroke-width:2}.chart-crosshair{stroke:var(--accent);stroke-width:1;stroke-dasharray:3 4;opacity:.6}.trend-axis{position:relative;height:15px;margin-top:-15px}.trend-axis span{position:absolute;transform:translateX(-50%);font-size:9px;color:var(--muted)}.trend-axis span:first-child{transform:none}.trend-axis span:last-child{transform:translateX(-100%)}.chart-tooltip{pointer-events:none;position:absolute;top:28px;min-width:112px;padding:10px 12px;display:grid;gap:5px;z-index:2;background:var(--surface);border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:10px;box-shadow:0 12px 35px #0002;animation:mission-tooltip-in .15s ease}.chart-tooltip span{font-size:10px;color:var(--muted)}.chart-tooltip strong{font-size:16px;color:var(--text)}.trend-empty{position:absolute;top:45%;left:0;right:0;text-align:center;font-size:12px;color:var(--muted);pointer-events:none}@keyframes mission-line-reveal{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}@keyframes mission-area-reveal{from{opacity:0}to{opacity:1}}@keyframes mission-tooltip-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){.chart-line,.chart-area,.chart-tooltip{animation:none}}
+.traffic-trend{min-width:0;padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:16px}.traffic-trend.embedded{border:0;border-radius:0;padding:0;background:transparent}header{display:flex;justify-content:space-between;align-items:center}h2{font-size:15px}.trend-chart{position:relative;height:200px;padding-top:8px}.trend-chart>svg{width:100%;height:100%;display:block;overflow:visible;outline-offset:3px}.chart-ceiling{position:absolute;top:0;left:7px;color:var(--muted);font-size:9px}.chart-clip-note{position:absolute;top:0;right:2px;color:var(--muted);font-size:9px}.chart-grid line{stroke:var(--line);stroke-dasharray:2 6;opacity:.6}.chart-line{stroke-dasharray:1;stroke-dashoffset:0;animation:mission-line-reveal 1.3s cubic-bezier(.22,1,.36,1) both;filter:drop-shadow(0 3px 5px var(--accent-soft))}.chart-area{animation:mission-area-reveal 1.2s ease both}.chart-halo{fill:var(--accent);opacity:.15}.chart-dot{fill:var(--accent);stroke:var(--surface);stroke-width:2}.chart-halo.clipped{opacity:.28}.chart-dot.clipped{fill:var(--warning,#e0a13a)}.chart-crosshair{stroke:var(--accent);stroke-width:1;stroke-dasharray:3 4;opacity:.6}.trend-axis{position:relative;height:15px;margin-top:-15px}.trend-axis span{position:absolute;transform:translateX(-50%);font-size:9px;color:var(--muted)}.trend-axis span:first-child{transform:none}.trend-axis span:last-child{transform:translateX(-100%)}.chart-tooltip{pointer-events:none;position:absolute;top:28px;min-width:112px;padding:10px 12px;display:grid;gap:5px;z-index:2;background:var(--surface);border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:10px;box-shadow:0 12px 35px #0002;animation:mission-tooltip-in .15s ease}.chart-tooltip span{font-size:10px;color:var(--muted)}.chart-tooltip strong{font-size:16px;color:var(--text)}.trend-empty{position:absolute;top:45%;left:0;right:0;text-align:center;font-size:12px;color:var(--muted);pointer-events:none}@keyframes mission-line-reveal{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}@keyframes mission-area-reveal{from{opacity:0}to{opacity:1}}@keyframes mission-tooltip-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){.chart-line,.chart-area,.chart-tooltip{animation:none}}
 </style>

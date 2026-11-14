@@ -1,84 +1,50 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
-	"sort"
-	"strings"
 	"time"
 )
 
+// errorLocation is an aggregated counter: one row per site and HTTP status.
+// The panel no longer stores per-request records, so nothing here identifies a
+// client, a URL or a user agent.
 type errorLocation struct {
-	SiteID int64         `json:"site_id"`
-	Name   string        `json:"name"`
-	Domain string        `json:"domain"`
-	Status int           `json:"status"`
-	Count  int           `json:"count"`
-	Events []accessEntry `json:"events"`
+	SiteID int64  `json:"site_id"`
+	Name   string `json:"name"`
+	Domain string `json:"domain"`
+	Status int    `json:"status"`
+	Count  int64  `json:"count"`
 }
 
-// This view deliberately uses retained events, never extrapolates a full-period count.
+// webErrorLocations reads the same hourly aggregates the traffic card uses, so
+// the breakdown always adds up to the error count shown above it.
 func (a *App) webErrorLocations(w http.ResponseWriter, r *http.Request) {
-	hours := 24
-	switch r.URL.Query().Get("range") {
-	case "7d":
-		hours = 168
-	case "30d":
-		hours = 720
-	}
+	window, hours := trafficWindow(r)
 	cutoff := time.Now().Unix()/3600*3600 - int64(hours-1)*3600
-	rows, err := a.db.QueryContext(r.Context(), `SELECT h.id,h.name,h.domain,e.event FROM site_access_events e JOIN proxy_hosts h ON h.id=e.site_id WHERE json_extract(e.event,'$.ts')>=? AND json_extract(e.event,'$.status') BETWEEN 400 AND 599 ORDER BY e.id DESC LIMIT 20001`, cutoff)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT h.id,h.name,h.domain,e.status,SUM(e.count) FROM site_error_hours e JOIN proxy_hosts h ON h.id=e.site_id WHERE e.hour>=? AND e.status BETWEEN 400 AND 599 GROUP BY h.id,e.status ORDER BY 5 DESC,h.id,e.status`, cutoff)
 	if err != nil {
 		fail(w, 500, err)
 		return
 	}
 	defer rows.Close()
-	groups := map[[2]int64]*errorLocation{}
-	scanned := 0
-	limited := false
+	out := []errorLocation{}
 	for rows.Next() {
-		var id int64
-		var name, domain, raw string
-		if err = rows.Scan(&id, &name, &domain, &raw); err != nil {
+		var group errorLocation
+		if err = rows.Scan(&group.SiteID, &group.Name, &group.Domain, &group.Status, &group.Count); err != nil {
 			fail(w, 500, err)
 			return
 		}
-		scanned++
-		if scanned > 20000 {
-			limited = true
-			break
-		}
-		var event accessEntry
-		if json.Unmarshal([]byte(raw), &event) != nil || strings.HasPrefix(event.Logger, "http.log.error") {
-			continue
-		}
-		key := [2]int64{id, int64(event.Status)}
-		group := groups[key]
-		if group == nil {
-			group = &errorLocation{SiteID: id, Name: name, Domain: domain, Status: event.Status, Events: []accessEntry{}}
-			groups[key] = group
-		}
-		group.Count++
-		if len(group.Events) < 30 {
-			group.Events = append(group.Events, event)
-		}
+		out = append(out, group)
 	}
 	if err = rows.Err(); err != nil {
 		fail(w, 500, err)
 		return
 	}
-	out := []*errorLocation{}
-	for _, g := range groups {
-		out = append(out, g)
+	// Requests in the same window give the panel a denominator for the share.
+	var requests int64
+	if err = a.db.QueryRowContext(r.Context(), `SELECT COALESCE(SUM(requests),0) FROM traffic_hours WHERE hour>=?`, cutoff).Scan(&requests); err != nil {
+		fail(w, 500, err)
+		return
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Count != out[j].Count {
-			return out[i].Count > out[j].Count
-		}
-		if out[i].SiteID != out[j].SiteID {
-			return out[i].SiteID < out[j].SiteID
-		}
-		return out[i].Status < out[j].Status
-	})
-	writeJSON(w, 200, map[string]any{"groups": out, "recent_only": true, "limited": limited})
+	writeJSON(w, 200, map[string]any{"groups": out, "requests": requests, "window": window})
 }

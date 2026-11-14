@@ -9,7 +9,9 @@ func activeArchiveTables(tables []tableDump) []tableDump {
 	for _, table := range tables {
 		// config_revisions was removed: archives exported by older builds may
 		// still contain it, so silently drop it instead of rejecting the import.
-		if table.Name != "monitors" && table.Name != "monitor_samples" && table.Name != "config_revisions" {
+		// site_access_events is the retired per-request log; statistics live in
+		// traffic_hours and site_error_hours now.
+		if table.Name != "monitors" && table.Name != "monitor_samples" && table.Name != "config_revisions" && table.Name != "site_access_events" {
 			active = append(active, table)
 		}
 	}

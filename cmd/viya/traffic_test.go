@@ -64,12 +64,20 @@ func TestTrafficPersistsAndFollowsRotation(t *testing.T) {
 	}
 	check(2)
 	check(2)
-	var secretCount int
-	if err = db.QueryRow(`SELECT COUNT(*) FROM site_access_events WHERE event LIKE '%SECRET%'`).Scan(&secretCount); err != nil {
+	// Per-request logs are no longer stored; only an aggregate of failures is.
+	var failures int
+	if err = db.QueryRow(`SELECT COALESCE(SUM(count),0) FROM site_error_hours WHERE site_id=1 AND status=500`).Scan(&failures); err != nil {
 		t.Fatal(err)
 	}
-	if secretCount != 0 {
-		t.Fatal("secret leaked into stored site logs")
+	if failures != 1 {
+		t.Fatalf("failure aggregate = %d, want 1", failures)
+	}
+	var retired int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='site_access_events'`).Scan(&retired); err != nil {
+		t.Fatal(err)
+	}
+	if retired != 0 {
+		t.Fatal("per-request log table should not be created")
 	}
 	// A partial final line is consumed only after its newline arrives.
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)

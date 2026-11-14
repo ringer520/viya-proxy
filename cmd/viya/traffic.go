@@ -71,13 +71,27 @@ type trafficDay struct {
 	trafficCounters
 }
 
+// trafficDayKey groups hourly rows into one local calendar day per site/rule.
+type trafficDayKey struct {
+	id  int64
+	day int64
+}
+
+// localDayStart returns local midnight for an hour bucket. Hour buckets are
+// absolute epoch hours, so the day boundary has to be derived in the panel's
+// own timezone rather than by taking hour modulo 86400 (which is UTC).
+func localDayStart(hour int64) int64 {
+	t := time.Unix(hour, 0).In(time.Local)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local).Unix()
+}
+
 func (a *App) initTraffic() error {
 	_, err := a.db.Exec(`CREATE TABLE IF NOT EXISTS traffic_hours(site_id INTEGER NOT NULL REFERENCES proxy_hosts(id) ON DELETE CASCADE,hour INTEGER NOT NULL,requests INTEGER NOT NULL,errors INTEGER NOT NULL,upload INTEGER NOT NULL,download INTEGER NOT NULL,PRIMARY KEY(site_id,hour));
 	CREATE INDEX IF NOT EXISTS idx_traffic_hours_hour ON traffic_hours(hour);
 	CREATE TABLE IF NOT EXISTS traffic_cursors(generation TEXT PRIMARY KEY,offset INTEGER NOT NULL,complete INTEGER NOT NULL DEFAULT 0);
 	CREATE TABLE IF NOT EXISTS traffic_files(path TEXT PRIMARY KEY,size INTEGER NOT NULL,mtime INTEGER NOT NULL,offset INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0,generation TEXT NOT NULL DEFAULT '');
-	CREATE TABLE IF NOT EXISTS site_access_events(id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES proxy_hosts(id) ON DELETE CASCADE,event TEXT NOT NULL);
-	CREATE INDEX IF NOT EXISTS idx_site_access_events ON site_access_events(site_id,id DESC);
+	CREATE TABLE IF NOT EXISTS site_error_hours(site_id INTEGER NOT NULL REFERENCES proxy_hosts(id) ON DELETE CASCADE,hour INTEGER NOT NULL,status INTEGER NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(site_id,hour,status));
+	CREATE INDEX IF NOT EXISTS idx_site_error_hours_hour ON site_error_hours(hour);
 	CREATE TABLE IF NOT EXISTS layer4_traffic_hours(rule_id INTEGER NOT NULL REFERENCES layer4_rules(id) ON DELETE CASCADE,hour INTEGER NOT NULL,connections INTEGER NOT NULL,upload INTEGER NOT NULL,download INTEGER NOT NULL,PRIMARY KEY(rule_id,hour));
 	CREATE INDEX IF NOT EXISTS idx_layer4_traffic_hours_hour ON layer4_traffic_hours(hour);`)
 	if err != nil {
@@ -224,7 +238,10 @@ func (a *App) pruneTraffic(ctx context.Context) error {
 	if _, err := a.db.ExecContext(ctx, `DELETE FROM layer4_traffic_hours WHERE hour<?`, cutoff); err != nil {
 		return err
 	}
-	return pruneRecentAccess(ctx, a.db, policy.AccessEvents)
+	// Error breakdown is statistics, not a log: it keeps only counts per
+	// site/hour/status and is pruned with the same retention window.
+	_, err := a.db.ExecContext(ctx, `DELETE FROM site_error_hours WHERE hour<?`, cutoff)
+	return err
 }
 func (a *App) ingestTraffic() error {
 	a.trafficMu.Lock()
@@ -345,7 +362,6 @@ func (a *App) ingestTrafficFile(path string) error {
 	sites := map[string]int64{}
 	sitesByListener := map[string]map[string]int64{}
 	ambiguous := map[string]bool{}
-	allIDs := []int64{}
 	for rows.Next() {
 		var id int64
 		var domain, listenerID string
@@ -357,7 +373,6 @@ func (a *App) ingestTrafficFile(path string) error {
 			sitesByListener[listenerID] = map[string]int64{}
 		}
 		sitesByListener[listenerID][domain] = id
-		allIDs = append(allIDs, id)
 		if sites[domain] != 0 {
 			delete(sites, domain)
 			ambiguous[domain] = true
@@ -396,7 +411,6 @@ func (a *App) ingestTrafficFile(path string) error {
 	if err != nil {
 		return err
 	}
-	eventLimit := a.retention(a.ctx).AccessEvents
 	var resetAt string
 	_ = a.db.QueryRowContext(a.ctx, `SELECT value FROM panel_settings WHERE key='traffic_reset_at'`).Scan(&resetAt)
 	resetTime, _ := strconv.ParseFloat(resetAt, 64)
@@ -485,14 +499,14 @@ func (a *App) ingestTrafficFile(path string) error {
 		if err != nil {
 			return err
 		}
-		data, _ := json.Marshal(event)
-		if _, err = tx.ExecContext(a.ctx, `INSERT INTO site_access_events(site_id,event) VALUES(?,?)`, id, string(data)); err != nil {
-			return err
-		}
-	}
-	for _, id := range allIDs {
-		if _, err = tx.ExecContext(a.ctx, `DELETE FROM site_access_events WHERE site_id=? AND id NOT IN (SELECT id FROM site_access_events WHERE site_id=? ORDER BY id DESC LIMIT ?)`, id, id, eventLimit); err != nil {
-			return err
+		// Only an aggregate of failures is kept. The request line, client IP and
+		// user agent are deliberately not stored, so no per-request log survives
+		// the ingest. traffic_hours already carries the error count; this table
+		// adds the status-code breakdown the panel needs.
+		if failures != 0 {
+			if _, err = tx.ExecContext(a.ctx, `INSERT INTO site_error_hours(site_id,hour,status,count) VALUES(?,?,?,1) ON CONFLICT(site_id,hour,status) DO UPDATE SET count=count+1`, id, hour, event.Status); err != nil {
+				return err
+			}
 		}
 	}
 	// A shorter reader must never move the shared content cursor backwards.
@@ -595,26 +609,41 @@ func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, out)
 		return
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT site_id,hour-hour%86400 AS day,SUM(requests),SUM(errors),SUM(upload),SUM(download) FROM traffic_hours WHERE hour>=? GROUP BY site_id,day ORDER BY day`, cutoff)
+	// Daily buckets follow the panel's local calendar (local midnight to
+	// midnight). Grouping by hour-hour%86400 used UTC days, which in UTC+8 put
+	// every request made before 08:00 on the previous day.
+	rows, err := a.db.QueryContext(r.Context(), `SELECT site_id,hour,requests,errors,upload,download FROM traffic_hours WHERE hour>=? ORDER BY hour`, cutoff)
 	if err != nil {
 		fail(w, 500, errors.New("无法读取流量统计"))
 		return
 	}
 	defer rows.Close()
+	order := []trafficDayKey{}
+	days := map[trafficDayKey]*trafficDay{}
 	for rows.Next() {
 		var id int64
-		var d trafficDay
-		if err = rows.Scan(&id, &d.Day, &d.Requests, &d.Errors, &d.Upload, &d.Download); err != nil {
+		var p trafficPoint
+		if err = rows.Scan(&id, &p.Hour, &p.Requests, &p.Errors, &p.Upload, &p.Download); err != nil {
 			fail(w, 500, err)
 			return
 		}
-		s := summaryFor(id)
-		addTraffic(&s.Recent, d.trafficCounters)
-		s.Daily = append(s.Daily, d)
+		key := trafficDayKey{id, localDayStart(p.Hour)}
+		d := days[key]
+		if d == nil {
+			d = &trafficDay{Day: key.day}
+			days[key] = d
+			order = append(order, key)
+		}
+		addTraffic(&d.trafficCounters, p.trafficCounters)
+		addTraffic(&summaryFor(id).Recent, p.trafficCounters)
 	}
 	if err = rows.Err(); err != nil {
 		fail(w, 500, err)
 		return
+	}
+	for _, key := range order {
+		s := summaryFor(key.id)
+		s.Daily = append(s.Daily, *days[key])
 	}
 	writeJSON(w, 200, out)
 }
@@ -685,26 +714,38 @@ func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, out)
 		return
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT rule_id,hour-hour%86400 AS day,SUM(connections),SUM(upload),SUM(download) FROM layer4_traffic_hours WHERE hour>=? GROUP BY rule_id,day ORDER BY day`, cutoff)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT rule_id,hour,connections,upload,download FROM layer4_traffic_hours WHERE hour>=? ORDER BY hour`, cutoff)
 	if err != nil {
 		fail(w, 500, errors.New("无法读取流量统计"))
 		return
 	}
 	defer rows.Close()
+	order := []trafficDayKey{}
+	days := map[trafficDayKey]*trafficDay{}
 	for rows.Next() {
 		var id int64
-		var d trafficDay
-		if err = rows.Scan(&id, &d.Day, &d.Requests, &d.Upload, &d.Download); err != nil {
+		var p trafficPoint
+		if err = rows.Scan(&id, &p.Hour, &p.Requests, &p.Upload, &p.Download); err != nil {
 			fail(w, 500, err)
 			return
 		}
-		s := summaryFor(id)
-		addTraffic(&s.Recent, d.trafficCounters)
-		s.Daily = append(s.Daily, d)
+		key := trafficDayKey{id, localDayStart(p.Hour)}
+		d := days[key]
+		if d == nil {
+			d = &trafficDay{Day: key.day}
+			days[key] = d
+			order = append(order, key)
+		}
+		addTraffic(&d.trafficCounters, p.trafficCounters)
+		addTraffic(&summaryFor(id).Recent, p.trafficCounters)
 	}
 	if err = rows.Err(); err != nil {
 		fail(w, 500, err)
 		return
+	}
+	for _, key := range order {
+		s := summaryFor(key.id)
+		s.Daily = append(s.Daily, *days[key])
 	}
 	writeJSON(w, 200, out)
 }
@@ -714,24 +755,26 @@ func (a *App) siteAccessLogs(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, errors.New("站点 ID 无效"))
 		return
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT event FROM site_access_events WHERE site_id=? ORDER BY id DESC LIMIT 50`, id)
+	var domain string
+	if err = a.db.QueryRowContext(r.Context(), `SELECT domain FROM proxy_hosts WHERE id=?`, id).Scan(&domain); err != nil {
+		fail(w, 404, errors.New("站点不存在"))
+		return
+	}
+	// Read straight from Caddy's rotating log file. Nothing about a single
+	// request is persisted, so this preview is bounded by whatever the engine
+	// still keeps on disk.
+	host := normalizedLogHost(domain)
+	events, err := readRecentLogFileWhere(filepath.Join(a.dataDir, "access.log"), 50, func(event map[string]any) bool {
+		if caddyLogKind(event) != "access" {
+			return false
+		}
+		request, _ := event["request"].(map[string]any)
+		value, _ := request["host"].(string)
+		return normalizedLogHost(value) == host
+	})
 	if err != nil {
 		fail(w, 500, errors.New("无法读取站点访问日志"))
 		return
 	}
-	defer rows.Close()
-	out := []json.RawMessage{}
-	for rows.Next() {
-		var event string
-		if err = rows.Scan(&event); err != nil {
-			fail(w, 500, err)
-			return
-		}
-		out = append(out, json.RawMessage(event))
-	}
-	if err = rows.Err(); err != nil {
-		fail(w, 500, err)
-		return
-	}
-	writeJSON(w, 200, out)
+	writeJSON(w, 200, events)
 }

@@ -25,7 +25,7 @@ func (a *App) resetTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	at := strconv.FormatFloat(float64(time.Now().UnixMicro())/1e6, 'f', 6, 64)
-	for _, table := range []string{"traffic_hours", "layer4_traffic_hours", "site_access_events"} {
+	for _, table := range []string{"traffic_hours", "layer4_traffic_hours", "site_error_hours"} {
 		if _, err = tx.ExecContext(r.Context(), "DELETE FROM "+table); err != nil {
 			fail(w, 500, err)
 			return

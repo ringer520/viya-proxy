@@ -102,6 +102,7 @@ func TestArchiveCompatDropsLegacyRevisionTable(t *testing.T) {
 		{Name: "config_revisions"},
 		{Name: "monitors"},
 		{Name: "monitor_samples"},
+		{Name: "site_access_events"},
 	}
 	active := activeArchiveTables(tables)
 	if len(active) != 1 || active[0].Name != "proxy_hosts" {

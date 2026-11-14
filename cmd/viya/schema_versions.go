@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 // The baseline is idempotent so interrupted upgrades can safely resume. New
 // migrations are transactional and are recorded only after they complete.
@@ -44,6 +44,9 @@ CREATE TABLE access_rule_guards(id INTEGER PRIMARY KEY CHECK(id=1),ban_id INTEGE
 CREATE TABLE provider_checks(provider_id INTEGER PRIMARY KEY REFERENCES dns_providers(id) ON DELETE CASCADE,status TEXT NOT NULL,message TEXT NOT NULL,checked_at INTEGER NOT NULL);`},
 		{6, "retire configuration history", `DROP TABLE IF EXISTS config_revisions;`},
 		{7, "configuration change audit", `CREATE TABLE IF NOT EXISTS config_audit(id INTEGER PRIMARY KEY, username TEXT NOT NULL DEFAULT '', method TEXT NOT NULL DEFAULT '', path TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', status INTEGER NOT NULL DEFAULT 0, request_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT 0); CREATE INDEX IF NOT EXISTS idx_config_audit_created ON config_audit(created_at);`},
+		{8, "statistics only, no per-request log retention", `DROP TABLE IF EXISTS site_access_events;
+CREATE TABLE IF NOT EXISTS site_error_hours(site_id INTEGER NOT NULL REFERENCES proxy_hosts(id) ON DELETE CASCADE,hour INTEGER NOT NULL,status INTEGER NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(site_id,hour,status));
+CREATE INDEX IF NOT EXISTS idx_site_error_hours_hour ON site_error_hours(hour);`},
 	}
 	for _, m := range migrations {
 		if m.version <= current {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -14,12 +13,11 @@ import (
 )
 
 type retentionSettings struct {
-	TrafficDays  int `json:"traffic_days"`
-	AccessEvents int `json:"access_events"`
+	TrafficDays int `json:"traffic_days"`
 }
 
 func (a *App) retention(ctx context.Context) retentionSettings {
-	v := retentionSettings{90, 100}
+	v := retentionSettings{90}
 	var raw string
 	if a.db.QueryRowContext(ctx, `SELECT value FROM panel_settings WHERE key='retention'`).Scan(&raw) == nil {
 		var saved retentionSettings
@@ -30,7 +28,7 @@ func (a *App) retention(ctx context.Context) retentionSettings {
 	return v
 }
 func validRetention(v retentionSettings) bool {
-	return v.TrafficDays >= 30 && v.TrafficDays <= 365 && v.AccessEvents >= 0 && v.AccessEvents <= 100
+	return v.TrafficDays >= 30 && v.TrafficDays <= 365
 }
 
 type storageCategory struct {
@@ -105,7 +103,7 @@ func (a *App) storageUsage(w http.ResponseWriter, r *http.Request) {
 func (a *App) saveRetention(w http.ResponseWriter, r *http.Request) {
 	var v retentionSettings
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&v) != nil || !validRetention(v) {
-		fail(w, 400, errors.New("流量保留 30–365 天，近期访问记录每站点保留 0–100 条"))
+		fail(w, 400, errors.New("流量统计保留 30–365 天"))
 		return
 	}
 	raw, _ := json.Marshal(v)
@@ -121,7 +119,7 @@ func (a *App) cleanupStorage(w http.ResponseWriter, r *http.Request) {
 		Confirmed bool `json:"confirmed"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&input) != nil || !input.Confirmed {
-		fail(w, 400, errors.New("请确认清理过期统计和超出数量的近期访问记录"))
+		fail(w, 400, errors.New("请确认清理超出保留期的流量统计"))
 		return
 	}
 	if err := a.pruneTraffic(r.Context()); err != nil {
@@ -136,9 +134,4 @@ func (a *App) cleanupStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "message": "已清理过期记录；SQLite 空闲页将自动复用"})
-}
-
-func pruneRecentAccess(ctx context.Context, db *sql.DB, limit int) error {
-	_, err := db.ExecContext(ctx, `DELETE FROM site_access_events WHERE id IN (SELECT id FROM (SELECT id,ROW_NUMBER() OVER(PARTITION BY site_id ORDER BY id DESC) AS position FROM site_access_events) WHERE position>?)`, limit)
-	return err
 }

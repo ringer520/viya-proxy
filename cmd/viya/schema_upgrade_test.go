@@ -82,7 +82,7 @@ func TestRetiredTablesAreNotCreatedAndGetDropped(t *testing.T) {
 	if err := migrateSchema(fresh); err != nil {
 		t.Fatalf("fresh migration failed: %v", err)
 	}
-	for _, table := range []string{"config_revisions", "monitors", "monitor_samples"} {
+	for _, table := range []string{"config_revisions", "monitors", "monitor_samples", "site_access_events"} {
 		var name string
 		err := fresh.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
 		if err == nil {

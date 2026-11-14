@@ -1763,5 +1763,21 @@
   "关闭提示": "Dismiss",
   "保留期内累计": "Retained total",
   "重启 / 升级不清零": "Survives restarts & upgrades",
-  "累计值来自数据库，重启或升级不会清零；超过保留期的历史会被清理": "Totals are stored in the database and survive restarts and upgrades; history older than the retention window is pruned."
+  "累计值来自数据库，重启或升级不会清零；超过保留期的历史会被清理": "Totals are stored in the database and survive restarts and upgrades; history older than the retention window is pruned.",
+  "Web 请求": "Web requests",
+  "转发连接": "forward connections",
+  "峰值": "Peak",
+  "占比": "Share",
+  "错误合计": "Total errors",
+  "该周期 Web 请求": "Web requests in period",
+  "所选周期内没有错误记录。": "No errors recorded in the selected period.",
+  "按站点与状态码汇总计数，只保留统计，不保存具体请求记录。": "Counts are aggregated by site and status code. Only statistics are kept; individual requests are not stored.",
+  "统计来自聚合表，重启或升级不会丢失。": "Counts come from the aggregate table and survive restarts and upgrades.",
+  "流量统计保留天数": "Traffic statistics retention (days)",
+  "只保留按小时聚合的请求数、流量与错误计数，不保存具体请求记录。清理按已保存策略执行，删除的记录无法恢复；缩短保留天数也会缩小累计统计范围。日志文件的大小与保留期限在日志页面配置。": "Only hourly aggregates of requests, bytes and error counts are kept; individual requests are not stored. Pruning follows the saved policy and cannot be undone. Shortening the window also shrinks the retained totals. Log file size and rotation are configured on the logs page.",
+  "清空所有 Web 服务及端口转发的按小时统计与错误计数，清空后重新计数。此操作无法撤销，原始日志文件及业务配置会保留。": "Clear the hourly statistics and error counts for every web service and port forward. This cannot be undone; raw log files and configuration are kept.",
+  "按已保存的保留策略清理过期统计。网站文件、证书和恢复点会保留。确认继续？": "Prune statistics older than the saved retention policy. Website files, certificates and recovery points are kept. Continue?",
+  "流量统计保留 30–365 天": "Traffic statistics retention must be between 30 and 365 days",
+  "请确认清理超出保留期的流量统计": "Confirm pruning statistics older than the retention window",
+  "{0} 天窗口内 {1} 天有记录": "{1} of {0} days in the window have data"
 }

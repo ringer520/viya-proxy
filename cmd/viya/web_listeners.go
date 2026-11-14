@@ -188,7 +188,7 @@ func (a *App) saveWebListeners(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err)
 		return
 	}
-	snapshot, err := captureTables(r.Context(), a.db, []string{"proxy_hosts", "traffic_hours", "site_access_events"})
+	snapshot, err := captureTables(r.Context(), a.db, []string{"proxy_hosts", "traffic_hours", "site_error_hours"})
 	if err != nil {
 		fail(w, 500, err)
 		return
