@@ -106,6 +106,15 @@ func (a *App) initTraffic() error {
 // inherits this offset instead of being replayed from byte zero, which would
 // double-count traffic already stored in traffic_hours.
 func (a *App) seedTrafficCursors() error {
+	// Nothing to protect on a fresh database, and a deliberate rebuild (tables
+	// cleared) must read every log from the beginning.
+	var tracked int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM traffic_files`).Scan(&tracked); err != nil {
+		return err
+	}
+	if tracked == 0 {
+		return nil
+	}
 	for _, name := range []string{"access.log", "l4-access.log"} {
 		path := filepath.Join(a.dataDir, name)
 		f, err := os.Open(path)
@@ -142,6 +151,26 @@ func trafficGeneration(path string, first []byte) string {
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write(first)
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// legacyTrafficGeneration is the content identity used before v0.6.6, when the
+// log family was not part of the hash.
+func legacyTrafficGeneration(first []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(first))
+}
+
+// inheritedTrafficOffset returns how far a log has already been consumed. Old
+// builds recorded cursors under the family-less identity, so an upgrade has to
+// probe that too: otherwise every rotated file looks new and gets replayed,
+// which double-counts the stored traffic.
+func (a *App) inheritedTrafficOffset(generation string, first []byte) int64 {
+	for _, candidate := range []string{generation, legacyTrafficGeneration(first)} {
+		var offset int64
+		if err := a.db.QueryRowContext(a.ctx, `SELECT offset FROM traffic_cursors WHERE generation=?`, candidate).Scan(&offset); err == nil {
+			return offset
+		}
+	}
+	return 0
 }
 func normalizedLogHost(host string) string {
 	if name, _, err := net.SplitHostPort(host); err == nil {
@@ -267,16 +296,16 @@ func (a *App) ingestTrafficFile(path string) error {
 		return err
 	}
 	generation := trafficGeneration(path, first)
+	// Each file may only contribute the log kind it is named for. Historical
+	// files contain both kinds because Caddy used to duplicate every entry to
+	// every custom log; ignoring cross-kind lines keeps a re-ingest accurate.
+	l4Source := strings.HasPrefix(filepath.Base(path), "l4")
 	// A changed first line on an existing path means the file was truncated or
 	// recreated (rotation / config reload). A brand-new path is usually a log
 	// that was renamed after rotation. In both cases resume from the content
 	// cursor so already-consumed bytes are never counted twice.
 	if !haveFileCursor || (fileGeneration != "" && fileGeneration != generation) {
-		var inherited int64
-		if err := a.db.QueryRowContext(a.ctx, `SELECT offset FROM traffic_cursors WHERE generation=?`, generation).Scan(&inherited); err != nil {
-			inherited = 0
-		}
-		offset = inherited
+		offset = a.inheritedTrafficOffset(generation, first)
 		complete = 0
 	}
 	if complete != 0 {
@@ -397,6 +426,9 @@ func (a *App) ingestTrafficFile(path string) error {
 		// has no HTTP status; route it to the per-rule counters instead. Only the
 		// "stopped" line carries byte counts — the "started" line is skipped.
 		if event.Logger == "layer4" {
+			if !l4Source {
+				continue
+			}
 			var l4 layer4ConnStat
 			if json.Unmarshal(line, &l4) != nil || l4.Local == "" || l4.Msg != "stopped handling connection; connection stats" {
 				continue
@@ -409,6 +441,11 @@ func (a *App) ingestTrafficFile(path string) error {
 			if _, err = tx.ExecContext(a.ctx, `INSERT INTO layer4_traffic_hours(rule_id,hour,connections,upload,download) VALUES(?,?,1,?,?) ON CONFLICT(rule_id,hour) DO UPDATE SET connections=connections+1,upload=upload+excluded.upload,download=download+excluded.download`, ruleID, hour, int64(l4.Read), int64(l4.Written)); err != nil {
 				return err
 			}
+			continue
+		}
+		if l4Source {
+			// A layer4 file also captured HTTP access lines under the old logging
+			// config; they duplicate access.log and must not be counted twice.
 			continue
 		}
 		// Caddy may log one failed request both as an error and as an access event.

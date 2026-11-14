@@ -361,6 +361,95 @@ func TestRecoveryRuntimeKeepsLayer4Traffic(t *testing.T) {
 	}
 }
 
+// v0.6.5 recorded cursors as sha256(first line) only. v0.6.6 changed the
+// identity to include the log family; without probing the legacy value an
+// upgrade replayed every rotated file and doubled the stored traffic.
+func TestTrafficLegacyGenerationIsNotReplayed(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err = db.Exec(`PRAGMA foreign_keys=ON; CREATE TABLE proxy_hosts(id INTEGER PRIMARY KEY,domain TEXT,listener_id TEXT NOT NULL DEFAULT '');INSERT INTO proxy_hosts(id,domain) VALUES(1,'app.test');CREATE TABLE layer4_rules(id INTEGER PRIMARY KEY,name TEXT,listen_port INTEGER,protocol TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{db: db, ctx: context.Background(), dataDir: t.TempDir()}
+	if err = a.initTraffic(); err != nil {
+		t.Fatal(err)
+	}
+	startup := []byte(`{"level":"info","ts":1793894026.5,"logger":"tls.cache.maintenance","msg":"started background certificate maintenance"}` + "\n")
+	line := []byte(`{"ts":1793318400,"status":200,"bytes_read":1,"size":2,"request":{"host":"app.test","uri":"/"}}` + "\n")
+	path := filepath.Join(a.dataDir, "access-2026-11-05T15-53-46.597-size.log.gz")
+	archive, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	z := gzip.NewWriter(archive)
+	if _, err = z.Write(append(append([]byte{}, startup...), line...)); err != nil {
+		t.Fatal(err)
+	}
+	z.Close()
+	archive.Close()
+	// The old build already consumed the whole file and recorded it without
+	// the log family prefix.
+	if _, err = db.Exec(`INSERT INTO traffic_cursors(generation,offset,complete) VALUES(?,?,1)`, legacyTrafficGeneration(startup), int64(len(startup)+len(line))); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.ingestTraffic(); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err = db.QueryRow(`SELECT COALESCE(SUM(requests),0) FROM traffic_hours`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("replayed %d requests from an already consumed rotated log", n)
+	}
+}
+
+// Historical files contain both HTTP access lines and layer4 connection lines
+// because Caddy used to duplicate every entry to both writers. Ingestion must
+// only trust the kind implied by the file name.
+func TestTrafficIgnoresCrossKindLogLines(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err = db.Exec(`PRAGMA foreign_keys=ON; CREATE TABLE proxy_hosts(id INTEGER PRIMARY KEY,domain TEXT,listener_id TEXT NOT NULL DEFAULT '');INSERT INTO proxy_hosts(id,domain) VALUES(1,'app.test');CREATE TABLE layer4_rules(id INTEGER PRIMARY KEY,name TEXT,listen_port INTEGER,protocol TEXT);INSERT INTO layer4_rules(id,name,listen_port,protocol) VALUES(1,'ssh',2222,'tcp')`); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{db: db, ctx: context.Background(), dataDir: t.TempDir()}
+	if err = a.initTraffic(); err != nil {
+		t.Fatal(err)
+	}
+	httpLine := []byte(`{"ts":1793318400,"status":200,"bytes_read":1,"size":2,"request":{"host":"app.test","uri":"/"}}` + "\n")
+	l4Line := []byte(`{"level":"debug","ts":1793318400,"logger":"layer4","msg":"stopped handling connection; connection stats","network":"tcp","local":"0.0.0.0:2222","remote":"192.0.2.1:5000","read":100,"written":250}` + "\n")
+	// access.log carries a stray layer4 line; l4-access.log carries a stray
+	// HTTP line. Neither may be counted.
+	if err = os.WriteFile(filepath.Join(a.dataDir, "access.log"), l4Line, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(a.dataDir, "l4-access.log"), httpLine, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.ingestTraffic(); err != nil {
+		t.Fatal(err)
+	}
+	var httpCount, l4Count int
+	if err = db.QueryRow(`SELECT COALESCE(SUM(requests),0) FROM traffic_hours`).Scan(&httpCount); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow(`SELECT COALESCE(SUM(connections),0) FROM layer4_traffic_hours`).Scan(&l4Count); err != nil {
+		t.Fatal(err)
+	}
+	if httpCount != 0 || l4Count != 0 {
+		t.Fatalf("cross-kind lines were counted: http=%d l4=%d", httpCount, l4Count)
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
