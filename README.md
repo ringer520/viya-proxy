@@ -14,6 +14,8 @@
 
 <p align="center"><a href="https://viya.861010.xyz">官网 · viya.861010.xyz</a></p>
 
+<p align="center"><img src="docs/screenshots/02-overview.webp" alt="Viya 运行概览：资源、流量趋势与待处理异常"></p>
+
 **目录**：[快速开始](#快速开始) · [安全提示](#安全提示) · [功能概览](#功能概览) · [界面预览](#界面预览) · [安装](#安装) · [备份与恢复](#备份与恢复) · [从源码构建](#从源码构建) · [卸载](#卸载) · [文件与共享](docs/文件服务权限.md)
 
 ## 快速开始
@@ -99,8 +101,6 @@ sudo systemctl restart viya
 ## 界面预览
 
 运行概览展示服务器资源、可切换时间范围的流量趋势和需要关注的服务状态；点击 Web 错误率可按站点和状态码查看异常计数（只保留聚合统计，不保存逐条请求）。
-
-![Viya 运行概览](docs/screenshots/02-overview.webp)
 
 <details>
 <summary>展开查看其他界面</summary>

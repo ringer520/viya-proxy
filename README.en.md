@@ -14,6 +14,8 @@
 
 <p align="center"><a href="https://viya.861010.xyz">Website · viya.861010.xyz</a></p>
 
+<p align="center"><img src="docs/screenshots/02-overview.webp" alt="Viya overview: resources, traffic trends and pending issues"></p>
+
 **Contents:** [Quick start](#quick-start) · [Security](#security) · [Features](#features) · [Screenshots](#screenshots) · [Installation](#installation) · [Backups](#backups-and-restore) · [Build from source](#build-from-source) · [Uninstall](#uninstall) · [Files & Shares](docs/文件服务权限.md)
 
 ## Quick start
@@ -99,8 +101,6 @@ sudo systemctl restart viya
 ## Screenshots
 
 The overview shows server resources, traffic trends over a selectable range and the services that need attention; clicking the web error rate breaks errors down by site and status code (aggregate counts only — individual requests are not stored).
-
-![Viya overview](docs/screenshots/02-overview.webp)
 
 <details>
 <summary>More screens</summary>
