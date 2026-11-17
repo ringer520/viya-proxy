@@ -4,10 +4,13 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestTrafficPersistsAndFollowsRotation(t *testing.T) {
@@ -465,4 +468,54 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestTrafficDailyCutoffAndTimezoneAlignment(t *testing.T) {
+	a := stabilityApp(t)
+	if err := a.initTraffic(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`INSERT INTO proxy_hosts(id,domain,upstream) VALUES(1,'app.test','http://127.0.0.1:9000')`); err != nil {
+		t.Fatal(err)
+	}
+	utc8 := time.FixedZone("UTC+8", 8*3600)
+	todayStart := dayStartIn(time.Now().Unix(), utc8)
+	firstDayMidnight := todayStart - 6*86400
+	outsideDay := todayStart - 7*86400
+
+	if got := trafficCutoff("7d", 24*7, utc8); got != firstDayMidnight {
+		t.Fatalf("trafficCutoff(7d) = %d, want %d", got, firstDayMidnight)
+	}
+	if _, err := a.db.Exec(`
+		INSERT INTO traffic_hours(site_id,hour,requests,errors,upload,download) VALUES
+		(1, ?, 5, 1, 100, 200),
+		(1, ?, 3, 0, 50, 150),
+		(1, ?, 2, 0, 20, 80)`,
+		outsideDay, firstDayMidnight, todayStart); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/proxy-hosts/traffic?range=7d&tz=28800", nil)
+	rec := httptest.NewRecorder()
+	a.siteTraffic(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("siteTraffic status = %d", rec.Code)
+	}
+	var res map[string]trafficSummary
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	s := res["1"]
+	if s.Recent.Requests != 5 || s.Recent.Upload != 70 || s.Recent.Download != 230 {
+		t.Fatalf("unexpected Recent totals: %+v", s.Recent)
+	}
+	var dailyReq, dailyUp, dailyDown int64
+	for _, d := range s.Daily {
+		dailyReq += d.Requests
+		dailyUp += d.Upload
+		dailyDown += d.Download
+	}
+	if dailyReq != s.Recent.Requests || dailyUp != s.Recent.Upload || dailyDown != s.Recent.Download {
+		t.Fatalf("Recent (%+v) != Daily sum (req=%d up=%d down=%d)", s.Recent, dailyReq, dailyUp, dailyDown)
+	}
 }

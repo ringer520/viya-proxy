@@ -22,7 +22,11 @@ onMounted(() => {
 const scaleMax = computed(() => {
   const values = props.points.map((p) => p.bytes).filter((v) => v > 0).sort((a, b) => a - b)
   if (!values.length) return 1
-  return Math.max(1, values[Math.min(values.length - 1, Math.floor((values.length - 1) * 0.9))])
+  const max = values[values.length - 1]
+  if (values.length < 6) return Math.max(1, max)
+  const p90 = values[Math.floor((values.length - 1) * 0.9)]
+  if (max > p90 * 2) return Math.max(1, p90)
+  return Math.max(1, max)
 })
 const peakValue = computed(() => props.points.reduce((best, p) => Math.max(best, p.bytes), 0))
 const clipped = computed(() => peakValue.value > scaleMax.value)

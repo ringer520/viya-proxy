@@ -77,12 +77,42 @@ type trafficDayKey struct {
 	day int64
 }
 
-// localDayStart returns local midnight for an hour bucket. Hour buckets are
-// absolute epoch hours, so the day boundary has to be derived in the panel's
-// own timezone rather than by taking hour modulo 86400 (which is UTC).
+// trafficLocation returns the client's timezone when ?tz=<offsetSeconds> is
+// supplied (bounded to valid UTC offsets [-12h, +14h]), falling back to the
+// server's local timezone.
+func trafficLocation(r *http.Request) *time.Location {
+	if r == nil {
+		return time.Local
+	}
+	raw := strings.TrimSpace(r.URL.Query().Get("tz"))
+	if raw == "" {
+		return time.Local
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil || offset < -12*3600 || offset > 14*3600 {
+		return time.Local
+	}
+	return time.FixedZone("client", offset)
+}
+
+// dayStartIn returns midnight in loc for an hour bucket.
+func dayStartIn(hour int64, loc *time.Location) int64 {
+	t := time.Unix(hour, 0).In(loc)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc).Unix()
+}
+
+// localDayStart returns local midnight for an hour bucket.
 func localDayStart(hour int64) int64 {
-	t := time.Unix(hour, 0).In(time.Local)
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local).Unix()
+	return dayStartIn(hour, time.Local)
+}
+
+func trafficCutoff(window string, hours int, loc *time.Location) int64 {
+	now := time.Now().Unix()
+	if window == "24h" {
+		return now/3600*3600 - int64(hours-1)*3600
+	}
+	days := max(1, hours/24)
+	return dayStartIn(now, loc) - int64(days-1)*86400
 }
 
 func (a *App) initTraffic() error {
@@ -551,7 +581,8 @@ func parseDaysWindow(raw string) (int, bool) {
 
 func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
 	window, hours := trafficWindow(r)
-	cutoff := time.Now().Unix()/3600*3600 - int64(hours-1)*3600
+	loc := trafficLocation(r)
+	cutoff := trafficCutoff(window, hours, loc)
 	out := map[int64]*trafficSummary{}
 	summaryFor := func(id int64) *trafficSummary {
 		s := out[id]
@@ -627,7 +658,7 @@ func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, err)
 			return
 		}
-		key := trafficDayKey{id, localDayStart(p.Hour)}
+		key := trafficDayKey{id, dayStartIn(p.Hour, loc)}
 		d := days[key]
 		if d == nil {
 			d = &trafficDay{Day: key.day}
@@ -658,7 +689,8 @@ func addTraffic(to *trafficCounters, from trafficCounters) {
 // connection count so the panel can reuse the same rendering for both.
 func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
 	window, hours := trafficWindow(r)
-	cutoff := time.Now().Unix()/3600*3600 - int64(hours-1)*3600
+	loc := trafficLocation(r)
+	cutoff := trafficCutoff(window, hours, loc)
 	out := map[int64]*trafficSummary{}
 	summaryFor := func(id int64) *trafficSummary {
 		s := out[id]
@@ -729,7 +761,7 @@ func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, err)
 			return
 		}
-		key := trafficDayKey{id, localDayStart(p.Hour)}
+		key := trafficDayKey{id, dayStartIn(p.Hour, loc)}
 		d := days[key]
 		if d == nil {
 			d = &trafficDay{Day: key.day}

@@ -182,7 +182,7 @@ export const trafficTrend = computed(() => {
 // this so an identical 30d/90d total does not look like a broken range switch.
 export const trafficTrendSpan = computed(() => ({
   window: trafficDays.value || 24,
-  points: trafficTrend.value.length,
+  points: trafficTrend.value.filter((point) => point.bytes > 0).length,
 }));
 // Sites and forwards ranked by the volume inside the selected window. The
 // kind field lets the range bar tag forwards so they read apart from domains.
@@ -221,11 +221,12 @@ export async function refreshTraffic() {
   if (!authenticated.value) return;
   const seq = ++trafficSequence;
   const range = trafficRange.value;
+  const tz = -new Date().getTimezoneOffset() * 60;
   try {
     const responses = await Promise.all([
-      fetch(`/api/v1/proxy-hosts/traffic?range=${range}`),
-      fetch(`/api/v1/layer4-rules/traffic?range=${range}`),
-      ...(range === "30d" ? [] : [fetch("/api/v1/proxy-hosts/traffic?range=30d"),fetch("/api/v1/layer4-rules/traffic?range=30d")]),
+      fetch(`/api/v1/proxy-hosts/traffic?range=${range}&tz=${tz}`),
+      fetch(`/api/v1/layer4-rules/traffic?range=${range}&tz=${tz}`),
+      ...(range === "30d" ? [] : [fetch(`/api/v1/proxy-hosts/traffic?range=30d&tz=${tz}`),fetch(`/api/v1/layer4-rules/traffic?range=30d&tz=${tz}`)]),
     ]);
     const [siteRes,l4Res] = responses;
     if (siteRes.status === 401 || l4Res.status === 401) {
