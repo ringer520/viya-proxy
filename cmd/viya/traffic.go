@@ -101,11 +101,6 @@ func dayStartIn(hour int64, loc *time.Location) int64 {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc).Unix()
 }
 
-// localDayStart returns local midnight for an hour bucket.
-func localDayStart(hour int64) int64 {
-	return dayStartIn(hour, time.Local)
-}
-
 func trafficCutoff(window string, hours int, loc *time.Location) int64 {
 	now := time.Now().Unix()
 	if window == "24h" {
