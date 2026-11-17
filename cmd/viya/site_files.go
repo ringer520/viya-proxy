@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Static-site file management. These endpoints exist for the convenience of
@@ -336,6 +337,9 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	overwrite := r.URL.Query().Get("overwrite") != "0"
+	// Extend read deadline for large file / archive uploads so the global 15s
+	// http.Server.ReadTimeout does not abort valid multi-megabyte transfers.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Minute))
 	r.Body = http.MaxBytesReader(w, r.Body, siteFileMaxRequest)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		fail(w, 400, errors.New("上传内容无效（可能过大）"))

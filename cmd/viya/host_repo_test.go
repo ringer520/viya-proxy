@@ -190,3 +190,65 @@ func TestCompileConfigUpstreamSkipTLSVerify(t *testing.T) {
 		t.Fatalf("unexpected insecure_skip_verify when disabled: %s", string(cfg))
 	}
 }
+
+func TestCompileConfigRouteOrderAndPolicyDedup(t *testing.T) {
+	// Verify routing order helper directly (exact domain before wildcard,
+	// longer path before shorter path).
+	ordered := []Host{
+		{ID: 1, Domain: "*.example.com", Path: ""},
+		{ID: 2, Domain: "app.example.com", Path: ""},
+		{ID: 3, Domain: "app.example.com", Path: "/api"},
+		{ID: 4, Domain: "app.example.com", Path: "/api/v2"},
+	}
+	sortHostsForRouting(ordered)
+	if ordered[0].Path != "/api/v2" || ordered[1].Path != "/api" || ordered[2].Domain != "app.example.com" || ordered[3].Domain != "*.example.com" {
+		t.Fatalf("unexpected sortHostsForRouting order: %+v", ordered)
+	}
+
+	a := stabilityApp(t)
+	ctx := context.Background()
+	if err := a.initListenerSites(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.initCertificateRequests(); err != nil {
+		t.Fatal(err)
+	}
+	seed := []Host{
+		{
+			Name: "wildcard", Domain: "*.example.com", ListenerID: "http-main",
+			Upstream: "http://127.0.0.1:8003", Enabled: true, TLSMode: "none", Type: "proxy",
+			CustomHeaders: map[string]string{}, IPAllowlist: []string{}, IPDenylist: []string{}, AllowedMethods: []string{},
+		},
+		{
+			Name: "http-app", Domain: "app.example.com", ListenerID: "http-main", Path: "",
+			Upstream: "http://127.0.0.1:8001", Enabled: true, TLSMode: "http-01", Type: "proxy",
+			CustomHeaders: map[string]string{}, IPAllowlist: []string{}, IPDenylist: []string{}, AllowedMethods: []string{},
+		},
+		{
+			Name: "https-app", Domain: "app.example.com", ListenerID: "https-main", Path: "/api",
+			Upstream: "http://127.0.0.1:8002", Enabled: true, TLSMode: "http-01", Type: "proxy",
+			CustomHeaders: map[string]string{}, IPAllowlist: []string{}, IPDenylist: []string{}, AllowedMethods: []string{},
+		},
+	}
+	for _, h := range seed {
+		if _, err := a.db.ExecContext(ctx, hostInsertSQL(), hostWriteValues(h)...); err != nil {
+			t.Fatalf("insert %s: %v", h.Name, err)
+		}
+	}
+	cfgBytes, err := a.compileConfig(ctx)
+	if err != nil {
+		t.Fatalf("compileConfig: %v", err)
+	}
+	cfg := string(cfgBytes)
+	exactIdx := strings.Index(cfg, "127.0.0.1:8001")
+	wildIdx := strings.Index(cfg, "127.0.0.1:8003")
+	if exactIdx < 0 || wildIdx < 0 {
+		t.Fatalf("missing expected upstreams in config: %s", cfg)
+	}
+	if exactIdx >= wildIdx {
+		t.Fatalf("expected exact domain route before wildcard on same listener: exact=%d wildcard=%d", exactIdx, wildIdx)
+	}
+	if count := strings.Count(cfg, `"subjects":["app.example.com"]`); count != 1 {
+		t.Fatalf("expected 1 TLS policy for app.example.com, got %d", count)
+	}
+}

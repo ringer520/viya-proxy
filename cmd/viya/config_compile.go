@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,29 @@ func maintenancePage(h Host) string {
 		"</p></main></body></html>"
 }
 
+// sortHostsForRouting orders hosts so more specific matchers run first in
+// Caddy's route list: exact domains before wildcards, and longer path prefixes
+// before shorter or catch-all root sites.
+func sortHostsForRouting(hosts []Host) {
+	sort.SliceStable(hosts, func(i, j int) bool {
+		wi := strings.HasPrefix(hosts[i].Domain, "*.")
+		wj := strings.HasPrefix(hosts[j].Domain, "*.")
+		if wi != wj {
+			return !wi
+		}
+		if hosts[i].Domain != hosts[j].Domain {
+			return hosts[i].Domain < hosts[j].Domain
+		}
+		if len(hosts[i].Path) != len(hosts[j].Path) {
+			return len(hosts[i].Path) > len(hosts[j].Path)
+		}
+		if hosts[i].Path != hosts[j].Path {
+			return hosts[i].Path < hosts[j].Path
+		}
+		return hosts[i].ID < hosts[j].ID
+	})
+}
+
 func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 	rows, err := a.db.QueryContext(ctx, `SELECT `+hostReadColumns+` FROM proxy_hosts WHERE enabled=1 ORDER BY domain`)
 	if err != nil {
@@ -53,6 +77,7 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	rows.Close()
+	sortHostsForRouting(hosts)
 	globalPolicy, domainPolicies := a.readSecurityGlobal(ctx), a.readSecurityDomains(ctx)
 	for i := range hosts {
 		effectiveHostPolicy(&hosts[i], globalPolicy, domainPolicies)
@@ -62,6 +87,7 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	policySeen := map[string]bool{}
 	noTLSHosts := []string{}
 	usesInternalTLS := managedInternal
 	// Ban rules are a security policy: if they cannot be read, refuse to push a
@@ -303,28 +329,33 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		}
 		hostRoutes = append(hostRoutes, map[string]any{"match": []any{hostMatcher}, "handle": handlers})
 		routesByListener[host.ListenerID] = append(routesByListener[host.ListenerID], hostRoutes...)
-		if host.TLSMode == "http-01" {
-			policies = append(policies, map[string]any{"subjects": []string{host.Domain}, "issuers": []any{map[string]any{"module": "acme", "challenges": map[string]any{"http": map[string]any{}}}}})
-		}
 		if hostUsesInternalCA(host) {
 			usesInternalTLS = true
 		}
-		if host.TLSMode == "internal" {
+		if host.TLSMode == "http-01" && !policySeen[host.Domain] {
+			policySeen[host.Domain] = true
+			policies = append(policies, map[string]any{"subjects": []string{host.Domain}, "issuers": []any{map[string]any{"module": "acme", "challenges": map[string]any{"http": map[string]any{}}}}})
+		}
+		if host.TLSMode == "internal" && !policySeen[host.Domain] {
+			policySeen[host.Domain] = true
 			policies = append(policies, map[string]any{"subjects": []string{host.Domain}, "issuers": []any{map[string]any{"module": "internal"}}})
 		}
 		if host.TLSMode == "dns-01" {
 			if host.DNSProviderID == nil {
 				return nil, errors.New("DNS-01 站点缺少 DNS 凭据")
 			}
-			providerType, credentials, err := a.loadDNSProvider(ctx, *host.DNSProviderID)
-			if err != nil {
-				return nil, err
+			if !policySeen[host.Domain] {
+				providerType, credentials, err := a.loadDNSProvider(ctx, *host.DNSProviderID)
+				if err != nil {
+					return nil, err
+				}
+				provider := map[string]any{"name": providerType}
+				for key, value := range credentials {
+					provider[key] = value
+				}
+				policySeen[host.Domain] = true
+				policies = append(policies, map[string]any{"subjects": []string{host.Domain}, "issuers": []any{map[string]any{"module": "acme", "challenges": map[string]any{"dns": map[string]any{"provider": provider}}}}})
 			}
-			provider := map[string]any{"name": providerType}
-			for key, value := range credentials {
-				provider[key] = value
-			}
-			policies = append(policies, map[string]any{"subjects": []string{host.Domain}, "issuers": []any{map[string]any{"module": "acme", "challenges": map[string]any{"dns": map[string]any{"provider": provider}}}}})
 		}
 	}
 	listeners, err := a.webListeners(ctx)

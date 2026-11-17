@@ -308,10 +308,6 @@ func (a *App) requireAuthUnlocked(next http.Handler) http.Handler {
 
 func (a *App) requireSession(next http.Handler, holdConfigLock bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if holdConfigLock && r.Method != http.MethodGet {
-			a.configMu.Lock()
-			defer a.configMu.Unlock()
-		}
 		secret, ok := sessionCookie(r)
 		if !ok {
 			fail(w, http.StatusUnauthorized, errors.New("需要登录"))
@@ -345,6 +341,10 @@ func (a *App) requireSession(next http.Handler, holdConfigLock bool) http.Handle
 				fail(w, http.StatusForbidden, errors.New("CSRF 令牌缺失或无效"))
 				return
 			}
+		}
+		if holdConfigLock && r.Method != http.MethodGet {
+			a.configMu.Lock()
+			defer a.configMu.Unlock()
 		}
 		ctx := context.WithValue(requestOperation(r, session.username), sessionContextKey{}, session)
 		rec := &statusRecorder{ResponseWriter: w}

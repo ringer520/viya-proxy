@@ -99,6 +99,11 @@ func (a *App) streamLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	offset := info.Size()
+	if lastID := strings.TrimSpace(r.Header.Get("Last-Event-ID")); lastID != "" {
+		if resumeOffset, parseErr := strconv.ParseInt(lastID, 10, 64); parseErr == nil && resumeOffset >= 0 && resumeOffset <= offset && offset-resumeOffset <= 2<<20 {
+			offset = resumeOffset
+		}
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming is unavailable", 500)
@@ -133,7 +138,7 @@ func (a *App) streamLogs(w http.ResponseWriter, r *http.Request) {
 				}
 				sanitizeAccessEvent(event)
 				b, _ := json.Marshal(event)
-				if _, e = fmt.Fprintf(w, "data: %s\n\n", b); e != nil {
+				if _, e = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", newOffset, b); e != nil {
 					return
 				}
 				flusher.Flush()
