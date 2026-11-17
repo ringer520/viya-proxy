@@ -130,6 +130,7 @@ var proxyHostAdditiveColumns = []struct{ name, definition string }{
 	{"strip_prefix", "INTEGER NOT NULL DEFAULT 0"},
 	{"rewrite_to", "TEXT NOT NULL DEFAULT ''"},
 	{"streaming", "INTEGER NOT NULL DEFAULT 0"},
+	{"upstream_skip_tls_verify", "INTEGER NOT NULL DEFAULT 0"},
 	{"dial_timeout", "TEXT NOT NULL DEFAULT ''"},
 	{"response_header_timeout", "TEXT NOT NULL DEFAULT ''"},
 	{"maintenance", "INTEGER NOT NULL DEFAULT 0"},

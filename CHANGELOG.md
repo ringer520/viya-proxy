@@ -6,6 +6,10 @@
 
 暂无。
 
+## v0.6.9
+
+[完整说明](docs/releases/v0.6.9.md) — 反向代理支持「跳过上游 TLS 证书校验」（`upstream_skip_tls_verify`），便于直接反代 PVE / ESXi / NAS 等内网自签名 HTTPS 服务。启动自动补列，无破坏性迁移。
+
 ## v0.6.8
 
 [完整说明](docs/releases/v0.6.8.md) — 只保留聚合统计：删除 `site_access_events`，新增 `site_error_hours`（站点×小时×状态码），异常定位改为计数视图，站点访问记录改读日志文件。修正概览流量图（p90 封顶、窗口裁剪、本地日切分、KPI 拆 Web 请求与转发连接）。schema 8。

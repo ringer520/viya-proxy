@@ -42,6 +42,11 @@ type PathMode = "keep" | "strip" | "rewrite";
 const pathMode = ref<PathMode>("keep");
 // 上游调优与「访问控制与安全」共用卡片式折叠，避免同一个弹窗里出现两套折叠样式。
 const upstreamOpen = ref(false);
+const isHTTPSUpstream = computed(
+  () =>
+    form.value.upstream.trim().toLowerCase().startsWith("https://") ||
+    !!form.value.upstream_skip_tls_verify,
+);
 
 function syncPathMode() {
   pathMode.value = form.value.rewrite_to
@@ -307,6 +312,11 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
               "填写 http(s):// 地址。端口可省略，HTTP 默认 80，HTTPS 默认 443。",
             )
           }}</small></label
+        >
+        <label v-if="isHTTPSUpstream" class="drawer-check-line"
+          ><input v-model="form.upstream_skip_tls_verify" type="checkbox" /><span>{{
+            t("跳过上游 TLS 证书校验（适用于内网自签证书）")
+          }}</span></label
         >
         <div class="probe-row">
           <button

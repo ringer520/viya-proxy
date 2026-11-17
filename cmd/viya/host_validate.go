@@ -32,8 +32,12 @@ func validateHost(h *Host) error {
 			return err
 		}
 		h.Upstream = u.String()
+		if u.Scheme != "https" {
+			h.UpstreamSkipTLSVerify = false
+		}
 	case "static":
 		h.Upstream = ""
+		h.UpstreamSkipTLSVerify = false
 		h.RedirectTarget = ""
 		h.RedirectStatus = 0
 		h.WebDAV = false
@@ -49,6 +53,7 @@ func validateHost(h *Host) error {
 		// A file service serves one shared directory over the web and/or WebDAV.
 		// It never proxies, never redirects and has no SPA entry point.
 		h.Upstream = ""
+		h.UpstreamSkipTLSVerify = false
 		h.RedirectTarget = ""
 		h.RedirectStatus = 0
 		h.SpaFallback = false
@@ -76,6 +81,7 @@ func validateHost(h *Host) error {
 		}
 	case "redirect":
 		h.Upstream = ""
+		h.UpstreamSkipTLSVerify = false
 		h.RootPath = ""
 		target := strings.TrimSpace(h.RedirectTarget)
 		if target == "" {

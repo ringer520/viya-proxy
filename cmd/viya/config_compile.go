@@ -278,7 +278,11 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 				usesTLS := false
 				if upstream, parseErr := url.Parse(host.Upstream); parseErr == nil && upstream.Scheme == "https" {
 					usesTLS = true
-					transport["tls"] = map[string]any{"server_name": upstream.Hostname()}
+					tlsConfig := map[string]any{"server_name": upstream.Hostname()}
+					if host.UpstreamSkipTLSVerify {
+						tlsConfig["insecure_skip_verify"] = true
+					}
+					transport["tls"] = tlsConfig
 				}
 				// Caddy decodes the transport by its "protocol" module name, so
 				// any non-empty transport must carry it, not just the TLS case.

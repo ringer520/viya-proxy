@@ -11,7 +11,7 @@ import (
 // exactly. Both are derived from these two declarations instead of being
 // hand-written at every call site: a new column added to one copy used to mean
 // three other copies silently dropped it.
-const hostReadColumns = `id,name,domain,listener_id,upstream,enabled,version,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server,strip_prefix,rewrite_to,streaming,dial_timeout,response_header_timeout,maintenance,maintenance_message,spa_fallback,browse,webdav,webdav_write`
+const hostReadColumns = `id,name,domain,listener_id,upstream,enabled,version,tls_mode,path,icon_color,dns_provider_id,custom_certificate_id,custom_headers,basic_auth_user,basic_auth_hash,ip_allowlist,ip_denylist,rate_limit_requests,rate_limit_window,type,root_path,redirect_target,redirect_status,redirect_keep_path,security_headers,max_body_bytes,allowed_methods,hide_server,strip_prefix,rewrite_to,streaming,upstream_skip_tls_verify,dial_timeout,response_header_timeout,maintenance,maintenance_message,spa_fallback,browse,webdav,webdav_write`
 
 // hostWriteColumns is the writable subset, in INSERT order. UPDATE reuses the
 // same order so hostWriteValues can be passed to both statements.
@@ -22,7 +22,7 @@ var hostWriteColumns = []string{
 	"rate_limit_requests", "rate_limit_window", "type", "root_path",
 	"redirect_target", "redirect_status", "redirect_keep_path",
 	"security_headers", "max_body_bytes", "allowed_methods", "hide_server",
-	"strip_prefix", "rewrite_to", "streaming", "dial_timeout",
+	"strip_prefix", "rewrite_to", "streaming", "upstream_skip_tls_verify", "dial_timeout",
 	"response_header_timeout", "maintenance", "maintenance_message",
 	"spa_fallback", "browse", "webdav", "webdav_write",
 }
@@ -37,13 +37,14 @@ func scanHost(row rowScanner) (*Host, error) {
 	var providerID, certID sql.NullInt64
 	var headerJSON, allowJSON, denyJSON, securityJSON, methodsJSON string
 	var maxBody int64
-	var hideServer, stripPrefix, streaming, maintenance, spaFallback, browse, webdav, webdavWrite int
-	if err := row.Scan(&h.ID, &h.Name, &h.Domain, &h.ListenerID, &h.Upstream, &enabled, &h.Version, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headerJSON, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer, &stripPrefix, &h.RewriteTo, &streaming, &h.DialTimeout, &h.ResponseHeaderTimeout, &maintenance, &h.MaintenanceMessage, &spaFallback, &browse, &webdav, &webdavWrite); err != nil {
+	var hideServer, stripPrefix, streaming, upstreamSkipTLSVerify, maintenance, spaFallback, browse, webdav, webdavWrite int
+	if err := row.Scan(&h.ID, &h.Name, &h.Domain, &h.ListenerID, &h.Upstream, &enabled, &h.Version, &h.TLSMode, &h.Path, &h.IconColor, &providerID, &certID, &headerJSON, &h.BasicAuthUser, &h.PasswordHash, &allowJSON, &denyJSON, &h.RateLimitRequests, &h.RateLimitWindow, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus, &redirectKeepPath, &securityJSON, &maxBody, &methodsJSON, &hideServer, &stripPrefix, &h.RewriteTo, &streaming, &upstreamSkipTLSVerify, &h.DialTimeout, &h.ResponseHeaderTimeout, &maintenance, &h.MaintenanceMessage, &spaFallback, &browse, &webdav, &webdavWrite); err != nil {
 		return nil, err
 	}
 	h.Enabled = enabled == 1
 	h.StripPrefix = stripPrefix == 1
 	h.Streaming = streaming == 1
+	h.UpstreamSkipTLSVerify = upstreamSkipTLSVerify == 1
 	h.Maintenance = maintenance == 1
 	h.SpaFallback = spaFallback == 1
 	h.Browse = browse == 1
@@ -94,7 +95,7 @@ func hostWriteValues(h Host) []any {
 		h.RateLimitRequests, h.RateLimitWindow, h.Type, h.RootPath,
 		h.RedirectTarget, h.RedirectStatus, boolInt(h.RedirectKeepPath),
 		string(securityJSON), h.MaxBodyBytes, string(methodsJSON), boolInt(h.HideServer),
-		boolInt(h.StripPrefix), h.RewriteTo, boolInt(h.Streaming), h.DialTimeout,
+		boolInt(h.StripPrefix), h.RewriteTo, boolInt(h.Streaming), boolInt(h.UpstreamSkipTLSVerify), h.DialTimeout,
 		h.ResponseHeaderTimeout, boolInt(h.Maintenance), h.MaintenanceMessage,
 		boolInt(h.SpaFallback), boolInt(h.Browse), boolInt(h.WebDAV), boolInt(h.WebDAVWrite),
 	}

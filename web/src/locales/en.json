@@ -1135,6 +1135,7 @@
   "服务正在维护，请稍后访问。": "This service is under maintenance. Please check back later.",
   "显示在维护页上的说明文字，留空使用默认文案。": "Text shown on the maintenance page. Leave empty to use the default message.",
   "流式响应（SSE / 逐字输出）": "Streaming response (SSE / token-by-token)",
+  "跳过上游 TLS 证书校验（适用于内网自签证书）": "Skip upstream TLS certificate verification (for internal self-signed certificates)",
   "站点状态": "Site status",
   "文件服务": "File service",
   "共享目录 · WebDAV": "Shared folder · WebDAV",

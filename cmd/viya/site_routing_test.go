@@ -153,3 +153,23 @@ func TestValidateHostStaticDropsWebDAV(t *testing.T) {
 		t.Fatal("static sites do not expose WebDAV")
 	}
 }
+
+func TestValidateHostUpstreamSkipTLSVerify(t *testing.T) {
+	h := proxyHost()
+	h.Upstream = "https://192.168.1.100:8006"
+	h.UpstreamSkipTLSVerify = true
+	if err := validateHost(h); err != nil {
+		t.Fatalf("https upstream with skip verify should pass: %v", err)
+	}
+	if !h.UpstreamSkipTLSVerify {
+		t.Fatal("https upstream should keep UpstreamSkipTLSVerify")
+	}
+
+	h.Upstream = "http://127.0.0.1:9000"
+	if err := validateHost(h); err != nil {
+		t.Fatalf("http upstream should pass: %v", err)
+	}
+	if h.UpstreamSkipTLSVerify {
+		t.Fatal("http upstream must clear UpstreamSkipTLSVerify")
+	}
+}

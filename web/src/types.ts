@@ -54,6 +54,7 @@ export type Host = {
   strip_prefix?: boolean;
   rewrite_to?: string;
   streaming?: boolean;
+  upstream_skip_tls_verify?: boolean;
   dial_timeout?: string;
   response_header_timeout?: string;
   maintenance?: boolean;

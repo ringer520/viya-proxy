@@ -88,7 +88,7 @@ sudo systemctl restart viya
 
 | 能力 | 说明 |
 | --- | --- |
-| Web 服务 | 反向代理、静态站点、URL 重定向；按 HTTP/HTTPS 监听管理，支持路径匹配、上游调优、克隆与启停 |
+| Web 服务 | 反向代理、静态站点、URL 重定向；按 HTTP/HTTPS 监听管理，支持路径匹配、上游调优（含跳过内网自签 TLS 证书校验）、克隆与启停 |
 | TLS 证书 | 申请与自动续期、进度查看、自定义上传；站点可复用匹配的泛域名证书 |
 | 动态 DNS | A / AAAA / CNAME；跟随网卡或固定地址，定时与手动更新，固定地址失效会报错而非静默替换 |
 | DNS 凭据 | Cloudflare、DNSPod、阿里云等；凭据用独立主密钥加密存储 |
@@ -147,7 +147,7 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 固定版本安装：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.8 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.6.9 sh
 ```
 
 环境变量必须放在管道右侧。
@@ -247,7 +247,7 @@ uci commit uhttpd && /etc/init.d/uhttpd restart
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.6.8 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.6.9 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 需要 `curl` 或 `wget`、`tar`、`sha256sum`、`netstat`、UCI 与 HTTPS CA 证书（opkg 系安装 `ca-bundle`，apk 系安装 `ca-certificates`）。`/opt` 必须是持久化目录或已挂载的外部存储，下载解压还需 `/tmp` 约 128 MiB 可用空间。安装器不会自动开放 WAN 端口。小内存路由器建议挂外部存储或改用独立 Linux 主机。

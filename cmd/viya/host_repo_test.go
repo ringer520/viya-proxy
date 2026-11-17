@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -45,6 +46,7 @@ func sampleHost() Host {
 		StripPrefix:           true,
 		RewriteTo:             "/target",
 		Streaming:             true,
+		UpstreamSkipTLSVerify: true,
 		DialTimeout:           "5s",
 		ResponseHeaderTimeout: "30s",
 		Maintenance:           true,
@@ -56,6 +58,9 @@ func TestHostWriteReadRoundTrip(t *testing.T) {
 	a := stabilityApp(t)
 	ctx := context.Background()
 	if err := a.initListenerSites(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.initCertificateRequests(); err != nil {
 		t.Fatal(err)
 	}
 	// The nullable columns are real foreign keys; seed the rows they point at.
@@ -89,7 +94,7 @@ func TestHostWriteReadRoundTrip(t *testing.T) {
 			got.Upstream != want.Upstream || got.TLSMode != want.TLSMode || got.Path != want.Path ||
 			got.IconColor != want.IconColor || !got.Enabled || !got.SpaFallback || !got.Browse ||
 			!got.WebDAV || !got.WebDAVWrite || !got.RedirectKeepPath || !got.HideServer ||
-			!got.StripPrefix || !got.Streaming {
+			!got.StripPrefix || !got.Streaming || !got.UpstreamSkipTLSVerify {
 			t.Fatalf("%s: scalar or boolean column lost: %+v", stage, got)
 		}
 		if got.RewriteTo != want.RewriteTo || got.MaintenanceMessage != want.MaintenanceMessage ||
@@ -137,5 +142,51 @@ func TestHostWriteReadRoundTrip(t *testing.T) {
 	}
 	if got.Version != 2 {
 		t.Fatalf("version did not advance: %d", got.Version)
+	}
+}
+
+func TestCompileConfigUpstreamSkipTLSVerify(t *testing.T) {
+	a := stabilityApp(t)
+	ctx := context.Background()
+	if err := a.initListenerSites(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.initCertificateRequests(); err != nil {
+		t.Fatal(err)
+	}
+	h := Host{
+		Name:                  "pve",
+		Domain:                "pve.example.com",
+		ListenerID:            "http-main",
+		Upstream:              "https://192.168.1.100:8006",
+		Enabled:               true,
+		TLSMode:               "none",
+		Type:                  "proxy",
+		UpstreamSkipTLSVerify: true,
+		CustomHeaders:         map[string]string{},
+		IPAllowlist:           []string{},
+		IPDenylist:            []string{},
+		AllowedMethods:        []string{},
+	}
+	if _, err := a.db.ExecContext(ctx, hostInsertSQL(), hostWriteValues(h)...); err != nil {
+		t.Fatalf("insert host: %v", err)
+	}
+	cfg, err := a.compileConfig(ctx)
+	if err != nil {
+		t.Fatalf("compileConfig: %v", err)
+	}
+	if !strings.Contains(string(cfg), `"insecure_skip_verify":true`) {
+		t.Fatalf("expected insecure_skip_verify in compiled config, got: %s", string(cfg))
+	}
+
+	if _, err := a.db.ExecContext(ctx, `UPDATE proxy_hosts SET upstream_skip_tls_verify=0 WHERE domain='pve.example.com'`); err != nil {
+		t.Fatalf("update host: %v", err)
+	}
+	cfg, err = a.compileConfig(ctx)
+	if err != nil {
+		t.Fatalf("compileConfig after disable: %v", err)
+	}
+	if strings.Contains(string(cfg), `"insecure_skip_verify"`) {
+		t.Fatalf("unexpected insecure_skip_verify when disabled: %s", string(cfg))
 	}
 }
