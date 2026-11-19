@@ -244,6 +244,12 @@ docker compose logs -f viya
 wget -qO- https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
 ```
 
+中国大陆网络可使用镜像加速：
+
+```sh
+wget -qO- https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
+```
+
 通用入口会识别 OpenWrt 并调用专用安装器。新安装默认访问 `http://路由器IP:8181`，数据在 `/opt/viya/data`，主密钥在 `/etc/viya/secrets/master.key`。
 
 <details>
