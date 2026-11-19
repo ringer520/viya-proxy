@@ -60,23 +60,24 @@ TARBALL="$PKG.tar.gz"
 # Mirror / Proxy support (especially useful in mainland China)
 GH_PROXY="${GH_PROXY:-}"
 if [ -z "$GH_PROXY" ]; then
-  # Quick probe to see if direct GitHub connection is blocked / resets
+  # Probe actual release download endpoint with a short timeout
+  PROBE_TARGET="https://github.com/${REPO}/releases/latest/download/sha256sums.txt"
   if command -v curl >/dev/null 2>&1; then
-    if ! curl -fsSL -I --connect-timeout 3 "https://github.com" >/dev/null 2>&1; then
-      for mirror in "https://ghproxy.net/" "https://mirror.ghproxy.com/"; do
-        if curl -fsSL -I --connect-timeout 3 "${mirror}https://github.com" >/dev/null 2>&1; then
+    if ! curl -fsSL -I --connect-timeout 4 "$PROBE_TARGET" >/dev/null 2>&1; then
+      for mirror in "https://ghproxy.net/" "https://gh-proxy.com/"; do
+        if curl -fsSL -I --connect-timeout 4 "${mirror}${PROBE_TARGET}" >/dev/null 2>&1; then
           GH_PROXY="$mirror"
-          echo "==> Direct GitHub connection unreachable; using mirror: $GH_PROXY"
+          echo "==> Direct GitHub releases unreachable; using mirror: $GH_PROXY"
           break
         fi
       done
     fi
   elif command -v wget >/dev/null 2>&1; then
-    if ! wget --spider --timeout=3 -q "https://github.com" >/dev/null 2>&1; then
-      for mirror in "https://ghproxy.net/" "https://mirror.ghproxy.com/"; do
-        if wget --spider --timeout=3 -q "${mirror}https://github.com" >/dev/null 2>&1; then
+    if ! wget --spider --timeout=4 -q "$PROBE_TARGET" >/dev/null 2>&1; then
+      for mirror in "https://ghproxy.net/" "https://gh-proxy.com/"; do
+        if wget --spider --timeout=4 -q "${mirror}${PROBE_TARGET}" >/dev/null 2>&1; then
           GH_PROXY="$mirror"
-          echo "==> Direct GitHub connection unreachable; using mirror: $GH_PROXY"
+          echo "==> Direct GitHub releases unreachable; using mirror: $GH_PROXY"
           break
         fi
       done
@@ -101,14 +102,42 @@ BASE_URL="${RELEASE_URL}/${TARBALL}"
 CHECKSUM_URL="${RELEASE_URL}/sha256sums.txt"
 
 download() {
+  url="$1"
+  dest="$2"
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 2 --connect-timeout 15 --max-time 600 --progress-bar "$1" -o "$2"
+    if curl -fL --retry 1 --connect-timeout 10 --max-time 600 --progress-bar "$url" -o "$dest"; then
+      return 0
+    fi
   elif command -v wget >/dev/null 2>&1; then
-    wget "$1" -O "$2"
+    if wget "$url" -O "$dest"; then
+      return 0
+    fi
   else
     echo "Error: neither curl nor wget is available. Install one and retry." >&2
     exit 1
   fi
+
+  # Fallback: if direct GitHub download failed (e.g. connection reset or empty reply), retry with mirrors
+  case "$url" in
+    https://github.com/*)
+      for mirror in "https://ghproxy.net/" "https://gh-proxy.com/"; do
+        mirror_url="${mirror}${url}"
+        echo "==> Download failed. Retrying via mirror: ${mirror_url}"
+        if command -v curl >/dev/null 2>&1; then
+          if curl -fL --retry 2 --connect-timeout 15 --max-time 600 --progress-bar "$mirror_url" -o "$dest"; then
+            return 0
+          fi
+        elif command -v wget >/dev/null 2>&1; then
+          if wget "$mirror_url" -O "$dest"; then
+            return 0
+          fi
+        fi
+      done
+      ;;
+  esac
+
+  echo "Error: failed to download $url" >&2
+  exit 1
 }
 
 # --- Dependency preflight ---------------------------------------------------

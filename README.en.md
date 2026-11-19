@@ -24,12 +24,12 @@
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
 ```
 
-For servers in mainland China or regions with restricted GitHub access, use an accelerated mirror:
+For servers in mainland China or regions with restricted GitHub access, use an accelerated mirror (passing `GH_PROXY` is recommended):
 
 ```sh
-curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
-# Or via jsDelivr CDN
-curl -fsSL https://cdn.jsdelivr.net/gh/ringer520/viya-proxy@main/install.sh | sh
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://ghproxy.net/ sh
+# Or backup mirror
+curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://gh-proxy.com/ sh
 ```
 
 Open `http://SERVER_IP:8181` afterwards and create the administrator account. systemd Linux and OpenWrt are supported, with amd64, arm64 and armv7 builds; see [Installation](#installation) for Docker.
@@ -139,12 +139,12 @@ The overview shows server resources, traffic trends over a selectable range and 
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
 ```
 
-For servers in mainland China or regions with restricted GitHub access, use an accelerated mirror:
+For servers in mainland China or regions with restricted GitHub access, use an accelerated mirror (passing `GH_PROXY` is recommended):
 
 ```sh
-curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
-# Or via jsDelivr CDN
-curl -fsSL https://cdn.jsdelivr.net/gh/ringer520/viya-proxy@main/install.sh | sh
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://ghproxy.net/ sh
+# Or backup mirror
+curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://gh-proxy.com/ sh
 ```
 
 The installer verifies the release SHA-256, creates a systemd service and enables it at boot. It needs `curl` or `wget`, `tar`, `python3` and system CA certificates, and will try to install missing dependencies with the system package manager. Running it as a normal user works too: it re-runs itself through `sudo`.
