@@ -8,8 +8,10 @@ for tool in tar sha256sum awk df du; do command -v "$tool" >/dev/null 2>&1 || { 
 if [ ! -s /etc/ssl/certs/ca-certificates.crt ] && [ ! -s /etc/ssl/cert.pem ];then
  echo 'Install HTTPS certificates first: opkg update && opkg install ca-bundle (or apk add ca-certificates on apk-based OpenWrt).' >&2;exit 1
 fi
-BASE=https://github.com/ringer520/viya-proxy/releases/latest/download
-[ -z "${VERSION:-}" ] || BASE="https://github.com/ringer520/viya-proxy/releases/download/$VERSION"
+GH_PROXY="${GH_PROXY:-}"
+if [ -n "$GH_PROXY" ]; then case "$GH_PROXY" in */) ;; *) GH_PROXY="${GH_PROXY}/" ;; esac; fi
+BASE="${GH_PROXY}https://github.com/ringer520/viya-proxy/releases/latest/download"
+[ -z "${VERSION:-}" ] || BASE="${GH_PROXY}https://github.com/ringer520/viya-proxy/releases/download/$VERSION"
 STAGE=$(mktemp -d /tmp/viya-install.XXXXXX)
 BACKUP='';CHANGED=0;WAS_RUNNING=0;SUCCESS=0;STOPPED=0;HAD_SERVICE=0
 cleanup(){

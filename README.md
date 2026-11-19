@@ -24,6 +24,14 @@
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
 ```
 
+中国大陆服务器如遇 GitHub 网络连接受限，可使用国内加速镜像（脚本内置自动故障回退）：
+
+```sh
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
+# 或使用 jsDelivr CDN
+curl -fsSL https://cdn.jsdelivr.net/gh/ringer520/viya-proxy@main/install.sh | sh
+```
+
 安装完成后打开 `http://服务器IP:8181`，首次访问创建管理员账号。支持 systemd Linux 与 OpenWrt，提供 amd64 / arm64 / armv7 版本；Docker 见[安装](#安装)。
 
 > [!IMPORTANT]
@@ -129,6 +137,14 @@ sudo systemctl restart viya
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
+```
+
+中国大陆服务器如遇 GitHub 网络连接受限，可使用国内加速镜像（脚本内置自动故障回退）：
+
+```sh
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
+# 或使用 jsDelivr CDN
+curl -fsSL https://cdn.jsdelivr.net/gh/ringer520/viya-proxy@main/install.sh | sh
 ```
 
 安装会校验 Release 包的 SHA-256、创建 systemd 服务并设置开机自启。需要 `curl` 或 `wget`、`tar`、`python3` 与系统 CA 证书，安装器会尝试用系统包管理器补齐。普通用户可执行同一命令，安装器会通过 `sudo` 重新运行。

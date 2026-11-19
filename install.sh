@@ -18,8 +18,8 @@ if [ "$(id -u)" -ne 0 ]; then
 
   # Re-fetch under sudo: this script may itself be arriving through a pipe,
   # whose stdin cannot safely be handed to a second shell after self-copying.
-  exec sudo env VERSION="${VERSION:-}" VIYA_INSTALL_LISTEN="${VIYA_INSTALL_LISTEN:-}" \
-    sh -c 'set -eu; task=$(mktemp -d); trap "rm -rf \"$task\"" EXIT; if command -v curl >/dev/null 2>&1; then curl -fL --retry 2 --connect-timeout 15 --max-time 120 https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh -o "$task/install.sh"; else wget -O "$task/install.sh" https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh; fi; sh "$task/install.sh"'
+  exec sudo env VERSION="${VERSION:-}" VIYA_INSTALL_LISTEN="${VIYA_INSTALL_LISTEN:-}" GH_PROXY="${GH_PROXY:-}" \
+    sh -c 'set -eu; task=$(mktemp -d); trap "rm -rf \"$task\"" EXIT; if command -v curl >/dev/null 2>&1; then curl -fL --retry 2 --connect-timeout 15 --max-time 120 "${GH_PROXY:-}https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh" -o "$task/install.sh"; else wget -O "$task/install.sh" "${GH_PROXY:-}https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh"; fi; sh "$task/install.sh"'
 fi
 
 if [ "$(uname -s)" != "Linux" ]; then
@@ -31,8 +31,8 @@ fi
 if [ -r /etc/openwrt_release ]; then
   stage=$(mktemp -d /tmp/viya-bootstrap.XXXXXX)
   trap 'rm -rf "$stage"' EXIT
-  if command -v curl >/dev/null 2>&1; then curl -fL --retry 2 --connect-timeout 15 --max-time 120 https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh -o "$stage/install.sh"
-  elif command -v wget >/dev/null 2>&1; then wget -O "$stage/install.sh" https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
+  if command -v curl >/dev/null 2>&1; then curl -fL --retry 2 --connect-timeout 15 --max-time 120 "${GH_PROXY:-}https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh" -o "$stage/install.sh"
+  elif command -v wget >/dev/null 2>&1; then wget -O "$stage/install.sh" "${GH_PROXY:-}https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh"
   else echo 'Install curl or wget first.' >&2; exit 1; fi
   sh "$stage/install.sh"
   exit $?
@@ -57,11 +57,45 @@ esac
 REPO="ringer520/viya-proxy"
 PKG="viya-linux-$ARCH"
 TARBALL="$PKG.tar.gz"
+# Mirror / Proxy support (especially useful in mainland China)
+GH_PROXY="${GH_PROXY:-}"
+if [ -z "$GH_PROXY" ]; then
+  # Quick probe to see if direct GitHub connection is blocked / resets
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -fsSL -I --connect-timeout 3 "https://github.com" >/dev/null 2>&1; then
+      for mirror in "https://ghproxy.net/" "https://mirror.ghproxy.com/"; do
+        if curl -fsSL -I --connect-timeout 3 "${mirror}https://github.com" >/dev/null 2>&1; then
+          GH_PROXY="$mirror"
+          echo "==> Direct GitHub connection unreachable; using mirror: $GH_PROXY"
+          break
+        fi
+      done
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    if ! wget --spider --timeout=3 -q "https://github.com" >/dev/null 2>&1; then
+      for mirror in "https://ghproxy.net/" "https://mirror.ghproxy.com/"; do
+        if wget --spider --timeout=3 -q "${mirror}https://github.com" >/dev/null 2>&1; then
+          GH_PROXY="$mirror"
+          echo "==> Direct GitHub connection unreachable; using mirror: $GH_PROXY"
+          break
+        fi
+      done
+    fi
+  fi
+fi
+
+if [ -n "$GH_PROXY" ]; then
+  case "$GH_PROXY" in
+    */) ;;
+    *) GH_PROXY="${GH_PROXY}/" ;;
+  esac
+fi
+
 # Pin a version with: curl ... | VERSION=v1.2.3 sh
 if [ -n "${VERSION:-}" ]; then
-  RELEASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+  RELEASE_URL="${GH_PROXY}https://github.com/${REPO}/releases/download/${VERSION}"
 else
-  RELEASE_URL="https://github.com/${REPO}/releases/latest/download"
+  RELEASE_URL="${GH_PROXY}https://github.com/${REPO}/releases/latest/download"
 fi
 BASE_URL="${RELEASE_URL}/${TARBALL}"
 CHECKSUM_URL="${RELEASE_URL}/sha256sums.txt"
