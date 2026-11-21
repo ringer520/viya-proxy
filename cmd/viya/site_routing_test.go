@@ -173,3 +173,70 @@ func TestValidateHostUpstreamSkipTLSVerify(t *testing.T) {
 		t.Fatal("http upstream must clear UpstreamSkipTLSVerify")
 	}
 }
+
+func TestValidateHostUpstreamHostAndSNI(t *testing.T) {
+	for _, valid := range []string{
+		"",
+		"app.internal",
+		"APP.INTERNAL:8443",
+		"127.0.0.1:8080",
+		"{http.request.hostport}",
+		"{http.request.host}",
+		"{http.reverse_proxy.upstream.hostport}",
+		"{http.reverse_proxy.upstream.host}",
+	} {
+		h := proxyHost()
+		h.UpstreamHost = valid
+		if err := validateHost(h); err != nil {
+			t.Fatalf("valid upstream_host %q rejected: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{
+		"{env.SECRET}",
+		"bad host",
+		"bad\nhost",
+		"*.example.com",
+		"app.internal/path",
+		"app.internal:99999",
+	} {
+		h := proxyHost()
+		h.UpstreamHost = invalid
+		if err := validateHost(h); err == nil {
+			t.Fatalf("invalid upstream_host %q should be rejected", invalid)
+		}
+	}
+
+	h := proxyHost()
+	h.Upstream = "https://192.168.1.50:9090"
+	h.UpstreamTLSServerName = "Cockpit.Internal."
+	if err := validateHost(h); err != nil {
+		t.Fatalf("valid upstream_tls_server_name rejected: %v", err)
+	}
+	if h.UpstreamTLSServerName != "cockpit.internal" {
+		t.Fatalf("expected normalized SNI cockpit.internal, got %q", h.UpstreamTLSServerName)
+	}
+
+	for _, badSNI := range []string{"192.168.1.50", "cockpit.internal:9090", "*.internal", "bad sni"} {
+		h := proxyHost()
+		h.Upstream = "https://192.168.1.50:9090"
+		h.UpstreamTLSServerName = badSNI
+		if err := validateHost(h); err == nil {
+			t.Fatalf("invalid upstream_tls_server_name %q should be rejected", badSNI)
+		}
+	}
+
+	// HTTP upstream clears SNI but preserves UpstreamHost.
+	h = proxyHost()
+	h.Upstream = "http://127.0.0.1:9000"
+	h.UpstreamHost = "{http.request.hostport}"
+	h.UpstreamTLSServerName = "cockpit.internal"
+	if err := validateHost(h); err != nil {
+		t.Fatalf("http upstream with upstream_host should pass: %v", err)
+	}
+	if h.UpstreamTLSServerName != "" {
+		t.Fatalf("http upstream must clear UpstreamTLSServerName, got %q", h.UpstreamTLSServerName)
+	}
+	if h.UpstreamHost != "{http.request.hostport}" {
+		t.Fatalf("http upstream should keep UpstreamHost, got %q", h.UpstreamHost)
+	}
+}

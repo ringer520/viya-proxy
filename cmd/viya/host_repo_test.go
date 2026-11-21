@@ -46,6 +46,8 @@ func sampleHost() Host {
 		StripPrefix:           true,
 		RewriteTo:             "/target",
 		Streaming:             true,
+		UpstreamHost:          "{http.request.hostport}",
+		UpstreamTLSServerName: "origin.example.com",
 		UpstreamSkipTLSVerify: true,
 		DialTimeout:           "5s",
 		ResponseHeaderTimeout: "30s",
@@ -100,6 +102,7 @@ func TestHostWriteReadRoundTrip(t *testing.T) {
 		if got.RewriteTo != want.RewriteTo || got.MaintenanceMessage != want.MaintenanceMessage ||
 			got.RateLimitWindow != want.RateLimitWindow || got.DialTimeout != want.DialTimeout ||
 			got.ResponseHeaderTimeout != want.ResponseHeaderTimeout ||
+			got.UpstreamHost != want.UpstreamHost || got.UpstreamTLSServerName != want.UpstreamTLSServerName ||
 			got.PasswordHash != want.PasswordHash || got.BasicAuthUser != want.BasicAuthUser {
 			t.Fatalf("%s: string column lost: %+v", stage, got)
 		}
@@ -250,5 +253,61 @@ func TestCompileConfigRouteOrderAndPolicyDedup(t *testing.T) {
 	}
 	if count := strings.Count(cfg, `"subjects":["app.example.com"]`); count != 1 {
 		t.Fatalf("expected 1 TLS policy for app.example.com, got %d", count)
+	}
+}
+
+func TestCompileConfigUpstreamHostAndSNI(t *testing.T) {
+	a := stabilityApp(t)
+	ctx := context.Background()
+	if err := a.initListenerSites(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.initCertificateRequests(); err != nil {
+		t.Fatal(err)
+	}
+	h := Host{
+		Name:                  "cockpit",
+		Domain:                "cockpit.example.com",
+		ListenerID:            "http-main",
+		Upstream:              "https://192.168.1.50:9090",
+		Enabled:               true,
+		TLSMode:               "none",
+		Type:                  "proxy",
+		UpstreamHost:          "{http.request.hostport}",
+		UpstreamTLSServerName: "cockpit.internal",
+		CustomHeaders:         map[string]string{},
+		IPAllowlist:           []string{},
+		IPDenylist:            []string{},
+		AllowedMethods:        []string{},
+	}
+	if _, err := a.db.ExecContext(ctx, hostInsertSQL(), hostWriteValues(h)...); err != nil {
+		t.Fatalf("insert host: %v", err)
+	}
+	cfgBytes, err := a.compileConfig(ctx)
+	if err != nil {
+		t.Fatalf("compileConfig: %v", err)
+	}
+	cfg := string(cfgBytes)
+	if !strings.Contains(cfg, `"headers":{"request":{"set":{"Host":["{http.request.hostport}"]}}}`) {
+		t.Fatalf("expected upstream Host header override in compiled config, got: %s", cfg)
+	}
+	if !strings.Contains(cfg, `"server_name":"cockpit.internal"`) {
+		t.Fatalf("expected custom TLS server_name in compiled config, got: %s", cfg)
+	}
+
+	// Clearing both fields must revert to default behavior (no headers override, server_name falls back to upstream hostname).
+	if _, err := a.db.ExecContext(ctx, `UPDATE proxy_hosts SET upstream_host='', upstream_tls_server_name='' WHERE domain='cockpit.example.com'`); err != nil {
+		t.Fatalf("clear overrides: %v", err)
+	}
+	cfgBytes, err = a.compileConfig(ctx)
+	if err != nil {
+		t.Fatalf("compileConfig after clear: %v", err)
+	}
+	cfg = string(cfgBytes)
+	if strings.Contains(cfg, `"set":{"Host"`) {
+		t.Fatalf("unexpected Host header override after clearing: %s", cfg)
+	}
+	if !strings.Contains(cfg, `"server_name":"192.168.1.50"`) {
+		t.Fatalf("expected default server_name 192.168.1.50 after clearing, got: %s", cfg)
 	}
 }

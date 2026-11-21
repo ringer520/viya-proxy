@@ -32,11 +32,25 @@ func validateHost(h *Host) error {
 			return err
 		}
 		h.Upstream = u.String()
+		upstreamHost, err := validateUpstreamHost(h.UpstreamHost)
+		if err != nil {
+			return err
+		}
+		h.UpstreamHost = upstreamHost
 		if u.Scheme != "https" {
 			h.UpstreamSkipTLSVerify = false
+			h.UpstreamTLSServerName = ""
+		} else {
+			sni, err := validateUpstreamTLSServerName(h.UpstreamTLSServerName)
+			if err != nil {
+				return err
+			}
+			h.UpstreamTLSServerName = sni
 		}
 	case "static":
 		h.Upstream = ""
+		h.UpstreamHost = ""
+		h.UpstreamTLSServerName = ""
 		h.UpstreamSkipTLSVerify = false
 		h.RedirectTarget = ""
 		h.RedirectStatus = 0
@@ -53,6 +67,8 @@ func validateHost(h *Host) error {
 		// A file service serves one shared directory over the web and/or WebDAV.
 		// It never proxies, never redirects and has no SPA entry point.
 		h.Upstream = ""
+		h.UpstreamHost = ""
+		h.UpstreamTLSServerName = ""
 		h.UpstreamSkipTLSVerify = false
 		h.RedirectTarget = ""
 		h.RedirectStatus = 0
@@ -81,6 +97,8 @@ func validateHost(h *Host) error {
 		}
 	case "redirect":
 		h.Upstream = ""
+		h.UpstreamHost = ""
+		h.UpstreamTLSServerName = ""
 		h.UpstreamSkipTLSVerify = false
 		h.RootPath = ""
 		target := strings.TrimSpace(h.RedirectTarget)
@@ -377,3 +395,61 @@ func hostUsesInternalCA(h Host) bool {
 }
 
 func upstreamDial(raw string) string { u, _ := url.Parse(raw); return u.Host }
+
+func validateUpstreamHost(raw string) (string, error) {
+	val := strings.TrimSpace(raw)
+	if val == "" {
+		return "", nil
+	}
+	if len(val) > 255 || strings.ContainsAny(val, " \t\r\n\x00/?#\\*") {
+		return "", errors.New("上游 Host 必须是合法主机名（可带端口）或受支持的占位符")
+	}
+	if strings.ContainsAny(val, "{}") {
+		switch val {
+		case "{http.request.hostport}", "{http.request.host}", "{http.reverse_proxy.upstream.hostport}", "{http.reverse_proxy.upstream.host}":
+			return val, nil
+		default:
+			return "", errors.New("上游 Host 仅支持占位符 {http.request.hostport}、{http.request.host}、{http.reverse_proxy.upstream.hostport} 或 {http.reverse_proxy.upstream.host}")
+		}
+	}
+	host := val
+	port := ""
+	if strings.Contains(val, ":") {
+		if ip := net.ParseIP(strings.Trim(val, "[]")); ip != nil {
+			// Bare IPv6 literal without port
+			return strings.ToLower(val), nil
+		}
+		h, p, err := net.SplitHostPort(val)
+		if err != nil {
+			return "", errors.New("上游 Host 格式无效，请填写主机名或 主机名:端口")
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 65535 {
+			return "", errors.New("上游 Host 端口须在 1-65535 之间")
+		}
+		host = h
+		port = p
+	}
+	hostLower := strings.TrimSuffix(strings.ToLower(host), ".")
+	if hostLower == "" {
+		return "", errors.New("上游 Host 不能为空")
+	}
+	if net.ParseIP(hostLower) == nil && !domainRE.MatchString(hostLower) {
+		return "", errors.New("上游 Host 必须是合法主机名或 IP 地址")
+	}
+	if port != "" {
+		return net.JoinHostPort(hostLower, port), nil
+	}
+	return hostLower, nil
+}
+
+func validateUpstreamTLSServerName(raw string) (string, error) {
+	sni := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+	if sni == "" {
+		return "", nil
+	}
+	if len(sni) > 253 || strings.ContainsAny(sni, " \t\r\n\x00/:?*\\{}") || net.ParseIP(sni) != nil || !domainRE.MatchString(sni) {
+		return "", errors.New("上游 TLS SNI 必须是合法的域名，不能包含端口、通配符或 IP 地址")
+	}
+	return sni, nil
+}

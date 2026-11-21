@@ -295,6 +295,15 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 				handlers = append(handlers, map[string]any{"handler": "static_response", "status_code": host.RedirectStatus, "headers": map[string]any{"Location": []string{location}}})
 			default:
 				proxy := map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": upstreamDial(host.Upstream)}}}
+				if host.UpstreamHost != "" {
+					proxy["headers"] = map[string]any{
+						"request": map[string]any{
+							"set": map[string]any{
+								"Host": []string{host.UpstreamHost},
+							},
+						},
+					}
+				}
 				// -1 disables response buffering so SSE and token-by-token output
 				// reach the browser as soon as the upstream writes it.
 				if host.Streaming {
@@ -304,7 +313,11 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 				usesTLS := false
 				if upstream, parseErr := url.Parse(host.Upstream); parseErr == nil && upstream.Scheme == "https" {
 					usesTLS = true
-					tlsConfig := map[string]any{"server_name": upstream.Hostname()}
+					serverName := upstream.Hostname()
+					if host.UpstreamTLSServerName != "" {
+						serverName = host.UpstreamTLSServerName
+					}
+					tlsConfig := map[string]any{"server_name": serverName}
 					if host.UpstreamSkipTLSVerify {
 						tlsConfig["insecure_skip_verify"] = true
 					}

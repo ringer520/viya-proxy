@@ -6,6 +6,10 @@
 
 暂无。
 
+## v0.6.10
+
+[完整说明](docs/releases/v0.6.10.md) — 反向代理站点支持自定义上游 `Host` 请求头（`upstream_host`）与 HTTPS 上游 TLS 证书域名 SNI（`upstream_tls_server_name`），解决 Cockpit WebSocket 等上游 Host/SNI 校验问题（#2）；优化 `install.sh` 国内镜像下载回退。启动自动补列，无破坏性迁移。
+
 ## v0.6.9
 
 [完整说明](docs/releases/v0.6.9.md) — 反向代理支持「跳过上游 TLS 证书校验」（`upstream_skip_tls_verify`）；优化路由优先级排序、TLS 策略去重、大文件上传超时与全局锁解耦、SSE 日志断点续传及概览流量统计口径对齐。启动自动补列，无破坏性迁移。

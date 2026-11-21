@@ -1780,5 +1780,16 @@
   "按已保存的保留策略清理过期统计。网站文件、证书和恢复点会保留。确认继续？": "Prune statistics older than the saved retention policy. Website files, certificates and recovery points are kept. Continue?",
   "流量统计保留 30–365 天": "Traffic statistics retention must be between 30 and 365 days",
   "请确认清理超出保留期的流量统计": "Confirm pruning statistics older than the retention window",
-  "{0} 天窗口内 {1} 天有记录": "{1} of {0} days in the window have data"
+  "{0} 天窗口内 {1} 天有记录": "{1} of {0} days in the window have data",
+  "上游 Host 不能为空": "Upstream Host cannot be empty",
+  "上游 Host 仅支持占位符 {http.request.hostport}、{http.request.host}、{http.reverse_proxy.upstream.hostport} 或 {http.reverse_proxy.upstream.host}": "Upstream Host only supports placeholders {http.request.hostport}, {http.request.host}, {http.reverse_proxy.upstream.hostport}, or {http.reverse_proxy.upstream.host}",
+  "上游 Host 必须是合法主机名或 IP 地址": "Upstream Host must be a valid hostname or IP address",
+  "上游 Host 必须是合法主机名（可带端口）或受支持的占位符": "Upstream Host must be a valid hostname (with optional port) or supported placeholder",
+  "上游 Host 格式无效，请填写主机名或 主机名:端口": "Invalid Upstream Host format; enter a hostname or host:port",
+  "上游 Host 端口须在 1-65535 之间": "Upstream Host port must be between 1 and 65535",
+  "上游 Host 请求头": "Upstream Host header",
+  "上游 TLS SNI 必须是合法的域名，不能包含端口、通配符或 IP 地址": "Upstream TLS SNI must be a valid domain name without port, wildcard, or IP address",
+  "上游 TLS 证书域名 (SNI)": "Upstream TLS server name (SNI)",
+  "留空使用上游地址主机名；上游填内网 IP 时可在此指定证书域名": "Leave empty to use the upstream URL hostname; specify the certificate domain here when dialing an internal IP",
+  "留空保持默认；可填自定义域名（如 app.internal）或 {http.request.hostport}、{http.reverse_proxy.upstream.hostport}": "Leave empty for default; enter a custom host (e.g. app.internal) or {http.request.hostport}, {http.reverse_proxy.upstream.hostport}"
 }

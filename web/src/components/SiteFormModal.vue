@@ -45,7 +45,8 @@ const upstreamOpen = ref(false);
 const isHTTPSUpstream = computed(
   () =>
     form.value.upstream.trim().toLowerCase().startsWith("https://") ||
-    !!form.value.upstream_skip_tls_verify,
+    !!form.value.upstream_skip_tls_verify ||
+    !!form.value.upstream_tls_server_name,
 );
 
 function syncPathMode() {
@@ -349,6 +350,24 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
               ><input v-model="form.streaming" type="checkbox" /><span>{{
                 t("流式响应（SSE / 逐字输出）")
               }}</span></label
+            >
+            <label
+              >{{ t("上游 Host 请求头")
+              }}<input
+                v-model="form.upstream_host"
+                placeholder="{http.request.hostport}"
+                autocomplete="off"
+                spellcheck="false"
+              /><small>{{ t("留空保持默认；可填自定义域名（如 app.internal）或 {http.request.hostport}、{http.reverse_proxy.upstream.hostport}") }}</small></label
+            >
+            <label v-if="isHTTPSUpstream"
+              >{{ t("上游 TLS 证书域名 (SNI)")
+              }}<input
+                v-model="form.upstream_tls_server_name"
+                placeholder="nas.example.com"
+                autocomplete="off"
+                spellcheck="false"
+              /><small>{{ t("留空使用上游地址主机名；上游填内网 IP 时可在此指定证书域名") }}</small></label
             >
             <label
               >{{ t("连接上游超时")

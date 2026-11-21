@@ -84,6 +84,8 @@ type Host struct {
 	// Upstream connection tuning (proxy sites only). Streaming disables response
 	// buffering so SSE / token-by-token output reaches the browser immediately.
 	Streaming             bool   `json:"streaming"`
+	UpstreamHost          string `json:"upstream_host,omitempty"`
+	UpstreamTLSServerName string `json:"upstream_tls_server_name,omitempty"`
 	UpstreamSkipTLSVerify bool   `json:"upstream_skip_tls_verify"`
 	DialTimeout           string `json:"dial_timeout,omitempty"`
 	ResponseHeaderTimeout string `json:"response_header_timeout,omitempty"`
