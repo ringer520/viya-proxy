@@ -12,8 +12,6 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
 
-<p align="center"><a href="https://viya.861010.xyz">Website · viya.861010.xyz</a></p>
-
 <p align="center"><img src="docs/screenshots/02-overview.webp" alt="Viya overview: resources, traffic trends and pending issues"></p>
 
 **Contents:** [Quick start](#quick-start) · [Security](#security) · [Features](#features) · [Screenshots](#screenshots) · [Installation](#installation) · [Backups](#backups-and-restore) · [Build from source](#build-from-source) · [Uninstall](#uninstall) · [Files & Shares](docs/文件服务权限.md)
@@ -271,6 +269,50 @@ Requires `curl` or `wget`, `tar`, `sha256sum`, `netstat`, UCI and HTTPS CA certi
 The OpenWrt script passes POSIX shell syntax checks but has not been validated on every device; confirm firmware, CPU, storage and networking on the actual hardware. Before upgrading, copy data, keys and the binary to `/opt/viya/backups/install-*`.
 
 </details>
+
+### Manual update
+
+In addition to one-click self-update under **Panel Settings → Version & Updates**, you can upgrade manually at any time (database, certificates, site files and the master key are preserved):
+
+**Linux (systemd)**
+
+1. **Re-run the installer (recommended)** — stops the service, backs up the current database and binaries, upgrades in place, and rolls back automatically on failure:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
+# Mainland China mirror
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://ghproxy.net/ sh
+```
+
+2. **Offline / manual archive upgrade** — download the release tarball (`viya-linux-amd64.tar.gz`, `arm64`, or `armv7`) and `sha256sums.txt` from [Releases](https://github.com/ringer520/viya-proxy/releases), verify the checksum, and run the bundled installer:
+
+```sh
+sha256sum -c sha256sums.txt --ignore-missing
+tar -xzf viya-linux-amd64.tar.gz
+sudo sh viya-linux-amd64/deploy/install-debian.sh
+```
+
+> To replace only the binaries without touching the systemd unit or helper scripts:
+> ```sh
+> sudo systemctl stop viya.service
+> sudo install -m 755 viya-linux-amd64/bin/viya-linux-amd64 /opt/viya/bin/viya
+> sudo install -m 755 viya-linux-amd64/bin/caddy-linux-amd64 /opt/viya/bin/caddy
+> sudo systemctl start viya.service
+> ```
+
+**Docker**
+
+```sh
+docker compose pull && docker compose up -d
+```
+
+**OpenWrt**
+
+Re-run the installer (or extract the tarball and run `sh viya-linux-<arch>/deploy/install-openwrt.sh`):
+
+```sh
+wget -qO- https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
+```
 
 ## Backups and restore
 

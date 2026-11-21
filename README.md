@@ -12,8 +12,6 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
 
-<p align="center"><a href="https://viya.861010.xyz">官网 · viya.861010.xyz</a></p>
-
 <p align="center"><img src="docs/screenshots/02-overview.webp" alt="Viya 运行概览：资源、流量趋势与待处理异常"></p>
 
 **目录**：[快速开始](#快速开始) · [安全提示](#安全提示) · [功能概览](#功能概览) · [界面预览](#界面预览) · [安装](#安装) · [备份与恢复](#备份与恢复) · [从源码构建](#从源码构建) · [卸载](#卸载) · [文件与共享](docs/文件服务权限.md)
@@ -277,6 +275,50 @@ VERSION=v0.6.10 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 OpenWrt 脚本已通过 POSIX Shell 语法检查，尚未做全型号真机验证，需在实际设备确认固件、CPU、存储与网络兼容性。升级前复制数据、密钥与程序到 `/opt/viya/backups/install-*`。
 
 </details>
+
+### 手动更新
+
+除了在面板 **「面板设置 → 版本与更新」** 中一键自更新外，也可以按部署方式手动升级（所有方式都会保留现有数据库、证书、网站文件与主密钥）：
+
+**Linux（systemd）**
+
+1. **方式一：重跑安装脚本（推荐）**——脚本会自动停止服务、备份当前数据库与二进制并就地升级，失败时自动回滚：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | sh
+# 中国大陆服务器可使用镜像加速
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://ghproxy.net/ sh
+```
+
+2. **方式二：离线 / 手动下载压缩包升级**——从 [Releases](https://github.com/ringer520/viya-proxy/releases) 下载对应架构的安装包（`viya-linux-amd64.tar.gz`、`arm64` 或 `armv7`）和 `sha256sums.txt`，校验后执行内置安装脚本（或直接替换二进制）：
+
+```sh
+sha256sum -c sha256sums.txt --ignore-missing
+tar -xzf viya-linux-amd64.tar.gz
+sudo sh viya-linux-amd64/deploy/install-debian.sh
+```
+
+> 若仅需手动替换二进制文件（不改动 systemd 单元与脚本），可先停服再覆盖 `/opt/viya/bin/viya` 与 `/opt/viya/bin/caddy`：
+> ```sh
+> sudo systemctl stop viya.service
+> sudo install -m 755 viya-linux-amd64/bin/viya-linux-amd64 /opt/viya/bin/viya
+> sudo install -m 755 viya-linux-amd64/bin/caddy-linux-amd64 /opt/viya/bin/caddy
+> sudo systemctl start viya.service
+> ```
+
+**Docker**
+
+```sh
+docker compose pull && docker compose up -d
+```
+
+**OpenWrt**
+
+重新执行安装命令（或解压对应架构压缩包后运行 `sh viya-linux-<arch>/deploy/install-openwrt.sh`）：
+
+```sh
+wget -qO- https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://ghproxy.net/ sh
+```
 
 ## 备份与恢复
 
