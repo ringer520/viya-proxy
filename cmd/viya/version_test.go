@@ -1,10 +1,13 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestVersionNewer(t *testing.T) {
@@ -105,5 +108,122 @@ func TestReplaceExecutableFromReaderAndReleaseBases(t *testing.T) {
 	bases := releaseDownloadBases("v0.6.10")
 	if len(bases) < 2 || !strings.HasPrefix(bases[0], "https://mirror.example.com/https://github.com/") {
 		t.Fatalf("unexpected releaseDownloadBases with GH_PROXY: %v", bases)
+	}
+}
+
+func TestProbeReleaseMirrors(t *testing.T) {
+	// Server 1: slow server (sleeps 400ms)
+	s1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(400 * time.Millisecond)
+		_, _ = w.Write([]byte("aaaa111122223333444455556666777788889999aaaabbbbccccddddeeeeffff  viya-linux-amd64.tar.gz\n"))
+	}))
+	defer s1.Close()
+
+	// Server 2: fast server (responds in ~1ms)
+	s2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("aaaa111122223333444455556666777788889999aaaabbbbccccddddeeeeffff  viya-linux-amd64.tar.gz\n"))
+	}))
+	defer s2.Close()
+
+	// Server 3: broken server (returns 500)
+	s3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer s3.Close()
+
+	bases := []string{s1.URL, s2.URL, s3.URL}
+	ordered, sum, format, err := probeReleaseMirrors(bases, "viya-linux-amd64.tar.gz", 2*time.Second)
+	if err != nil {
+		t.Fatalf("probeReleaseMirrors failed: %v", err)
+	}
+	if sum != "aaaa111122223333444455556666777788889999aaaabbbbccccddddeeeeffff" {
+		t.Fatalf("unexpected sum: %q", sum)
+	}
+	if !format {
+		t.Fatal("expected gotValidFormat to be true")
+	}
+	if len(ordered) != 3 {
+		t.Fatalf("expected 3 bases, got %d", len(ordered))
+	}
+	if ordered[0] != s2.URL {
+		t.Fatalf("expected fastest server s2 (%s) first, got %s", s2.URL, ordered[0])
+	}
+}
+
+func TestDownloadLowSpeedCircuitBreaker(t *testing.T) {
+	// Server that streams very slowly
+	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		chunk := make([]byte, 50)
+		for i := 0; i < 40; i++ {
+			_, _ = w.Write(chunk)
+			if flusher != nil {
+				flusher.Flush()
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}))
+	defer slowServer.Close()
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "test.tar.gz")
+
+	// Case 1: hasFallback = true -> should abort with low speed error
+	opts := downloadMonitorOptions{
+		minSpeedBytesPerSec: 10 * 1024, // 10 KB/s
+		warmupDuration:      1 * time.Second,
+		stallTimeout:        5 * time.Second,
+		hasFallback:         true,
+	}
+	_, err := downloadToFileWithProgressAndSHA256(slowServer.URL, dest, 10<<20, nil, opts)
+	if err == nil || !strings.Contains(err.Error(), "download speed too low") {
+		t.Fatalf("expected low speed abort error, got: %v", err)
+	}
+
+	// Case 2: hasFallback = false -> should NOT abort for low speed
+	fastServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("hello viya update"))
+	}))
+	defer fastServer.Close()
+
+	dest2 := filepath.Join(dir, "test2.tar.gz")
+	optsNoFallback := downloadMonitorOptions{
+		minSpeedBytesPerSec: 100 * 1024,
+		warmupDuration:      1 * time.Second,
+		stallTimeout:        5 * time.Second,
+		hasFallback:         false,
+	}
+	sum, err := downloadToFileWithProgressAndSHA256(fastServer.URL, dest2, 10<<20, nil, optsNoFallback)
+	if err != nil {
+		t.Fatalf("expected success with hasFallback=false, got: %v", err)
+	}
+	if sum == "" {
+		t.Fatal("expected non-empty sha256 sum")
+	}
+}
+
+func TestDownloadStallTimeout(t *testing.T) {
+	stallServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(3 * time.Second)
+	}))
+	defer stallServer.Close()
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "stall.tar.gz")
+	opts := downloadMonitorOptions{
+		minSpeedBytesPerSec: 0,
+		warmupDuration:      1 * time.Second,
+		stallTimeout:        500 * time.Millisecond,
+		hasFallback:         false,
+	}
+	_, err := downloadToFileWithProgressAndSHA256(stallServer.URL, dest, 10<<20, nil, opts)
+	if err == nil || !strings.Contains(err.Error(), "download stalled") {
+		t.Fatalf("expected stalled error, got: %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,9 +16,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -267,18 +270,25 @@ func (a *App) versionInfoHandler(w http.ResponseWriter, r *http.Request) {
 
 func releaseDownloadBases(tag string) []string {
 	direct := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s", updateRepoOwner, updateRepoName, tag)
-	var bases []string
+	var candidates []string
 	if proxy := strings.TrimSpace(os.Getenv("GH_PROXY")); proxy != "" {
 		if !strings.HasSuffix(proxy, "/") {
 			proxy += "/"
 		}
-		bases = append(bases, proxy+direct)
+		candidates = append(candidates, proxy+direct)
 	}
-	bases = append(bases, direct)
-	for _, mirror := range []string{"https://ghproxy.net/", "https://gh-proxy.com/"} {
-		candidate := mirror + direct
-		if len(bases) == 0 || bases[0] != candidate {
-			bases = append(bases, candidate)
+	candidates = append(candidates,
+		direct,
+		"https://ghfast.top/"+direct,
+		"https://ghproxy.net/"+direct,
+		"https://gh-proxy.com/"+direct,
+	)
+	var bases []string
+	seen := make(map[string]bool)
+	for _, c := range candidates {
+		if !seen[c] {
+			seen[c] = true
+			bases = append(bases, c)
 		}
 	}
 	return bases
@@ -301,6 +311,142 @@ func parseAssetChecksum(sums []byte, asset string) (string, bool) {
 	return "", false
 }
 
+type mirrorProbeResult struct {
+	base     string
+	duration time.Duration
+	sum      string
+	valid    bool
+	err      error
+}
+
+func probeSingleMirror(ctx context.Context, base, asset string) (string, time.Duration, bool, error) {
+	start := time.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/sha256sums.txt", nil)
+	if err != nil {
+		return "", 0, false, err
+	}
+	req.Header.Set("User-Agent", updateRepoName)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			ResponseHeaderTimeout: 3 * time.Second,
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", 0, false, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", 0, false, err
+	}
+	duration := time.Since(start)
+	sum, ok := parseAssetChecksum(data, asset)
+	hasFormat := strings.Contains(string(data), ".tar.gz")
+	if !ok {
+		return "", duration, hasFormat, errors.New("checksum not found")
+	}
+	return sum, duration, true, nil
+}
+
+func probeReleaseMirrors(bases []string, asset string, totalTimeout time.Duration) (orderedBases []string, wantSum string, gotValidFormat bool, err error) {
+	if len(bases) == 0 {
+		return nil, "", false, errors.New("无法下载校验文件")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), totalTimeout)
+	defer cancel()
+
+	type resWithBase struct {
+		base string
+		res  mirrorProbeResult
+	}
+
+	ch := make(chan resWithBase, len(bases))
+	for _, b := range bases {
+		go func(base string) {
+			sum, dur, valid, probeErr := probeSingleMirror(ctx, base, asset)
+			ch <- resWithBase{
+				base: base,
+				res: mirrorProbeResult{
+					base:     base,
+					duration: dur,
+					sum:      sum,
+					valid:    valid,
+					err:      probeErr,
+				},
+			}
+		}(b)
+	}
+
+	var successes []mirrorProbeResult
+	seenSuccess := make(map[string]bool)
+	completed := 0
+	var graceTimer *time.Timer
+	var graceCh <-chan time.Time
+
+	for completed < len(bases) {
+		select {
+		case r := <-ch:
+			completed++
+			if r.res.valid {
+				gotValidFormat = true
+			}
+			if r.res.err == nil && r.res.sum != "" {
+				if wantSum == "" {
+					wantSum = r.res.sum
+					// After the fastest mirror responds, wait a brief grace period (350ms)
+					// to collect other close contenders so we can rank them.
+					graceTimer = time.NewTimer(350 * time.Millisecond)
+					defer graceTimer.Stop()
+					graceCh = graceTimer.C
+				}
+				if !seenSuccess[r.base] {
+					seenSuccess[r.base] = true
+					successes = append(successes, r.res)
+				}
+			}
+		case <-graceCh:
+			completed = len(bases)
+		case <-ctx.Done():
+			completed = len(bases)
+		}
+	}
+
+	if len(successes) == 0 {
+		if gotValidFormat {
+			return nil, "", true, errors.New("校验文件中找不到当前架构的产物")
+		}
+		return nil, "", false, errors.New("无法下载校验文件")
+	}
+
+	// Sort successes by duration ascending (fastest first)
+	slices.SortFunc(successes, func(a, b mirrorProbeResult) int {
+		if a.duration < b.duration {
+			return -1
+		} else if a.duration > b.duration {
+			return 1
+		}
+		return 0
+	})
+
+	for _, s := range successes {
+		orderedBases = append(orderedBases, s.base)
+	}
+	// Append remaining bases as last-resort fallbacks
+	for _, b := range bases {
+		if !seenSuccess[b] {
+			orderedBases = append(orderedBases, b)
+		}
+	}
+
+	return orderedBases, wantSum, gotValidFormat, nil
+}
+
 // downloadAndSwap fetches the release archive for this machine's architecture,
 // verifies it against the published sha256sums, and atomically replaces the
 // running Viya binary plus its bundled Caddy using bounded temp files on disk
@@ -314,29 +460,15 @@ func (a *App) downloadAndSwap(tag string) error {
 	asset := fmt.Sprintf("viya-linux-%s.tar.gz", arch)
 	bases := releaseDownloadBases(tag)
 
-	var workingIdx int
-	wantSum := ""
-	gotValidFormat := false
-	for i, base := range bases {
-		sums, err := httpGetLimitedTimeout(base+"/sha256sums.txt", 1<<20, 15*time.Second)
-		if err != nil {
-			continue
-		}
-		if sum, ok := parseAssetChecksum(sums, asset); ok {
-			wantSum = sum
-			workingIdx = i
-			break
-		}
-		if strings.Contains(string(sums), ".tar.gz") {
-			gotValidFormat = true
-		}
-	}
-	if wantSum == "" {
+	orderedBases, wantSum, gotValidFormat, probeErr := probeReleaseMirrors(bases, asset, 4*time.Second)
+	if probeErr != nil {
 		if gotValidFormat {
 			return errors.New("校验文件中找不到当前架构的产物")
 		}
 		return errors.New("无法下载校验文件")
 	}
+
+	slog.Info("self-update: mirror probe completed", "fastest", orderedBases[0], "candidates", len(orderedBases))
 
 	tempRoot := a.dataDir
 	archiveFile, err := os.CreateTemp(tempRoot, "viya-release-*.tar.gz")
@@ -347,34 +479,37 @@ func (a *App) downloadAndSwap(tag string) error {
 	_ = archiveFile.Close()
 	defer os.Remove(archivePath)
 
-	// Try the base that served checksums first, then fall back to remaining mirrors
-	// without mutating or aliasing the original slice.
-	orderedBases := make([]string, 0, len(bases))
-	orderedBases = append(orderedBases, bases[workingIdx])
-	for i, b := range bases {
-		if i != workingIdx {
-			orderedBases = append(orderedBases, b)
-		}
-	}
 	var verified bool
 	var checksumMismatch bool
-	for _, base := range orderedBases {
+	for i, base := range orderedBases {
+		hasFallback := i < len(orderedBases)-1
 		setVersionUpdateProgress("正在下载更新包", 4, nil)
+		opts := downloadMonitorOptions{
+			minSpeedBytesPerSec: 150 * 1024, // 150 KB/s
+			warmupDuration:      5 * time.Second,
+			stallTimeout:        10 * time.Second,
+			hasFallback:         hasFallback,
+		}
 		actualSum, dlErr := downloadToFileWithProgressAndSHA256(base+"/"+asset, archivePath, 256<<20, func(downloaded, total int64) {
 			percent := 4
 			if total > 0 {
 				percent += int(float64(downloaded) / float64(total) * 82)
 			}
 			setVersionUpdateProgress("正在下载更新包", percent, nil)
-		})
+		}, opts)
 		if dlErr != nil {
+			slog.Warn("self-update: mirror failed or speed too low, trying next mirror", "base", base, "error", dlErr)
+			_ = os.Remove(archivePath)
 			continue
 		}
 		if actualSum != wantSum {
+			slog.Warn("self-update: checksum mismatch on mirror", "base", base)
 			checksumMismatch = true
+			_ = os.Remove(archivePath)
 			continue
 		}
 		verified = true
+		slog.Info("self-update: download verified successfully", "base", base)
 		break
 	}
 	if !verified {
@@ -474,13 +609,34 @@ func extractArchiveBinaries(archivePath, stageDir string) (viyaStage, caddyStage
 	return viyaStage, caddyStage, nil
 }
 
-func downloadToFileWithProgressAndSHA256(url, destPath string, limit int64, progress func(downloaded, total int64)) (string, error) {
-	client := &http.Client{Timeout: 5 * time.Minute}
-	req, err := http.NewRequest("GET", url, nil)
+type downloadMonitorOptions struct {
+	minSpeedBytesPerSec int64         // e.g. 150 * 1024 (150 KB/s)
+	warmupDuration      time.Duration // e.g. 5 * time.Second
+	stallTimeout        time.Duration // e.g. 10 * time.Second
+	hasFallback         bool
+}
+
+func downloadToFileWithProgressAndSHA256(
+	url, destPath string,
+	limit int64,
+	progress func(downloaded, total int64),
+	opts downloadMonitorOptions,
+) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", updateRepoName)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			ResponseHeaderTimeout: 15 * time.Second, // 首包响应超时：15秒无响应头则快速失败
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -494,32 +650,119 @@ func downloadToFileWithProgressAndSHA256(url, destPath string, limit int64, prog
 		return "", err
 	}
 	defer out.Close()
+
 	hasher := sha256.New()
 	mw := io.MultiWriter(out, hasher)
 	reader := io.LimitReader(resp.Body, limit+1)
+
+	var (
+		downloaded atomic.Int64
+		abortedErr error
+		abortMu    sync.Mutex
+	)
+
+	monitorStop := make(chan struct{})
+	var monitorWg sync.WaitGroup
+	monitorWg.Add(1)
+
+	go func() {
+		defer monitorWg.Done()
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+
+		startTime := time.Now()
+		lastProgressTime := startTime
+		lastBytes := int64(0)
+
+		const windowSec = 5
+		var samples [windowSec]int64
+		sampleIdx := 0
+		sampleCount := 0
+
+		for {
+			select {
+			case <-monitorStop:
+				return
+			case now := <-ticker.C:
+				cur := downloaded.Load()
+				delta := cur - lastBytes
+				lastBytes = cur
+
+				if delta > 0 {
+					lastProgressTime = now
+				} else if now.Sub(lastProgressTime) >= opts.stallTimeout {
+					abortMu.Lock()
+					abortedErr = fmt.Errorf("download stalled for %v", opts.stallTimeout)
+					abortMu.Unlock()
+					cancel()
+					return
+				}
+
+				samples[sampleIdx%windowSec] = delta
+				sampleIdx++
+				if sampleCount < windowSec {
+					sampleCount++
+				}
+
+				// 仅在有可用备用镜像、且经过预热期后触发低速主动熔断
+				if opts.hasFallback && opts.minSpeedBytesPerSec > 0 &&
+					now.Sub(startTime) >= opts.warmupDuration && sampleCount >= windowSec {
+					var windowTotal int64
+					for i := 0; i < windowSec; i++ {
+						windowTotal += samples[i]
+					}
+					avgSpeed := windowTotal / int64(windowSec)
+					if avgSpeed < opts.minSpeedBytesPerSec {
+						abortMu.Lock()
+						abortedErr = fmt.Errorf("download speed too low (%d KB/s < %d KB/s)", avgSpeed/1024, opts.minSpeedBytesPerSec/1024)
+						abortMu.Unlock()
+						cancel()
+						return
+					}
+				}
+			}
+		}
+	}()
+
 	chunk := make([]byte, 64*1024)
-	var downloaded int64
 	for {
 		n, readErr := reader.Read(chunk)
 		if n > 0 {
-			downloaded += int64(n)
-			if downloaded > limit {
+			downloaded.Add(int64(n))
+			cur := downloaded.Load()
+			if cur > limit {
+				close(monitorStop)
+				monitorWg.Wait()
 				return "", errors.New("下载内容超过大小限制")
 			}
 			if _, writeErr := mw.Write(chunk[:n]); writeErr != nil {
+				close(monitorStop)
+				monitorWg.Wait()
 				return "", writeErr
 			}
 			if progress != nil {
-				progress(downloaded, resp.ContentLength)
+				progress(cur, resp.ContentLength)
 			}
 		}
 		if readErr == io.EOF {
 			break
 		}
 		if readErr != nil {
+			close(monitorStop)
+			monitorWg.Wait()
+			abortMu.Lock()
+			customErr := abortedErr
+			abortMu.Unlock()
+			if customErr != nil {
+				return "", customErr
+			}
 			return "", readErr
 		}
 	}
+
+	close(monitorStop)
+	monitorWg.Wait()
+
 	if err := out.Close(); err != nil {
 		return "", err
 	}
@@ -562,24 +805,6 @@ func replaceExecutableFromReader(target string, src io.Reader) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), target)
-}
-
-func httpGetLimitedTimeout(url string, limit int64, timeout time.Duration) ([]byte, error) {
-	client := &http.Client{Timeout: timeout}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", updateRepoName)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
 // versionUpdateHandler downloads the latest release and swaps the binaries in
