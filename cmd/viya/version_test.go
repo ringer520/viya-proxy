@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,4 +82,28 @@ func TestUpdateWarningSurvivesProgressStages(t *testing.T) {
 		t.Fatalf("warning lost after the final progress update: %q", got)
 	}
 	setVersionUpdateWarning("")
+}
+
+func TestReplaceExecutableFromReaderAndReleaseBases(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "viya-bin")
+	if err := os.WriteFile(target, []byte("old"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceExecutableFromReader(target, strings.NewReader("streamed-binary")); err != nil {
+		t.Fatalf("replaceExecutableFromReader: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "streamed-binary" {
+		t.Fatalf("content = %q, want streamed-binary", string(got))
+	}
+
+	t.Setenv("GH_PROXY", "https://mirror.example.com")
+	bases := releaseDownloadBases("v0.6.10")
+	if len(bases) < 2 || !strings.HasPrefix(bases[0], "https://mirror.example.com/https://github.com/") {
+		t.Fatalf("unexpected releaseDownloadBases with GH_PROXY: %v", bases)
+	}
 }

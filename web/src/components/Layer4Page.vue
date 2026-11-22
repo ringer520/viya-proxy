@@ -6,7 +6,7 @@ import { clearListFilters, hasListFilter, listSearch, readOnly, statusFilter } f
 import { nextTick, ref } from "vue";
 
 import { l4Stats } from "../composables/useTraffic";
-import { l4Logs, l4PreviewLayout, l4Toggling, openL4, previewL4, removeL4, toggleL4, visibleL4 } from "../composables/useNetwork";
+import { l4Toggling, openL4, openL4Logs, removeL4, toggleL4, visibleL4 } from "../composables/useNetwork";
 import type { Layer4Rule } from "../types";
 function listenEndpoint(rule:Layer4Rule){return `${rule.listen_address.includes(":")?"["+rule.listen_address+"]":rule.listen_address}:${rule.listen_port}`}
 const searchOpen = ref(false);
@@ -46,60 +46,14 @@ async function toggleSearch() {
               <ServiceTrafficCell class="forward-metrics" :stats="l4Stats(rule)" kind="forward" :protocol="rule.protocol"/>
               <div class="forward-actions">
                 <button class="site-switch" type="button" role="switch" :aria-checked="rule.enabled" :aria-label="(rule.enabled?t('停用转发'):t('启用转发'))+' '+(rule.name||rule.listen_port)" :title="rule.enabled?t('停用转发'):t('启用转发')" :class="{on:rule.enabled}" :disabled="readOnly || !!l4Toggling[rule.id]" @click="toggleL4(rule)"><span/></button>
-<div class="site-log-preview-wrap">
-                  <button
-                    class="site-log-trigger"
-                    :aria-label="t('预览转发日志')"
-                    :title="t('悬浮预览转发日志')"
-                    @mouseenter="previewL4(rule, $event)"
-                    @focus="previewL4(rule, $event)"
-                  >
-                    <ScrollText :size="15" />
-                  </button>
-                  <div role="tooltip" class="site-log-tooltip" :style="l4PreviewLayout">
-                    <div class="site-log-heading">
-                      <b
-                        >{{ rule.name || t("端口转发") }} ·
-                        {{ rule.listen_port }}</b
-                      ><span>{{ t("最近") }} 50 {{ t("条") }}</span>
-                    </div>
-                    <p v-if="l4Logs[rule.id]?.loading" class="site-log-empty">
-                      {{ t("正在读取转发日志…") }}
-                    </p>
-                    <p
-                      v-else-if="l4Logs[rule.id]?.error"
-                      class="site-log-empty"
-                    >
-                      {{ l4Logs[rule.id]?.error }}
-                    </p>
-                    <p
-                      v-else-if="!l4Logs[rule.id]?.events?.length"
-                      class="site-log-empty"
-                    >
-                      {{ t("暂无转发日志；连接失败时会记录到这里。") }}
-                    </p>
-                    <ul v-else class="l4-log-list">
-                      <li
-                        v-for="(log, index) in l4Logs[rule.id].events"
-                        :key="index"
-                      >
-                        <time>{{
-                          new Date((log.ts || 0) * 1000).toLocaleString()
-                        }}</time>
-                        <b
-                          class="log-level"
-                          :class="String(log.level).toLowerCase()"
-                          >{{ log.level }}</b
-                        ><span
-                          >{{ log.msg
-                          }}<small v-if="log.error"> · {{ log.error }}</small></span
-                        ><small v-if="log.remote"
-                          >{{ t("来源") }} {{ log.remote }}</small
-                        >
-                      </li>
-                    </ul>
-                  </div>
-                </div>
+                <button
+                  class="site-log-trigger"
+                  :aria-label="t('查看转发日志')"
+                  :title="t('查看转发日志')"
+                  @click="openL4Logs(rule)"
+                >
+                  <ScrollText :size="15" />
+                </button>
                 <button class="icon-btn" :disabled="readOnly" :aria-label="t('编辑')" :title="t('编辑')" @click="openL4(rule)"><Pencil :size="15"/></button>
                 <button class="icon-btn danger" :disabled="readOnly" :aria-label="t('删除')" :title="t('删除')" @click="removeL4(rule)"><Trash2 :size="15"/></button>
               </div>

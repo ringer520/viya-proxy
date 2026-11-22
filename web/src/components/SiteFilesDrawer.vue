@@ -7,20 +7,17 @@ import { FolderUp, X, FolderPlus, Upload, ArrowUp, Download, Trash2, File, Folde
 import FilePreviewPane from "./site-files/FilePreviewPane.vue";
 import { fileApi, fileHeaders } from "./site-files/client";
 import type { Entry } from "./site-files/types";
+import type { Host } from "../types";
 import { useFileUpload } from "../composables/useFileUpload";
+import { siteURL as buildSiteURL } from "../composables/useHosts";
+import { readOnly } from "../composables/useState";
 
 // Static-site file drawer: browse, upload (files, folders or a zip that
 // auto-expands, with progress and overwrite confirmation), mkdir and delete.
 // Preview/editing lives in FilePreviewPane, the upload pipeline in useFileUpload.
 
 const props = defineProps<{
-  host: {
-    id: number;
-    type?: string;
-    domain: string;
-    root_path?: string;
-    tls_mode?: string;
-  };
+  host: Host;
   csrf: string;
 }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -37,6 +34,7 @@ type PreviewPaneHandle = {
 const entries = ref<Entry[]>([]);
 const path = ref("");
 const writable = ref(false);
+const canWrite = computed(() => writable.value && !readOnly.value);
 const truncated = ref(false);
 const loading = ref(false);
 const busy = ref(false);
@@ -63,10 +61,7 @@ const crumbs = computed(() => {
 
 const api = (query = "") => fileApi(props.host.id, query);
 const headers = (json = false) => fileHeaders(props.csrf, json);
-const siteURL = computed(() => {
-  const scheme = props.host.tls_mode === "none" ? "http" : "https";
-  return `${scheme}://${props.host.domain}`;
-});
+const siteURL = computed(() => buildSiteURL(props.host));
 
 const upload = useFileUpload({
   api: (query) => api(query),
@@ -97,7 +92,7 @@ async function load() {
     entries.value = body.items || [];
     writable.value = !!body.writable;
     truncated.value = !!body.truncated;
-    path.value = body.path || "";
+    path.value = body.path && body.path !== "." ? body.path : "";
   } catch (e) {
     error.value = e instanceof Error ? t(e.message) : t("读取目录失败");
   } finally {
@@ -121,10 +116,14 @@ function goTo(crumb: { path: string }) {
   void load();
 }
 
-function closeDrawer() { if (previewPane.value?.requestClose() ?? true) emit("close"); }
+function closeDrawer() {
+  if (busy.value || previewLocked.value) return;
+  if (previewPane.value?.requestClose() ?? true) emit("close");
+}
 
 async function onDrop(event: DragEvent) {
   dragOver.value = false;
+  if (!canWrite.value) return;
   await dropTransfer(event.dataTransfer);
 }
 
@@ -180,22 +179,25 @@ function modifiedLabel(value: string) {
 function onKeydown(event: KeyboardEvent) {
   if (event.key !== "Escape") return;
   const pane = previewPane.value;
-  if (pane?.isOpen()) { event.stopImmediatePropagation(); pane.requestClose(); return; }
-  if (conflictPrompt.value) { conflictPrompt.value = null; return; }
-  if (pendingDelete.value) { pendingDelete.value = null; return; }
-  if (mkdirOpen.value) { cancelMkdir(); return; }
+  if (pane?.isOpen()) { event.preventDefault(); event.stopImmediatePropagation(); pane.requestClose(); return; }
+  if (conflictPrompt.value) { event.preventDefault(); event.stopPropagation(); conflictPrompt.value = null; return; }
+  if (pendingDelete.value) { event.preventDefault(); event.stopPropagation(); pendingDelete.value = null; return; }
+  if (mkdirOpen.value) { event.preventDefault(); event.stopPropagation(); cancelMkdir(); return; }
+  if (busy.value || previewLocked.value) return;
+  event.preventDefault();
+  event.stopPropagation();
   closeDrawer();
 }
 
 function protectUnload(event: BeforeUnloadEvent) { if (previewPane.value?.isDirty()) { event.preventDefault(); event.returnValue = ""; } }
 onMounted(() => {
   window.addEventListener("beforeunload", protectUnload);
-  document.addEventListener("keydown", onKeydown);
+  document.addEventListener("keydown", onKeydown, true);
   requestAnimationFrame(() => drawer.value?.focus());
   void load();
 });
 onBeforeUnmount(() => {
-  document.removeEventListener("keydown", onKeydown);
+  document.removeEventListener("keydown", onKeydown, true);
   window.removeEventListener("beforeunload", protectUnload);
 });
 </script>
@@ -236,9 +238,15 @@ onBeforeUnmount(() => {
         </button>
       </header>
 
-      <p v-if="!writable" class="sfd-banner readonly">
+      <p v-if="!canWrite" class="sfd-banner readonly">
         <AlertTriangle :size="16" />
-        {{ props.host.type === "files" ? t("外部共享目录：支持预览和管理员文本编辑；上传和删除请使用已授权的 WebDAV 或服务器工具。") : t("该站点目录由面板外部管理，这里只读。上传请放到服务器上的对应目录。") }}
+        {{
+          readOnly
+            ? t("当前账号为只读，可以浏览和下载文件，但不能上传、新建或删除。")
+            : props.host.type === "files"
+              ? t("外部共享目录：支持预览和管理员文本编辑；上传和删除请使用已授权的 WebDAV 或服务器工具。")
+              : t("该站点目录由面板外部管理，这里只读。上传请放到服务器上的对应目录。")
+        }}
       </p>
 
       <div class="sfd-toolbar">
@@ -268,7 +276,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="secondary"
-            :disabled="busy || !writable"
+            :disabled="busy || !canWrite"
             @click="openMkdir"
           >
             <FolderPlus :size="15" />{{ t("新建文件夹") }}
@@ -276,7 +284,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="secondary"
-            :disabled="busy || !writable"
+            :disabled="busy || !canWrite"
             :title="t('上传整个文件夹，保留目录结构')"
             @click="dirInput?.click()"
           >
@@ -285,7 +293,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="primary"
-            :disabled="busy || !writable"
+            :disabled="busy || !canWrite"
             @click="fileInput?.click()"
           >
             <Loader2 v-if="busy" :size="15" class="spin" />
@@ -389,7 +397,7 @@ onBeforeUnmount(() => {
                     <Download :size="16" />
                   </button>
                   <button
-                    v-if="writable"
+                    v-if="canWrite"
                     type="button"
                     class="sfd-op danger"
                     :aria-label="t('删除')"
@@ -873,8 +881,8 @@ onBeforeUnmount(() => {
   color: var(--muted);
 }
 .sfd-note {
-  color: #15803d;
-  background: #16a34a12;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
   border-radius: 8px;
   padding: 8px 12px;
 }
@@ -882,9 +890,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  color: #dc2626;
-  background: #dc262610;
-  border: 1px solid #dc262633;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
   border-radius: 8px;
   padding: 8px 12px;
   overflow-wrap: anywhere;
@@ -1016,5 +1024,20 @@ onBeforeUnmount(() => {
     animation: none;
   }
 }
-.sfd-search { min-width:140px; flex:1; }
+.sfd-search {
+  min-width: 140px;
+  flex: 1;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.sfd-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 </style>

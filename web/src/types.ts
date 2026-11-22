@@ -206,8 +206,42 @@ export type SiteTraffic = {
   daily?: ({ day: number } & Counters)[];
 };
 
+export type AccessLogEvent = {
+  ts: number;
+  status: number;
+  bytes_read?: number;
+  size?: number;
+  duration?: number;
+  access_rule_id?: number;
+  request?: {
+    client_ip?: string;
+    remote_ip?: string;
+    method?: string;
+    host?: string;
+    uri?: string;
+  };
+};
+
+export type ProgramLogEvent = {
+  ts?: number;
+  time: string;
+  level?: string;
+  source?: string;
+  logger?: string;
+  msg?: string;
+  error?: string;
+};
+
+export type Layer4LogEvent = {
+  ts?: number;
+  level?: string;
+  msg?: string;
+  error?: string;
+  remote?: string;
+};
+
 export type RuleLogState = {
-  events: Record<string, any>[];
+  events: Layer4LogEvent[];
   loading: boolean;
   error: string;
   loadedAt: number;

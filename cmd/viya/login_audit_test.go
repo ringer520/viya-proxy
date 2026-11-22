@@ -123,3 +123,40 @@ func TestLoginAuditLimitQueryIsBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestLoginAuditRespectsTrustedProxy(t *testing.T) {
+	a, done := newAuditApp(t)
+	defer done()
+	proxies, err := parseTrustedProxies("127.0.0.1,::1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.trustedProxies = proxies
+
+	proxied := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{}`))
+	proxied.RemoteAddr = "127.0.0.1:43210"
+	proxied.Header.Set("X-Forwarded-For", "198.51.100.77")
+	a.recordLoginAudit(proxied, "admin", auditFailure, auditReasonPassword)
+
+	untrusted := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{}`))
+	untrusted.RemoteAddr = "203.0.113.5:1234"
+	untrusted.Header.Set("X-Forwarded-For", "198.51.100.99")
+	a.recordLoginAudit(untrusted, "admin", auditFailure, auditReasonPassword)
+
+	var ips []string
+	rows, err := a.db.Query(`SELECT ip FROM login_audit ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			t.Fatal(err)
+		}
+		ips = append(ips, ip)
+	}
+	if len(ips) != 2 || ips[0] != "198.51.100.77" || ips[1] != "203.0.113.5" {
+		t.Fatalf("recorded ips = %v, want [198.51.100.77 203.0.113.5]", ips)
+	}
+}

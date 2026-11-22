@@ -33,7 +33,7 @@ func (a *App) accessClientIP(r *http.Request) string {
 	if !trusted(current) {
 		return current
 	}
-	hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
 	for i := len(hops) - 1; i >= 0 && trusted(current); i-- {
 		next := strings.TrimSpace(hops[i])
 		if net.ParseIP(next) == nil {

@@ -139,7 +139,7 @@ function resultText(record: DDNSRecord) {
                 ddnsRunning[record.id] ? t("更新中…") : t("手动更新")
               }}</button
             ><button
-              class="icon-btn"
+              class="icon-btn ddns-edit-button"
               :disabled="readOnly"
               :aria-label="t('编辑')"
               :title="t('编辑')"
@@ -147,7 +147,7 @@ function resultText(record: DDNSRecord) {
             >
               <Pencil :size="15" /></button
             ><button
-              class="icon-btn danger"
+              class="icon-btn danger ddns-delete-button"
               :disabled="readOnly"
               :aria-label="t('删除')"
               :title="t('删除')"

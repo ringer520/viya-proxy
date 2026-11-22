@@ -116,12 +116,18 @@ func currentUpdateWarning() string {
 // keeps serving, so a failure must be reported instead of silently discarded.
 // Returning a warning (rather than an error) keeps the update itself successful
 // while making the mismatch visible in the log, progress API and UI.
-func swapEngineBinary(path string, content []byte) string {
-	if err := replaceExecutable(path, content); err != nil {
+func swapEngineBinaryWith(path string, install func() error) string {
+	if err := install(); err != nil {
 		slog.Warn("self-update: engine binary not replaced", "path", path, "error", err, "hint", engineSwapWarning)
 		return engineSwapWarning
 	}
 	return ""
+}
+
+func swapEngineBinary(path string, content []byte) string {
+	return swapEngineBinaryWith(path, func() error {
+		return replaceExecutable(path, content)
+	})
 }
 
 func (a *App) versionUpdateProgressHandler(w http.ResponseWriter, r *http.Request) {
@@ -259,90 +265,144 @@ func (a *App) versionInfoHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, info)
 }
 
+func releaseDownloadBases(tag string) []string {
+	direct := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s", updateRepoOwner, updateRepoName, tag)
+	var bases []string
+	if proxy := strings.TrimSpace(os.Getenv("GH_PROXY")); proxy != "" {
+		if !strings.HasSuffix(proxy, "/") {
+			proxy += "/"
+		}
+		bases = append(bases, proxy+direct)
+	}
+	bases = append(bases, direct)
+	for _, mirror := range []string{"https://ghproxy.net/", "https://gh-proxy.com/"} {
+		candidate := mirror + direct
+		if len(bases) == 0 || bases[0] != candidate {
+			bases = append(bases, candidate)
+		}
+	}
+	return bases
+}
+
+func parseAssetChecksum(sums []byte, asset string) (string, bool) {
+	for _, line := range strings.Split(string(sums), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.HasSuffix(fields[1], asset) {
+			continue
+		}
+		sum := strings.ToLower(fields[0])
+		if len(sum) != 64 {
+			continue
+		}
+		if _, err := hex.DecodeString(sum); err == nil {
+			return sum, true
+		}
+	}
+	return "", false
+}
+
 // downloadAndSwap fetches the release archive for this machine's architecture,
 // verifies it against the published sha256sums, and atomically replaces the
-// running Viya binary plus its bundled Caddy. The caller must have already
-// decided the update is allowed.
+// running Viya binary plus its bundled Caddy using bounded temp files on disk
+// (avoiding /tmp tmpfs on low-RAM routers).
 func (a *App) downloadAndSwap(tag string) error {
 	setVersionUpdateProgress("准备校验", 2, nil)
 	arch := runtime.GOARCH
 	if arch == "arm" {
 		arch = "armv7"
 	}
-	base := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s", updateRepoOwner, updateRepoName, tag)
 	asset := fmt.Sprintf("viya-linux-%s.tar.gz", arch)
+	bases := releaseDownloadBases(tag)
 
-	sums, err := httpGetLimited(base+"/sha256sums.txt", 1<<20)
-	if err != nil {
-		return errors.New("无法下载校验文件")
-	}
+	var workingIdx int
 	wantSum := ""
-	for _, line := range strings.Split(string(sums), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && strings.HasSuffix(fields[1], asset) {
-			wantSum = fields[0]
+	gotValidFormat := false
+	for i, base := range bases {
+		sums, err := httpGetLimitedTimeout(base+"/sha256sums.txt", 1<<20, 15*time.Second)
+		if err != nil {
+			continue
+		}
+		if sum, ok := parseAssetChecksum(sums, asset); ok {
+			wantSum = sum
+			workingIdx = i
 			break
+		}
+		if strings.Contains(string(sums), ".tar.gz") {
+			gotValidFormat = true
 		}
 	}
 	if wantSum == "" {
-		return errors.New("校验文件中找不到当前架构的产物")
+		if gotValidFormat {
+			return errors.New("校验文件中找不到当前架构的产物")
+		}
+		return errors.New("无法下载校验文件")
 	}
 
-	setVersionUpdateProgress("正在下载更新包", 4, nil)
-	archiveBytes, err := httpGetWithProgress(base+"/"+asset, 256<<20, func(downloaded, total int64) {
-		percent := 4
-		if total > 0 {
-			percent += int(float64(downloaded) / float64(total) * 82)
-		}
-		setVersionUpdateProgress("正在下载更新包", percent, nil)
-	})
+	tempRoot := a.dataDir
+	archiveFile, err := os.CreateTemp(tempRoot, "viya-release-*.tar.gz")
 	if err != nil {
-		return errors.New("无法下载新版本，请检查服务器网络")
+		return errors.New("无法创建更新临时文件")
 	}
-	sum := sha256.Sum256(archiveBytes)
-	if hex.EncodeToString(sum[:]) != wantSum {
-		return errors.New("下载文件校验失败，已取消更新")
+	archivePath := archiveFile.Name()
+	_ = archiveFile.Close()
+	defer os.Remove(archivePath)
+
+	// Try the base that served checksums first, then fall back to remaining mirrors
+	// without mutating or aliasing the original slice.
+	orderedBases := make([]string, 0, len(bases))
+	orderedBases = append(orderedBases, bases[workingIdx])
+	for i, b := range bases {
+		if i != workingIdx {
+			orderedBases = append(orderedBases, b)
+		}
+	}
+	var verified bool
+	var checksumMismatch bool
+	for _, base := range orderedBases {
+		setVersionUpdateProgress("正在下载更新包", 4, nil)
+		actualSum, dlErr := downloadToFileWithProgressAndSHA256(base+"/"+asset, archivePath, 256<<20, func(downloaded, total int64) {
+			percent := 4
+			if total > 0 {
+				percent += int(float64(downloaded) / float64(total) * 82)
+			}
+			setVersionUpdateProgress("正在下载更新包", percent, nil)
+		})
+		if dlErr != nil {
+			continue
+		}
+		if actualSum != wantSum {
+			checksumMismatch = true
+			continue
+		}
+		verified = true
+		break
+	}
+	if !verified {
+		if checksumMismatch {
+			return errors.New("下载文件校验失败，已取消更新")
+		}
+		return errors.New("无法下载新版本，请检查服务器网络")
 	}
 	setVersionUpdateProgress("校验更新包", 88, nil)
 
-	gz, err := gzip.NewReader(bytes.NewReader(archiveBytes))
+	stageDir, err := os.MkdirTemp(tempRoot, "viya-extract-*")
 	if err != nil {
-		return errors.New("无法解析新版本压缩包")
+		return errors.New("无法创建解压临时目录")
 	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	var viyaBin, caddyBin []byte
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return errors.New("无法读取新版本压缩包")
-		}
-		if hdr.Typeflag != tar.TypeReg || hdr.Size > 256<<20 {
-			continue
-		}
-		name := filepath.Base(hdr.Name)
-		if strings.HasPrefix(name, "viya-linux-") {
-			viyaBin, err = io.ReadAll(tr)
-		} else if strings.HasPrefix(name, "caddy-linux-") {
-			caddyBin, err = io.ReadAll(tr)
-		}
-		if err != nil {
-			return errors.New("无法读取新版本二进制")
-		}
+	defer os.RemoveAll(stageDir)
+
+	viyaStage, caddyStage, err := extractArchiveBinaries(archivePath, stageDir)
+	if err != nil {
+		return err
 	}
-	if viyaBin == nil || caddyBin == nil {
-		return errors.New("新版本压缩包缺少二进制文件")
-	}
+	_ = os.Remove(archivePath)
 	setVersionUpdateProgress("替换程序文件", 94, nil)
 
 	selfPath, err := os.Executable()
 	if err != nil {
 		return errors.New("无法定位当前程序路径")
 	}
-	if err := replaceExecutable(selfPath, viyaBin); err != nil {
+	if err := replaceExecutableFromFile(selfPath, viyaStage); err != nil {
 		return fmt.Errorf("无法替换主程序：%w", err)
 	}
 	caddyPath := a.caddyBin
@@ -350,32 +410,92 @@ func (a *App) downloadAndSwap(tag string) error {
 		caddyPath = filepath.Join(filepath.Dir(selfPath), "caddy")
 	}
 	// Caddy is a subprocess, so a missing path is not fatal: the new binary
-	// can still come up and the engine can be fixed later. Previously the error
-	// was discarded and the UI reported a clean success while the old engine
-	// kept running; now surface it everywhere the operator will look.
-	if warning := swapEngineBinary(caddyPath, caddyBin); warning != "" {
+	// can still come up and the engine can be fixed later.
+	if warning := swapEngineBinaryWith(caddyPath, func() error {
+		return replaceExecutableFromFile(caddyPath, caddyStage)
+	}); warning != "" {
 		setVersionUpdateWarning(warning)
 	}
 	setVersionUpdateProgress("正在重启", 97, nil)
 	return nil
 }
 
-func httpGetWithProgress(url string, limit int64, progress func(downloaded, total int64)) ([]byte, error) {
+func extractArchiveBinaries(archivePath, stageDir string) (viyaStage, caddyStage string, err error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return "", "", errors.New("无法打开已下载的压缩包")
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return "", "", errors.New("无法解析新版本压缩包")
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, nextErr := tr.Next()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			return "", "", errors.New("无法读取新版本压缩包")
+		}
+		if hdr.Typeflag != tar.TypeReg || hdr.Size < 0 || hdr.Size > 256<<20 {
+			continue
+		}
+		name := filepath.Base(hdr.Name)
+		var destName string
+		if strings.HasPrefix(name, "viya-linux-") {
+			destName = "viya-new"
+		} else if strings.HasPrefix(name, "caddy-linux-") {
+			destName = "caddy-new"
+		} else {
+			continue
+		}
+		destPath := filepath.Join(stageDir, destName)
+		out, openErr := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+		if openErr != nil {
+			return "", "", errors.New("无法暂存新版本二进制")
+		}
+		_, copyErr := io.Copy(out, io.LimitReader(tr, hdr.Size))
+		closeErr := out.Close()
+		if copyErr != nil || closeErr != nil {
+			return "", "", errors.New("无法读取新版本二进制")
+		}
+		if destName == "viya-new" {
+			viyaStage = destPath
+		} else {
+			caddyStage = destPath
+		}
+	}
+	if viyaStage == "" || caddyStage == "" {
+		return "", "", errors.New("新版本压缩包缺少二进制文件")
+	}
+	return viyaStage, caddyStage, nil
+}
+
+func downloadToFileWithProgressAndSHA256(url, destPath string, limit int64, progress func(downloaded, total int64)) (string, error) {
 	client := &http.Client{Timeout: 5 * time.Minute}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	req.Header.Set("User-Agent", updateRepoName)
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
+		return "", fmt.Errorf("status %d", resp.StatusCode)
 	}
-	var buf bytes.Buffer
+	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+	hasher := sha256.New()
+	mw := io.MultiWriter(out, hasher)
 	reader := io.LimitReader(resp.Body, limit+1)
 	chunk := make([]byte, 64*1024)
 	var downloaded int64
@@ -384,10 +504,10 @@ func httpGetWithProgress(url string, limit int64, progress func(downloaded, tota
 		if n > 0 {
 			downloaded += int64(n)
 			if downloaded > limit {
-				return nil, errors.New("下载内容超过大小限制")
+				return "", errors.New("下载内容超过大小限制")
 			}
-			if _, err := buf.Write(chunk[:n]); err != nil {
-				return nil, err
+			if _, writeErr := mw.Write(chunk[:n]); writeErr != nil {
+				return "", writeErr
 			}
 			if progress != nil {
 				progress(downloaded, resp.ContentLength)
@@ -397,24 +517,40 @@ func httpGetWithProgress(url string, limit int64, progress func(downloaded, tota
 			break
 		}
 		if readErr != nil {
-			return nil, readErr
+			return "", readErr
 		}
 	}
-	return buf.Bytes(), nil
+	if err := out.Close(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// replaceExecutable writes the new content beside the target and renames it
-// into place. On Linux the running process keeps the old inode alive, so this
-// is safe while the program is still executing; after exit the manager
-// (systemd/procd) starts the fresh file.
+func replaceExecutableFromFile(target, srcPath string) error {
+	f, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return replaceExecutableFromReader(target, f)
+}
+
 func replaceExecutable(target string, content []byte) error {
+	return replaceExecutableFromReader(target, bytes.NewReader(content))
+}
+
+// replaceExecutableFromReader writes the streamed binary beside the target and
+// renames it into place. On Linux the running process keeps the old inode alive,
+// so this is safe while the program is still executing; after exit the manager
+// (systemd/procd) starts the fresh file.
+func replaceExecutableFromReader(target string, src io.Reader) error {
 	dir := filepath.Dir(target)
 	tmp, err := os.CreateTemp(dir, ".viya-update-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(content); err != nil {
+	if _, err := io.Copy(tmp, src); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -428,8 +564,8 @@ func replaceExecutable(target string, content []byte) error {
 	return os.Rename(tmp.Name(), target)
 }
 
-func httpGetLimited(url string, limit int64) ([]byte, error) {
-	client := &http.Client{Timeout: 5 * time.Minute}
+func httpGetLimitedTimeout(url string, limit int64, timeout time.Duration) ([]byte, error) {
+	client := &http.Client{Timeout: timeout}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err

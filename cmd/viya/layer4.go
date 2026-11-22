@@ -161,8 +161,22 @@ func (a *App) checkLayer4Conflict(r *http.Request, id int64, v Layer4Rule) error
 			return fmt.Errorf("端口 %d 已被 Web 监听占用", v.ListenPort)
 		}
 	}
-	apiListen := env("VIYA_LISTEN", "127.0.0.1:8181")
-	for _, reserved := range []struct{ name, address string }{{"Caddy Admin API", a.adminListen}, {"Caddy HTTP", a.httpListen}, {"Viya management API", apiListen}} {
+	apiListen := a.panelListen
+	if apiListen == "" {
+		apiListen = env("VIYA_LISTEN", defaultPanelListen)
+	}
+	reservedListens := []struct{ name, address string }{
+		{"Caddy Admin API", a.adminListen},
+		{"Caddy HTTP", a.httpListen},
+		{"Viya management API", apiListen},
+	}
+	var pendingPanelPort int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT CAST(value AS INTEGER) FROM panel_settings WHERE key='listen_port'`).Scan(&pendingPanelPort); err == nil && pendingPanelPort > 0 {
+		if bindHost, _, err := net.SplitHostPort(apiListen); err == nil {
+			reservedListens = append(reservedListens, struct{ name, address string }{"Viya management API", net.JoinHostPort(bindHost, strconv.Itoa(pendingPanelPort))})
+		}
+	}
+	for _, reserved := range reservedListens {
 		if v.Protocol == "udp" {
 			continue
 		} // These management listeners are TCP, not UDP.

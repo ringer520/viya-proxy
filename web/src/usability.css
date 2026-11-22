@@ -211,11 +211,6 @@ main {
   width: 32px;
   height: 32px;
 }
-.site-log-tooltip {
-  max-width: min(900px, calc(100vw - 32px));
-  max-height: 65vh;
-  overflow: auto;
-}
 .site-log-table {
   font-size: 12px;
 }
@@ -229,16 +224,9 @@ main {
 .site-log-table th {
   padding: 10px 12px;
 }
-.site-log-tooltip .site-log-table td,
-.site-log-tooltip .site-log-table th {
-  padding: 7px 9px;
-}
 .site-log-table-scroll {
   max-width: 100%;
   overflow: auto;
-}
-.site-log-heading {
-  font-size: 13px;
 }
 .log-path {
   max-width: 320px;
@@ -246,28 +234,6 @@ main {
 }
 .site-log-empty {
   font-size: 13px;
-}
-/* One action bar, one filter strip, then each module's results. */
-.list-status > span {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-}
-.list-status select {
-  min-height: 38px;
-  padding: 9px 11px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 13px;
-  width: 100%;
-  min-width: 0;
-}
-.list-status {
-  display: grid;
-  gap: 7px;
-  min-width: 130px;
 }
 .listener-workspace {
   padding: 18px;
@@ -301,11 +267,11 @@ main {
   grid-column: 4;
   grid-row: 1;
 }
-.ddns-record-row > button[title="编辑"] {
+.ddns-record-row > .ddns-edit-button {
   grid-column: 5;
   grid-row: 1;
 }
-.ddns-record-row > button[title="删除"] {
+.ddns-record-row > .ddns-delete-button {
   grid-column: 6;
   grid-row: 1;
 }
@@ -375,10 +341,10 @@ main {
   padding: 12px;
 }
 .modal-actions {
-  bottom: -26px;
+  bottom: -24px;
   background: var(--surface);
   border-top: 1px solid var(--line);
-  padding: 16px 0 0;
+  padding: 14px 0 12px;
   margin-top: 22px;
   gap: 10px;
   z-index: 1;
@@ -486,10 +452,10 @@ html[data-theme="dark"] .ddns-record-row .ddns-error {
     grid-column: 3;
     grid-row: 1;
   }
-  .ddns-record-row > button[title="编辑"] {
+  .ddns-record-row > .ddns-edit-button {
     grid-column: 4;
   }
-  .ddns-record-row > button[title="删除"] {
+  .ddns-record-row > .ddns-delete-button {
     grid-column: 5;
   }
   .ddns-record-row > .ddns-feedback {
@@ -528,9 +494,6 @@ html[data-theme="dark"] .ddns-record-row .ddns-error {
   }
   .panel-head {
     padding: 18px;
-  }
-  .list-status {
-    flex: 1;
   }
   .host-row {
     padding: 16px;
@@ -591,11 +554,11 @@ html[data-theme="dark"] .ddns-record-row .ddns-error {
     grid-row: 3;
     justify-self: start;
   }
-  .ddns-record-row > button[title="编辑"] {
+  .ddns-record-row > .ddns-edit-button {
     grid-column: 3;
     grid-row: 3;
   }
-  .ddns-record-row > button[title="删除"] {
+  .ddns-record-row > .ddns-delete-button {
     grid-column: 4;
     grid-row: 3;
   }

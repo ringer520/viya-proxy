@@ -229,6 +229,8 @@ func (a *App) rollbackConfiguration(w http.ResponseWriter, r *http.Request) {
 	if e != nil {
 		restoreErr := restore(before)
 		engineErr := a.applyLocked(ctx)
+		a.reloadConfigCaches()
+		a.configureProgramLogging()
 		if restoreErr != nil || engineErr != nil {
 			fail(w, 500, errors.New("恢复失败，请使用服务器备份恢复"))
 			return
@@ -236,6 +238,7 @@ func (a *App) rollbackConfiguration(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, errors.New("恢复点校验失败，已还原本次恢复前的配置"))
 		return
 	}
+	a.reloadConfigCaches()
 	a.configureProgramLogging()
 	writeJSON(w, 200, map[string]any{"ok": true, "created": cp.Created, "message": "已恢复可用配置；账号保持不变，监听端口设置在重启后生效"})
 }

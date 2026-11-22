@@ -712,6 +712,8 @@ func (a *App) importConfiguration(w http.ResponseWriter, r *http.Request) {
 			_ = os.WriteFile(dest, file.Data, 0600)
 		}
 		engineErr := a.applyLocked(recoveryCtx)
+		a.reloadConfigCaches()
+		a.configureProgramLogging()
 		if restoreErr != nil || engineErr != nil {
 			fail(w, 500, errors.New("导入失败，自动恢复未完全完成；恢复备份位于服务器 backups 目录"))
 			return
@@ -719,33 +721,46 @@ func (a *App) importConfiguration(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, errors.New("导入配置未通过校验或引擎应用，已恢复导入前配置"))
 		return
 	}
+	a.reloadConfigCaches()
 	a.configureProgramLogging()
 	writeJSON(w, 200, map[string]any{"ok": true, "preferences": payload.Preferences, "requires_login": false, "message": "业务配置已恢复，当前账号和登录保持不变；面板端口在下次重启后生效"})
 }
 
+func (a *App) reloadConfigCaches() {
+	a.panelAccessCache.Store(a.readPanelAccess())
+	a.banPolicyCache.Store(a.readBanPolicy())
+	a.panelDomainsMu.Lock()
+	a.panelDomainsAt = time.Time{}
+	a.panelDomainsMu.Unlock()
+}
+
 func (a *App) validateRestoredBindings(ctx context.Context) error {
-	rows, err := a.db.QueryContext(ctx, `SELECT id,domain,listener_id,upstream,tls_mode,dns_provider_id,custom_certificate_id,type,root_path,redirect_target,redirect_status FROM proxy_hosts`)
+	rows, err := a.db.QueryContext(ctx, `SELECT `+hostReadColumns+` FROM proxy_hosts`)
 	if err != nil {
 		return err
 	}
-	hosts := []Host{}
+	hosts := []*Host{}
 	for rows.Next() {
-		var h Host
-		if err = rows.Scan(&h.ID, &h.Domain, &h.ListenerID, &h.Upstream, &h.TLSMode, &h.DNSProviderID, &h.CustomCertificateID, &h.Type, &h.RootPath, &h.RedirectTarget, &h.RedirectStatus); err != nil {
+		h, scanErr := scanHost(rows)
+		if scanErr != nil {
 			rows.Close()
-			return err
+			return scanErr
 		}
 		hosts = append(hosts, h)
 	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
 	rows.Close()
 	for _, h := range hosts {
-		if err = validateHost(&h); err != nil {
+		if err = validateHost(h); err != nil {
 			return err
 		}
-		if err = a.validateHostListener(ctx, &h); err != nil {
+		if err = a.validateHostListener(ctx, h); err != nil {
 			return err
 		}
-		if err = a.validateTLSSettings(ctx, &h); err != nil {
+		if err = a.validateTLSSettings(ctx, h); err != nil {
 			return err
 		}
 	}

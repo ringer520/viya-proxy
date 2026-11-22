@@ -36,12 +36,65 @@ CATALOG = FRONTEND / "locales" / "en.json"
 
 HAN = re.compile(r"[\u4e00-\u9fff]")
 T_CALL = re.compile(r"(?<![A-Za-z0-9_])t\(\s*([\"'])([^\"'\n]*?)\1")
-TR_TAG = re.compile(r"(?<![A-Za-z0-9_])tr`([^`\n]*)`")
+TR_START = re.compile(r"(?<![A-Za-z0-9_])tr`")
 GO_ERRORS = (
     re.compile(r"errors\.New\(\s*\"([^\"\n]*)\"\s*\)"),
     re.compile(r"fmt\.Errorf\(\s*\"([^\"\n]*)\""),
     re.compile(r"\"error\"\s*:\s*\"([^\"\n]*)\""),
 )
+
+
+def extract_tr_keys(text: str) -> list[str]:
+    """Extract `tr` tagged templates, replacing `${...}` slots with `{0}`, `{1}`, ..."""
+    keys: list[str] = []
+    n = len(text)
+    for match in TR_START.finditer(text):
+        i = match.end()
+        out: list[str] = []
+        slot = 0
+        closed = False
+        while i < n:
+            ch = text[i]
+            if ch == "\\":
+                if i + 1 < n:
+                    out.append(text[i : i + 2])
+                    i += 2
+                    continue
+                break
+            if ch == "`":
+                closed = True
+                break
+            if ch == "\n":
+                break
+            if ch == "$" and i + 1 < n and text[i + 1] == "{":
+                out.append(f"{{{slot}}}")
+                slot += 1
+                i += 2
+                depth = 1
+                in_quote: str | None = None
+                while i < n and depth > 0:
+                    c = text[i]
+                    if c == "\\":
+                        i += 2
+                        continue
+                    if in_quote:
+                        if c == in_quote:
+                            in_quote = None
+                        i += 1
+                        continue
+                    if c in ("'", '"', "`"):
+                        in_quote = c
+                    elif c == "{":
+                        depth += 1
+                    elif c == "}":
+                        depth -= 1
+                    i += 1
+                continue
+            out.append(ch)
+            i += 1
+        if closed:
+            keys.append("".join(out))
+    return keys
 
 
 def frontend_keys() -> dict[str, str]:
@@ -50,14 +103,15 @@ def frontend_keys() -> dict[str, str]:
     for path in paths:
         text = path.read_text(encoding="utf-8", errors="replace")
         rel = str(path.relative_to(ROOT)).replace("\\", "/")
-        for pattern in (T_CALL, TR_TAG):
-            for match in pattern.finditer(text):
-                key = match.group(2) if pattern is T_CALL else match.group(1)
-                if not key or not HAN.search(key):
-                    continue
-                if "${" in key or "\n" in key or "`" in key:
-                    continue
-                found.setdefault(key, rel)
+        for match in T_CALL.finditer(text):
+            key = match.group(2)
+            if not key or not HAN.search(key) or "\n" in key or "`" in key:
+                continue
+            found.setdefault(key, rel)
+        for key in extract_tr_keys(text):
+            if not key or not HAN.search(key):
+                continue
+            found.setdefault(key, rel)
     return found
 
 

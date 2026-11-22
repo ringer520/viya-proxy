@@ -8,6 +8,7 @@ import { applyRetryVisible, csrfToken, error, hosts, l4Rules, saving } from "./u
 import { load } from "./useRefresh";
 import {
   advancedOpen,
+  composedDomain,
   editingID,
   form,
   partialSave,
@@ -36,22 +37,41 @@ export async function retryApply() {
     l4Error.value = "";
     await load();
 
-    if (partialSave.value && editingID.value === null) {
-      const saved = hosts.value.find(
-        (host) =>
-          host.domain === form.value.domain.trim().toLowerCase() &&
-          host.listener_id === form.value.listener_id,
-      );
-      if (saved) editingID.value = saved.id;
+    if (partialSave.value) {
+      if (editingID.value === null) {
+        const domain = composedDomain.value.trim().toLowerCase();
+        const path = (form.value.path || "").trim();
+        const saved = hosts.value.find(
+          (host) =>
+            host.domain === domain &&
+            host.listener_id === form.value.listener_id &&
+            (host.path || "") === path,
+        );
+        if (saved) {
+          editingID.value = saved.id;
+          form.value.version = saved.version;
+        }
+      } else {
+        const saved = hosts.value.find((host) => host.id === editingID.value);
+        if (saved) form.value.version = saved.version;
+      }
     }
-    if (l4PartialSave.value && l4EditingID.value === null) {
-      const saved = l4Rules.value.find(
-        (rule) =>
-          rule.listen_port === l4Form.value.listen_port &&
-          rule.listen_address === l4Form.value.listen_address &&
-          rule.protocol === l4Form.value.protocol,
-      );
-      if (saved) l4EditingID.value = saved.id;
+    if (l4PartialSave.value) {
+      if (l4EditingID.value === null) {
+        const saved = l4Rules.value.find(
+          (rule) =>
+            rule.listen_port === l4Form.value.listen_port &&
+            rule.listen_address === l4Form.value.listen_address &&
+            rule.protocol === l4Form.value.protocol,
+        );
+        if (saved) {
+          l4EditingID.value = saved.id;
+          l4Form.value = { ...saved };
+        }
+      } else {
+        const saved = l4Rules.value.find((rule) => rule.id === l4EditingID.value);
+        if (saved) l4Form.value = { ...saved };
+      }
     }
     if (editingID.value !== null) partialSave.value = false;
     if (l4EditingID.value !== null) l4PartialSave.value = false;

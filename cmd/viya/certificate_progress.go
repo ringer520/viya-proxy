@@ -113,6 +113,10 @@ func (a *App) observeCertificateLog(line string) {
 		}
 		return ""
 	}
+	logger := strings.ToLower(textField("logger"))
+	if !strings.HasPrefix(logger, "tls.") {
+		return
+	}
 	message := strings.ToLower(textField("msg") + " " + textField("error"))
 	lowerLine := strings.ToLower(line)
 	challenge := strings.ToLower(textField("challenge_type"))
@@ -120,7 +124,7 @@ func (a *App) observeCertificateLog(line string) {
 	if identifier == "" {
 		identifier = strings.ToLower(textField("domain"))
 	}
-	if message == "  " || message == "" {
+	if strings.TrimSpace(message) == "" {
 		return
 	}
 
@@ -131,15 +135,14 @@ func (a *App) observeCertificateLog(line string) {
 	}
 	a.certProgressMu.RUnlock()
 	for _, domain := range domains {
-		base := strings.TrimPrefix(domain, "*.")
-		matches := strings.Contains(identifier, base) || strings.Contains(lowerLine, domain) || (strings.HasPrefix(domain, "*.") && strings.Contains(identifier, base))
+		matches := strings.EqualFold(identifier, domain) || (identifier == "" && strings.Contains(lowerLine, `"`+domain+`"`))
 		if !matches {
 			continue
 		}
 		previous := a.getCertificateProgress(domain)
 		next := previous
 		switch {
-		case strings.Contains(message, "challenge failed") || strings.Contains(message, "authorization failed") || strings.Contains(message, "certificate issuance failed") || strings.Contains(message, "error"):
+		case strings.Contains(message, "challenge failed") || strings.Contains(message, "authorization failed") || strings.Contains(message, "certificate issuance failed") || (previous.Status != "issued" && strings.Contains(message, "error")) || (strings.Contains(logger, "obtain") && strings.Contains(message, "error")):
 			next.Status, next.Percent = "retrying", 48
 			next.Message = "验证遇到问题，Caddy 将自动重试"
 			next.LastError = "CA 验证或签发暂未成功；可查看服务日志，Caddy 会自动重试。"

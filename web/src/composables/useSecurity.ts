@@ -83,4 +83,6 @@ export async function saveSecurityDefaults(){
 }
 export function closeSecurityDialog(){if(securitySaving.value)return;securityDialog.value.open=false;securityError.value="";securityNotice.value=""}
 
-registerRefreshTask("security-defaults",loadSecurityDefaults,"bans");
+export function resetSecurityState(){clearTimeout(previewTimer);previewRequest?.abort();securityDialog.value={open:false,scope:"global",domain:""};securityDefaults.value={global:normalizeDefault(),domains:{}};securityForm.value=emptySitePolicy();securityImpact.value=null;securityError.value="";securityNotice.value="";securityPreviewError.value="";securityPreviewPending.value=false}
+
+registerRefreshTask("security-defaults",loadSecurityDefaults,"security");

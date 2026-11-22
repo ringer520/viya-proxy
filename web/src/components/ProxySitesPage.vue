@@ -7,13 +7,11 @@ import { t } from "../i18n";
 import { onMounted, onUnmounted, ref } from "vue";
 import type { Host } from "../types";
 import { formatBytes } from "../format";
-import AccessLogTable from "./AccessLogTable.vue";
 import { clearListFilters, hasListFilter, listSearch, readOnly, statusFilter, upstreamHealth } from "../composables/useState";
 
 import { siteStats } from "../composables/useTraffic";
-import { cloneHost, hostContentStats, hostToggling, openCreate, openEdit, openListenerEditor, openSiteFiles, openSiteLogs, previewLayout, previewSite, remove, selectedListener, selectedPortState, selectListener, siteGroups, siteIconStyle, siteLogs, siteURL, toggleHost, toggleWebSearch, visibleHosts, webHosts, webListeners, webSearchInput, webSearchOpen } from "../composables/useHosts";
+import { cloneHost, hostContentStats, hostToggling, openCreate, openEdit, openListenerEditor, openSiteFiles, openSiteLogs, remove, selectedListener, selectedPortState, selectListener, siteGroups, siteIconStyle, siteURL, toggleHost, toggleWebSearch, visibleHosts, webHosts, webListeners, webSearchInput, webSearchOpen } from "../composables/useHosts";
 import { openSecurityDefaults, resolveSecurityPolicy } from "../composables/useSecurity";
-import { previewLimit } from "../composables/usePreferences";
 function hasSiteName(host: Host) { return !!host.name?.trim() && host.name.trim() !== host.domain; }
 function certificateDetails(host: Host) {
   const source = host.certificate_source;
@@ -137,16 +135,6 @@ function certificateIssue(host: Host) {
               >{{ selectedPortState.message }}</span
             >
           </div>
-        </div>
-        <div class="site-list-tools">
-          <span>{{ visibleHosts.length }} {{ t("个匹配站点") }}</span
-          ><button
-            v-if="hasListFilter"
-            class="inline-action"
-            @click="clearListFilters"
-          >
-            {{ t("清除筛选") }}
-          </button>
         </div>
         <div v-if="visibleHosts.length" class="site-groups">
           <section
@@ -292,51 +280,16 @@ function certificateIssue(host: Host) {
                 >
                   </div>
                   <div class="site-actions-buttons">
-                    <div class="site-log-preview-wrap">
-                      <button
-                        class="site-log-trigger"
-                        :aria-label="
-                          t('预览 ') + host.domain + t(' 的访问日志')
-                        "
-                        :aria-describedby="'site-log-' + host.id"
-                        :title="t('悬浮预览访问日志；点击查看完整记录')"
-                        @mouseenter="previewSite(host, $event)"
-                        @click="openSiteLogs(host)"
-                      >
-                        <ScrollText :size="15" />
-                      </button>
-                      <div
-                        :id="'site-log-' + host.id"
-                        role="tooltip"
-                        class="site-log-tooltip"
-                        :style="previewLayout"
-                      >
-                        <div class="site-log-heading">
-                          <b>{{ host.domain }} {{ t("· 最近访问") }}</b
-                          ><span
-                            >{{ t("最近") }} {{ previewLimit }}
-                            {{ t("条") }}</span
-                          >
-                        </div>
-                        <AccessLogTable
-                          :events="
-                            (siteLogs[host.id]?.events || []).slice(
-                              0,
-                              previewLimit,
-                            )
-                          "
-                          :loading="siteLogs[host.id]?.loading"
-                          :error="siteLogs[host.id]?.error"
-                          :limit="previewLimit"
-                          compact
-                        /><button
-                          class="inline-action"
-                          @click="openSiteLogs(host)"
-                        >
-                          {{ t("查看最近 50 条记录 →") }}
-                        </button>
-                      </div>
-                    </div>
+                    <button
+                      class="site-log-trigger"
+                      :aria-label="
+                        t('查看 ') + host.domain + t(' 的访问日志')
+                      "
+                      :title="t('查看访问日志')"
+                      @click="openSiteLogs(host)"
+                    >
+                      <ScrollText :size="15" />
+                    </button>
 
                     <button class="icon-btn site-diagnostic-action" :aria-label="t('一键诊断')" :title="t('一键诊断')" @click="openSiteDetails(host,true)"><Activity :size="16" /></button>
                     <button class="icon-btn" :disabled="readOnly" :aria-label="t('编辑')" :title="t('编辑')" @click="openEdit(host)"><Pencil :size="16" /></button>

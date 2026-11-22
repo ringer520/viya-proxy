@@ -143,7 +143,7 @@ func (a *App) diagnoseSite(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if h.Type == "static" {
+	if h.Type == "static" || h.Type == "files" {
 		info, err := os.Stat(h.RootPath)
 		if err != nil || !info.IsDir() {
 			add("静态目录", "fail", "目录不存在或不可读取", "检查托管目录与权限")

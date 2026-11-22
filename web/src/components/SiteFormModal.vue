@@ -33,7 +33,7 @@ import { applyRetryVisible, certificates, error, providers, saving } from "../co
 import { retryApply } from "../composables/useApply";
 import SitePolicyFields from "./SitePolicyFields.vue";
 import SiteSecurityPolicy from "./SiteSecurityPolicy.vue";
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 const iconPickerOpen = ref(false);
 // 上游路径处理：把「剥离前缀」和「重写路径」合并成互斥选项。
 // Caddy 里两者对应两条 rewrite，同时配置时后者会静默覆盖前者，
@@ -85,20 +85,78 @@ watch(
 
 // File services have their own page; the type picker is replaced by a locked chip.
 const isFileService = computed(() => form.value.type === "files");
-watch(show, (open) => {
-  if (open) {
-    syncPathMode();
-  } else {
-    error.value = "";
-    iconPickerOpen.value = false;
+const modalEyebrow = computed(() => {
+  const isNew = editingID.value === null;
+  switch (form.value.type) {
+    case "files":
+      return isNew ? t("新建文件服务") : t("修改文件服务");
+    case "static":
+      return isNew ? t("新建静态站点") : t("修改静态站点");
+    case "redirect":
+      return isNew ? t("新建重定向") : t("修改重定向");
+    default:
+      return isNew ? t("新建反代") : t("修改反代");
   }
 });
+const modalHeading = computed(() => {
+  const isNew = editingID.value === null;
+  switch (form.value.type) {
+    case "files":
+      return isNew ? t("添加文件服务") : t("编辑文件服务");
+    case "static":
+      return isNew ? t("添加静态站点") : t("编辑静态站点");
+    case "redirect":
+      return isNew ? t("添加重定向站点") : t("编辑重定向站点");
+    default:
+      return isNew ? t("添加代理站点") : t("编辑代理站点");
+  }
+});
+const routeSectionTitle = computed(() => {
+  switch (form.value.type) {
+    case "files":
+      return t("共享目录与访问方式");
+    case "static":
+      return t("网站文件与目录");
+    case "redirect":
+      return t("跳转规则");
+    default:
+      return t("路由与上游");
+  }
+});
+
+watch(
+  () => form.value.type,
+  (type) => {
+    if (type === "redirect") {
+      pathMode.value = "keep";
+      form.value.strip_prefix = false;
+      form.value.rewrite_to = "";
+    }
+  },
+);
+watch(
+  show,
+  (open) => {
+    if (open) {
+      syncPathMode();
+    } else {
+      error.value = "";
+      iconPickerOpen.value = false;
+    }
+  },
+  { immediate: true },
+);
 
 function closeIconPickerOnOutsideClick(event: MouseEvent) {
   if (iconPickerOpen.value && !(event.target as Element).closest(".site-icon-picker")) {
     iconPickerOpen.value = false;
   }
 }
+
+onBeforeUnmount(() => {
+  error.value = "";
+  iconPickerOpen.value = false;
+});
 
 </script>
 
@@ -107,26 +165,8 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
     <form class="modal proxy-modal" @submit.prevent="save" @click="closeIconPickerOnOutsideClick">
       <div class="modal-top">
         <div>
-          <span class="eyebrow">{{
-            isFileService
-              ? editingID === null
-                ? t("新建文件服务")
-                : t("修改文件服务")
-              : editingID === null
-                ? t("新建反代")
-                : t("修改反代")
-          }}</span>
-          <h2>
-            {{
-              isFileService
-                ? editingID === null
-                  ? t("添加文件服务")
-                  : t("编辑文件服务")
-                : editingID === null
-                  ? t("添加代理站点")
-                  : t("编辑代理站点")
-            }}
-          </h2>
+          <span class="eyebrow">{{ modalEyebrow }}</span>
+          <h2>{{ modalHeading }}</h2>
         </div>
         <button
           type="button"
@@ -156,7 +196,7 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
       <h3 class="form-section-title">{{ t("基本信息") }}</h3>
       <div class="site-name-entry">
         <div class="site-name-label-row">
-          <div class="site-icon-picker" @keydown.esc.stop="iconPickerOpen = false">
+          <div class="site-icon-picker" @keydown.esc="if (iconPickerOpen) { $event.stopPropagation(); iconPickerOpen = false; }">
             <button
               type="button"
               class="site-icon-trigger"
@@ -298,7 +338,7 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
         </div>
         <small class="site-type-hint">{{ siteTypeHint }}</small>
       </div>
-      <h3 class="form-section-title">{{ form.type === "files" ? t("共享目录与访问方式") : t("路由与上游") }}</h3>
+      <h3 class="form-section-title">{{ routeSectionTitle }}</h3>
       <template v-if="form.type === 'proxy'">
         <label
           >{{ t("上游地址") }}<span class="field-req" aria-hidden="true">*</span
@@ -516,30 +556,32 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
           t("留空接管整个域名；同域名同端口只能有一个站点，路径无法拆分多个后端。")
         }}</small></label
       >
-      <label
-        >{{ t("上游路径处理")
-        }}<select :value="pathMode" @change="onPathModeChange">
-          <option value="keep">{{ t("保持原样转发") }}</option>
-          <option v-if="form.path" value="strip">
-            {{ t("剥离访问路径前缀") }}
-          </option>
-          <option value="rewrite">{{ t("重写到固定路径") }}</option>
-        </select>
-        <small v-if="pathMode === 'strip'">{{
-          t("访问路径为 /api 时，/api/users 转发为 /users")
-        }}</small></label
-      >
-      <label v-if="pathMode === 'rewrite'"
-        >{{ t("重写目标路径")
-        }}<input
-          v-model="form.rewrite_to"
-          placeholder="/index.php"
-          autocapitalize="none"
-          spellcheck="false"
-        /><small>{{
-          t("整体替换，例如填 /index.php 时 /api/users 也会变成 /index.php")
-        }}</small></label
-      >
+      <template v-if="form.type !== 'redirect'">
+        <label
+          >{{ form.type === "proxy" ? t("上游路径处理") : t("路径处理")
+          }}<select :value="pathMode" @change="onPathModeChange">
+            <option value="keep">{{ t("保持原样转发") }}</option>
+            <option v-if="form.path" value="strip">
+              {{ t("剥离访问路径前缀") }}
+            </option>
+            <option value="rewrite">{{ t("重写到固定路径") }}</option>
+          </select>
+          <small v-if="pathMode === 'strip'">{{
+            t("访问路径为 /api 时，/api/users 转发为 /users")
+          }}</small></label
+        >
+        <label v-if="pathMode === 'rewrite'"
+          >{{ t("重写目标路径")
+          }}<input
+            v-model="form.rewrite_to"
+            placeholder="/index.php"
+            autocapitalize="none"
+            spellcheck="false"
+          /><small>{{
+            t("整体替换，例如填 /index.php 时 /api/users 也会变成 /index.php")
+          }}</small></label
+        >
+      </template>
       <h3 class="form-section-title">{{ t("HTTPS 与证书") }}</h3>
       <label
         >TLS / HTTPS<select v-model="form.tls_mode">
@@ -704,7 +746,7 @@ function closeIconPickerOnOutsideClick(event: MouseEvent) {
         >
       </div>
       <div class="modal-actions">
-        <button type="button" class="secondary" @click="show = false">
+        <button type="button" class="secondary" :disabled="saving" @click="show = false">
           {{ t("取消") }}</button
         ><button
           class="primary"

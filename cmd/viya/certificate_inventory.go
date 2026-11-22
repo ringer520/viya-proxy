@@ -204,7 +204,8 @@ func removeStoredCertificates(root, domain string) (int, error) {
 	}
 	names := []string{domain}
 	if strings.HasPrefix(domain, "*.") {
-		names = append(names, strings.TrimPrefix(domain, "*."))
+		// Caddy/CertMagic stores wildcard site directories under wildcard_.example.com.
+		names = append(names, "wildcard_."+strings.TrimPrefix(domain, "*."))
 	}
 	removed := 0
 	for _, issuer := range issuers {

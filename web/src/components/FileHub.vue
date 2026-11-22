@@ -6,6 +6,7 @@ import {
 } from "@lucide/vue";
 import { t } from "../i18n";
 import { openCreate, openSiteFiles, show as hostFormOpen } from "../composables/useHosts";
+import { readOnly } from "../composables/useState";
 import {
   fileShares, fileSharesLoading, fileSharesError, refreshFileShares,
 } from "../composables/useFileShares";
@@ -30,7 +31,15 @@ async function copy(text: string, key: string) {
 }
 
 function manage(share: FileShare) {
-  openSiteFiles({ id: share.id, domain: share.domain, root_path: share.root_path });
+  openSiteFiles({
+    id: share.id,
+    domain: share.domain,
+    root_path: share.root_path,
+    type: share.type,
+    tls_mode: share.tls_mode,
+    listener_id: share.listener_id,
+    path: share.path,
+  });
 }
 
 function toggleCommands(id: number) {
@@ -64,7 +73,7 @@ onMounted(() => void refreshFileShares());
         <button class="secondary" :disabled="fileSharesLoading" @click="refreshFileShares()">
           <RefreshCw :size="15" /> {{ t("刷新") }}
         </button>
-        <button class="primary" @click="openCreate(undefined, 'files')">
+        <button class="primary" :disabled="readOnly" @click="openCreate(undefined, 'files')">
           <Plus :size="15" /> {{ t("新建共享") }}
         </button>
       </div>

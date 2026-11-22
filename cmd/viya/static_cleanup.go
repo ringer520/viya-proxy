@@ -3,8 +3,20 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
+
+func pathOverlaps(root, candidate string) bool {
+	rel, err := filepath.Rel(root, candidate)
+	if err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))) {
+		return true
+	}
+	if runtime.GOOS == "windows" && strings.EqualFold(filepath.Clean(root), filepath.Clean(candidate)) {
+		return true
+	}
+	return false
+}
 
 // Execute only after a confirmed engine load. A failed delete must never
 // remove files that the previous, still-running Caddy configuration serves.
@@ -28,7 +40,7 @@ func (a *App) cleanupDeletedSites(ctx context.Context) error {
 		return err
 	}
 	for _, root := range pending {
-		rows, err = a.db.QueryContext(ctx, `SELECT domain,root_path FROM proxy_hosts WHERE type='static'`)
+		rows, err = a.db.QueryContext(ctx, `SELECT domain,root_path FROM proxy_hosts WHERE type IN ('static','files')`)
 		if err != nil {
 			return err
 		}
@@ -42,8 +54,7 @@ func (a *App) cleanupDeletedSites(ctx context.Context) error {
 			if path == "" {
 				path = managedStaticSiteRoot(a, domain)
 			}
-			rel, e := filepath.Rel(root, path)
-			if e == nil && (rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+			if pathOverlaps(root, path) {
 				used = true
 			}
 		}

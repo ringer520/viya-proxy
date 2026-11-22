@@ -32,7 +32,6 @@ html[data-density="compact"] .forward-panel .forward-row{min-height:72px;padding
 .forward-actions .icon-btn:hover,.forward-actions .site-log-trigger:hover{color:var(--accent);background:var(--accent-soft)}
 .forward-actions .danger:hover{color:#dc4e56;background:#dc4e5610}
 .forward-row.disabled .forward-entry,.forward-row.disabled .forward-target,.forward-row.disabled .forward-metrics{opacity:.5}
-.forward-panel .log-level.error{font-size:11px;line-height:1.4}
 @media(max-width:1250px){.forward-panel{--forward-columns:minmax(180px,1.15fr) minmax(145px,1fr) 115px 150px;--forward-gap:20px}.forward-columns,.forward-row{padding-left:16px;padding-right:16px}.forward-metrics{padding-left:10px}}
 @media(max-width:1100px){.forward-columns{display:none}.forward-row{grid-template-columns:minmax(0,1fr) 150px;gap:12px 18px}.forward-entry{grid-column:1;grid-row:1}.forward-target{grid-column:1;grid-row:2;padding-left:66px}.forward-connector{left:44px;top:2px}.forward-metrics{grid-column:2;grid-row:1}.forward-actions{grid-column:2;grid-row:2}}
 @media(max-width:540px){.forward-row{grid-template-columns:minmax(0,1fr);padding:14px}.forward-entry,.forward-target,.forward-metrics,.forward-actions{grid-column:1;grid-row:auto}.forward-metrics{margin-left:44px;padding:10px 0 0;border-left:0;border-top:1px solid var(--line);display:flex;align-items:center;flex-wrap:wrap;gap:10px}.forward-actions{padding-left:44px;justify-content:flex-end}}

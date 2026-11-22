@@ -128,7 +128,11 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		}
 		handlers := []any{}
 		if len(host.IPDenylist) > 0 {
-			hostRoutes = append(hostRoutes, map[string]any{"match": []any{map[string]any{"host": []string{host.Domain}, "remote_ip": map[string]any{"ranges": host.IPDenylist}}}, "handle": []any{map[string]any{"handler": "static_response", "status_code": 403, "body": "Forbidden"}}})
+			denyMatch := map[string]any{"host": []string{host.Domain}, "remote_ip": map[string]any{"ranges": host.IPDenylist}}
+			if host.Path != "" {
+				denyMatch["path"] = []string{host.Path, host.Path + "/*"}
+			}
+			hostRoutes = append(hostRoutes, map[string]any{"match": []any{denyMatch}, "handle": []any{map[string]any{"handler": "static_response", "status_code": 403, "body": "Forbidden", "headers": map[string][]string{"X-Viya-Access-Rule": {"deny"}}}}})
 		}
 		if active := bansByDomain[host.Domain]; len(active) > 0 {
 			ranges := []string{}
@@ -141,11 +145,15 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 			}
 			active = ranges
 			if len(active) > 0 {
-				hostRoutes = append(hostRoutes, map[string]any{"match": []any{map[string]any{"host": []string{host.Domain}, "remote_ip": map[string]any{"ranges": active}}}, "handle": []any{map[string]any{"handler": "static_response", "status_code": 403, "body": "Temporarily blocked"}}})
+				hostRoutes = append(hostRoutes, map[string]any{"match": []any{map[string]any{"host": []string{host.Domain}, "remote_ip": map[string]any{"ranges": active}}}, "handle": []any{map[string]any{"handler": "static_response", "status_code": 403, "body": "Temporarily blocked", "headers": map[string][]string{"X-Viya-Access-Rule": {"ban"}}}}})
 			}
 		}
 		if len(host.IPAllowlist) > 0 {
-			hostRoutes = append(hostRoutes, map[string]any{"match": []any{map[string]any{"host": []string{host.Domain}, "not": []any{map[string]any{"remote_ip": map[string]any{"ranges": host.IPAllowlist}}}}}, "handle": []any{map[string]any{"handler": "static_response", "status_code": 403, "body": "Forbidden"}}})
+			allowMatch := map[string]any{"host": []string{host.Domain}, "not": []any{map[string]any{"remote_ip": map[string]any{"ranges": host.IPAllowlist}}}}
+			if host.Path != "" {
+				allowMatch["path"] = []string{host.Path, host.Path + "/*"}
+			}
+			hostRoutes = append(hostRoutes, map[string]any{"match": []any{allowMatch}, "handle": []any{map[string]any{"handler": "static_response", "status_code": 403, "body": "Forbidden", "headers": map[string][]string{"X-Viya-Access-Rule": {"allow"}}}}})
 		}
 		if host.PasswordHash != "" {
 			handlers = append(handlers, map[string]any{"handler": "authentication", "providers": map[string]any{"http_basic": map[string]any{"accounts": []any{map[string]any{"username": host.BasicAuthUser, "password": host.PasswordHash}}}}})

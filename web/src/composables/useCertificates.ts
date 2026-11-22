@@ -57,6 +57,7 @@ export async function refreshManagedCertificates() {
   } catch {}
 }
 export async function requestCertificate() {
+  if (!guardWrite() || managedCertBusy.value) return;
   managedCertBusy.value = true;
   managedCertError.value = "";
   try {
@@ -100,6 +101,7 @@ export async function requestCertificate() {
   }
 }
 export async function removeManagedCert(cert: ManagedCertificate) {
+  if (!guardWrite()) return;
   const usage=hosts.value.filter(h=>h.certificate_source?.domain===cert.domain).map(h=>h.domain);
   if (await confirmDeletion(tr`停止“${cert.domain}”的证书托管和自动续期？`+(usage.length?"\n"+t("当前关联：")+usage.join("；"):"")))
     await performDelete(`/api/v1/managed-certificates/${cert.id}`);
@@ -112,6 +114,7 @@ export async function refreshCertificateInventory() {
   } catch {}
 }
 export async function removeAutomaticCert(cert: AutomaticCertificate) {
+  if (!guardWrite()) return;
   if (
     await confirmDeletion(
       tr`将彻底删除“${cert.domain}”的证书文件和申请记录，并由引擎重新应用配置。之后若站点仍选择自动 HTTPS，引擎会重新申请。确定继续吗？`,
@@ -130,6 +133,7 @@ export const keyFile = ref<File | null>(null);
 export const certError = ref("");
 
 export async function saveCert() {
+  if (!guardWrite() || saving.value) return;
   certError.value = "";
   saving.value = true;
   try {
@@ -158,8 +162,21 @@ export async function saveCert() {
   }
 }
 export async function removeCert(cert: Certificate) {
+  if (!guardWrite()) return;
   if (await confirmDeletion(tr`删除证书“${cert.name}”？`))
     await performDelete(`/api/v1/custom-certificates/${cert.id}`);
+}
+
+export function resetCertificatesState() {
+  showManagedCert.value = false;
+  showCert.value = false;
+  certFile.value = null;
+  keyFile.value = null;
+  certForm.value = { name: "" };
+  certError.value = "";
+  managedCertError.value = "";
+  editingManagedID.value = null;
+  automaticCertificates.value = [];
 }
 
 // ---- list filtering ----

@@ -61,7 +61,7 @@ func (a *App) recordLoginAudit(r *http.Request, username, result, reason string)
 	agent := clipText(strings.TrimSpace(r.Header.Get("User-Agent")), loginAuditAgent)
 	_, err := a.db.ExecContext(r.Context(),
 		`INSERT INTO login_audit(username,ip,user_agent,result,reason,created_at) VALUES(?,?,?,?,?,?)`,
-		username, clipText(remoteIP(r), 64), agent, result, reason, time.Now().Unix())
+		username, clipText(a.accessClientIP(r), 64), agent, result, reason, time.Now().Unix())
 	if err != nil {
 		slog.Warn("record login audit", "error", err)
 		return

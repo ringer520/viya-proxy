@@ -17,7 +17,6 @@ const interval=defineModel<number>('interval',{required:true})
 const autoRefresh=defineModel<boolean>('autoRefresh',{required:true})
 const pauseHidden=defineModel<boolean>('pauseHidden',{required:true})
 const charts=defineModel<boolean>('charts',{required:true})
-const previewLimit=defineModel<number>('previewLimit',{required:true})
 const landing=defineModel<string>('landing',{required:true})
 const showFileServices=defineModel<boolean>('showFileServices',{required:true})
 const port=defineModel<number>('port',{required:true})
@@ -170,12 +169,12 @@ const themeOptions=[
   <div class="settings-drawer-backdrop">
     <section ref="root" class="settings-drawer panel-settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" @keydown="keyboard">
       <header class="settings-drawer-header"><span class="settings-title-icon"><Settings :size="20"/></span><div><h2 id="settings-title">{{t('面板设置')}}</h2><span>{{t('偏好与管理')}}</span></div><button type="button" class="icon-btn" :disabled="locked" :aria-label="t('关闭面板设置')" @click="close"><X :size="19"/></button></header>
-      <SettingsVersionPanel :role="role" :csrf="csrf" :blocked="dirty||storageBusy||busy||userBusy||alertBusy||loading" @busy="versionBusy=$event" @reload-ready="allowReload=true"/>
+      <SettingsVersionPanel :role="role" :csrf="csrf" :blocked="dirty||storageBusy||busy||userBusy||alertBusy||accessBusy||loading" @busy="versionBusy=$event" @reload-ready="allowReload=true"/>
       <nav class="settings-drawer-tabs" role="tablist" :aria-label="t('设置分类')" @keydown="tabKeyboard"><button v-for="item in tabs" :id="'settings-tab-'+item.id" :key="item.id" type="button" role="tab" :tabindex="tab===item.id?0:-1" :aria-selected="tab===item.id" :aria-controls="'settings-section-'+item.id" :class="{selected:tab===item.id}" @click="selectTab(item.id)"><component :is="item.icon" :size="15"/><span>{{item.label}}</span></button></nav>
       <div ref="body" class="settings-drawer-body">
         <p v-if="loading" class="settings-notice" role="status">{{t('正在读取面板设置…')}}</p>
         <p v-if="showFeedback&&error" class="settings-alert" role="alert">{{error}}</p><p v-if="showFeedback&&message" class="settings-notice success" role="status">{{message}}</p>
-        <section v-show="tab==='storage'" id="settings-section-storage" class="settings-tab-panel" role="tabpanel" aria-labelledby="settings-tab-storage"><StorageSettings v-if="storageVisited" :csrf="csrf" :admin="admin" :blocked="busy||userBusy||alertBusy||versionBusy" @busy="storageBusy=$event" @dirty="storageDirty=$event"/></section>
+        <section v-show="tab==='storage'" id="settings-section-storage" class="settings-tab-panel" role="tabpanel" aria-labelledby="settings-tab-storage"><StorageSettings v-if="storageVisited" :csrf="csrf" :admin="admin" :blocked="busy||userBusy||alertBusy||accessBusy||versionBusy" @busy="storageBusy=$event" @dirty="storageDirty=$event"/></section>
         <section v-show="tab==='appearance'" id="settings-section-appearance" class="settings-tab-panel" role="tabpanel" aria-labelledby="settings-tab-appearance">
           <div class="settings-section-heading"><h3>{{t('外观与显示')}}</h3><span>{{t('当前浏览器 · 即时生效')}}</span></div>
           <div class="settings-row"><span><strong>{{t('语言 / Language')}}</strong></span><LanguagePicker/></div>
@@ -196,7 +195,6 @@ const themeOptions=[
             <label class="settings-row"><span><strong>{{t('自动刷新页面数据')}}</strong><small>{{t('流量、DDNS 状态及证书进度')}}</small></span><input v-model="autoRefresh" class="settings-switch" type="checkbox" role="switch"/></label>
             <label class="settings-row"><span><strong>{{t('流量与日志刷新间隔')}}</strong></span><select v-model.number="interval" :disabled="!autoRefresh"><option :value="5">{{t('5 秒')}}</option><option :value="15">{{t('15 秒')}}</option><option :value="30">{{t('30 秒')}}</option><option :value="60">{{t('60 秒')}}</option></select></label>
             <label class="settings-row"><span><strong>{{t('页面在后台时暂停刷新')}}</strong><small>{{t('回到页面后立即获取最新数据')}}</small></span><input v-model="pauseHidden" class="settings-switch" type="checkbox" role="switch" :disabled="!autoRefresh"/></label>
-            <label class="settings-row"><span><strong>{{t('悬浮日志显示条数')}}</strong><small>{{t('鼠标停留在站点日志图标时预览')}}</small></span><select v-model.number="previewLimit"><option :value="3">{{t('3 条')}}</option><option :value="5">{{t('5 条')}}</option><option :value="10">{{t('10 条')}}</option></select></label>
           </div>
           <p class="drawer-field-help">{{t('这里只控制页面刷新，DDNS 定时更新和证书续期仍由服务器独立运行。')}}</p>
         </section>

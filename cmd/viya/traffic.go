@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -285,7 +284,8 @@ func (a *App) ingestTraffic() error {
 			continue
 		}
 		if err := a.ingestTrafficFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+			slog.Warn("ingest traffic log skipped", "path", filepath.Base(path), "error", err)
+			continue
 		}
 	}
 	return nil
@@ -369,6 +369,10 @@ func (a *App) ingestTrafficFile(path string) error {
 		}
 		if strings.HasSuffix(path, ".gz") {
 			if _, err = io.CopyN(io.Discard, reader, offset-int64(len(first))); err != nil {
+				if errors.Is(err, io.EOF) {
+					_, _ = a.db.ExecContext(a.ctx, `INSERT INTO traffic_files(path,size,mtime,offset,complete,generation) VALUES(?,?,?,?,1,?) ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,offset=excluded.offset,complete=1,generation=excluded.generation`, path, info.Size(), info.ModTime().UnixNano(), offset, generation)
+					return nil
+				}
 				return err
 			}
 		} else {
@@ -509,11 +513,6 @@ func (a *App) ingestTrafficFile(path string) error {
 		}
 		if event.Download < 0 {
 			event.Download = 0
-		}
-		if parsed, e := url.Parse(event.Request.URI); e == nil {
-			event.Request.URI = parsed.EscapedPath()
-		} else {
-			event.Request.URI = "/"
 		}
 		hour := int64(event.Time) / 3600 * 3600
 		failures := 0
@@ -797,11 +796,15 @@ func (a *App) siteAccessLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		request, _ := event["request"].(map[string]any)
 		value, _ := request["host"].(string)
-		return normalizedLogHost(value) == host
+		return certificateMatchesDomain([]string{host}, normalizedLogHost(value))
 	})
 	if err != nil {
-		fail(w, 500, errors.New("无法读取站点访问日志"))
-		return
+		if errors.Is(err, os.ErrNotExist) {
+			events = []map[string]any{}
+		} else {
+			fail(w, 500, errors.New("无法读取站点访问日志"))
+			return
+		}
 	}
 	writeJSON(w, 200, events)
 }

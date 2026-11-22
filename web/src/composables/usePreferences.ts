@@ -40,7 +40,6 @@ export const refreshInterval = ref(
 export const autoRefresh = ref(localStorage.getItem("viya-auto-refresh") !== "false");
 export const pauseHidden = ref(localStorage.getItem("viya-pause-hidden") !== "false");
 export const trafficCharts = ref(localStorage.getItem("viya-traffic-charts") !== "false");
-export const previewLimit = ref(storedNumber("viya-log-preview-limit", [3, 5, 10], 5));
 export const landingPage = ref(localStorage.getItem("viya-landing-page") || "overview");
 // Files & Shares is opt-in for now: hidden from the sidebar unless the operator
 // turns it on in panel settings. The storage key is kept for backwards
@@ -77,7 +76,6 @@ export function applyPanelSettings() {
     "viya-auto-refresh": String(autoRefresh.value),
     "viya-pause-hidden": String(pauseHidden.value),
     "viya-traffic-charts": String(trafficCharts.value),
-    "viya-log-preview-limit": String(previewLimit.value),
     "viya-landing-page": landingPage.value,
     "viya-show-file-services": String(showFileServices.value),
   };

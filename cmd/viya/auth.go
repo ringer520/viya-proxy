@@ -230,13 +230,13 @@ func (a *App) createSessionForUser(w http.ResponseWriter, r *http.Request, userI
 	// A Secure cookie is dropped by the browser on plain-HTTP origins, which
 	// would silently break login for a panel served without TLS. Send Secure
 	// only when the client reaches us over HTTPS, either directly or through a
-	// TLS-terminating proxy that forwards X-Forwarded-Proto.
-	secure := a.secureCookies
-	if r.TLS == nil && !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		secure = false
-	}
-	http.SetCookie(w, &http.Cookie{Name: "viya_session", Value: secret, Path: "/", Expires: expires, MaxAge: int(sessionLifetime.Seconds()), HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode})
+	// trusted proxy that forwards X-Forwarded-Proto.
+	http.SetCookie(w, &http.Cookie{Name: "viya_session", Value: secret, Path: "/", Expires: expires, MaxAge: int(sessionLifetime.Seconds()), HttpOnly: true, Secure: a.cookieSecure(r), SameSite: http.SameSiteStrictMode})
 	return nil
+}
+
+func (a *App) cookieSecure(r *http.Request) bool {
+	return a.secureCookies && requestScheme(r, a.trustedProxies) == "https"
 }
 
 func (a *App) me(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +255,7 @@ func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, errors.New("无法结束会话"))
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "viya_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: a.secureCookies, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "viya_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: a.cookieSecure(r), SameSite: http.SameSiteStrictMode})
 	if session, ok := r.Context().Value(sessionContextKey{}).(sessionContext); ok {
 		a.recordLoginAudit(r, session.username, auditSuccess, auditReasonLogout)
 	}
@@ -370,7 +370,7 @@ func (a *App) renewSession(w http.ResponseWriter, r *http.Request, secret string
 		slog.Warn("renew session", "error", err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "viya_session", Value: secret, Path: "/", Expires: next, MaxAge: int(sessionLifetime.Seconds()), HttpOnly: true, Secure: a.secureCookies, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "viya_session", Value: secret, Path: "/", Expires: next, MaxAge: int(sessionLifetime.Seconds()), HttpOnly: true, Secure: a.cookieSecure(r), SameSite: http.SameSiteStrictMode})
 }
 
 func sessionCookie(r *http.Request) (string, bool) {
@@ -436,10 +436,14 @@ func requestScheme(r *http.Request, trustedProxies []*net.IPNet) string {
 	if !trusted {
 		return "http"
 	}
-	for _, forwardedScheme := range strings.Split(r.Header.Get("X-Forwarded-Proto"), ",") {
-		scheme := strings.TrimSpace(forwardedScheme)
-		if scheme == "http" || scheme == "https" {
-			return scheme
+	values := r.Header.Values("X-Forwarded-Proto")
+	for i := len(values) - 1; i >= 0; i-- {
+		parts := strings.Split(values[i], ",")
+		for j := len(parts) - 1; j >= 0; j-- {
+			scheme := strings.ToLower(strings.TrimSpace(parts[j]))
+			if scheme == "http" || scheme == "https" {
+				return scheme
+			}
 		}
 	}
 	return "http"
@@ -470,7 +474,7 @@ func parseTrustedProxies(value string) ([]*net.IPNet, error) {
 }
 
 func (a *App) allowLogin(r *http.Request) bool {
-	ip := remoteIP(r)
+	ip := a.accessClientIP(r)
 	now := time.Now().Unix()
 	window := int64(loginWindowLength.Seconds())
 	// A single atomic UPSERT keeps the rolling window consistent under
@@ -498,7 +502,7 @@ func (a *App) allowLogin(r *http.Request) bool {
 }
 
 func (a *App) clearLoginAttempts(r *http.Request) {
-	if _, err := a.db.ExecContext(r.Context(), `DELETE FROM login_attempts WHERE ip=?`, remoteIP(r)); err != nil {
+	if _, err := a.db.ExecContext(r.Context(), `DELETE FROM login_attempts WHERE ip=?`, a.accessClientIP(r)); err != nil {
 		slog.Warn("clear login attempts", "error", err)
 	}
 }
@@ -516,7 +520,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }

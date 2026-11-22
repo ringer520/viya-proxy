@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -192,6 +193,10 @@ func (a *App) listSiteFiles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := refuseSymlink(root, dir); err != nil {
+		fail(w, 400, err)
+		return
+	}
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
 		fail(w, 404, errors.New("目录不存在"))
@@ -220,10 +225,11 @@ func (a *App) listSiteFiles(w http.ResponseWriter, r *http.Request) {
 		item.Path = filepath.ToSlash(item.Path)
 		items = append(items, item)
 	}
+	session, _ := r.Context().Value(sessionContextKey{}).(sessionContext)
 	writeJSON(w, 200, map[string]any{
 		"items":     items,
 		"truncated": len(entries) > siteListMaxEntries,
-		"writable":  a.underManagedRoot(root),
+		"writable":  a.underManagedRoot(root) && !isViewerRole(session.role),
 		"path":      relPath(root, dir),
 	})
 }
@@ -299,7 +305,11 @@ func (a *App) downloadSiteFile(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, errors.New("文件不存在"))
 		return
 	}
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(full)+`"`)
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(full)})
+	if disposition == "" {
+		disposition = "attachment"
+	}
+	w.Header().Set("Content-Disposition", disposition)
 	http.ServeFile(w, r, full)
 }
 
@@ -337,10 +347,18 @@ func (a *App) uploadSiteFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	overwrite := r.URL.Query().Get("overwrite") != "0"
-	// Extend read deadline for large file / archive uploads so the global 15s
-	// http.Server.ReadTimeout does not abort valid multi-megabyte transfers.
-	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Minute))
+	// Extend read and write deadlines for large file / archive uploads so global
+	// http.Server timeouts do not abort valid multi-megabyte transfers.
+	deadline := time.Now().Add(30 * time.Minute)
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(deadline)
+	_ = rc.SetWriteDeadline(deadline)
 	r.Body = http.MaxBytesReader(w, r.Body, siteFileMaxRequest)
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		fail(w, 400, errors.New("上传内容无效（可能过大）"))
 		return
@@ -468,6 +486,9 @@ func extractZip(src io.Reader, dest string, maxEntries int, maxBytes int64) (int
 		if file.Mode()&os.ModeSymlink != 0 {
 			return count, fmt.Errorf("entry %s is a symbolic link", file.Name)
 		}
+		if err := refuseSymlink(dest, target); err != nil {
+			return count, err
+		}
 		if file.FileInfo().IsDir() {
 			if err := os.MkdirAll(target, siteMkdirMode); err != nil {
 				return count, errors.New("无法创建目录")
@@ -477,8 +498,8 @@ func extractZip(src io.Reader, dest string, maxEntries int, maxBytes int64) (int
 		if err := os.MkdirAll(filepath.Dir(target), siteMkdirMode); err != nil {
 			return count, errors.New("无法创建目录")
 		}
-		written += int64(file.UncompressedSize64)
-		if written > maxBytes {
+		remaining := maxBytes - written
+		if remaining <= 0 {
 			return count, errors.New("归档解压后超过大小限制")
 		}
 		in, err := file.Open()
@@ -490,9 +511,14 @@ func extractZip(src io.Reader, dest string, maxEntries int, maxBytes int64) (int
 			in.Close()
 			return count, errors.New("无法写入归档条目")
 		}
-		_, copyErr := io.Copy(out, in)
+		n, copyErr := io.Copy(out, io.LimitReader(in, remaining+1))
 		in.Close()
 		closeErr := out.Close()
+		written += n
+		if written > maxBytes {
+			_ = os.Remove(target)
+			return count, errors.New("归档解压后超过大小限制")
+		}
 		if copyErr != nil || closeErr != nil {
 			_ = os.Remove(target)
 			return count, errors.New("无法保存归档条目")
@@ -597,6 +623,7 @@ func (a *App) mkdirSiteFile(w http.ResponseWriter, r *http.Request) {
 		Path string `json:"path"`
 	}
 	if err := decodeJSONBody(w, r, &input); err != nil {
+		fail(w, 400, err)
 		return
 	}
 	full, err := resolveWithinRoot(root, input.Path)

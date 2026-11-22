@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"database/sql"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -163,5 +165,37 @@ func TestSiteFileStats(t *testing.T) {
 	}
 	if s["empty"] != false {
 		t.Fatalf("expected empty=false, got %v", s["empty"])
+	}
+}
+
+func TestExtractZipRejectsBombAndMkdirBadJSONReturns400(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("big.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("0123456789ABCDEF")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dest := t.TempDir()
+	if _, err := extractZip(bytes.NewReader(buf.Bytes()), dest, 10, 5); err == nil {
+		t.Fatal("extractZip must fail when decompressed bytes exceed maxBytes")
+	}
+	if _, statErr := os.Stat(filepath.Join(dest, "big.txt")); !os.IsNotExist(statErr) {
+		t.Fatal("oversized extracted entry must be removed")
+	}
+
+	app, db, _ := newStaticFilesApp(t, "static.test")
+	defer db.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proxy-hosts/1/files/mkdir", strings.NewReader("{bad json"))
+	req.SetPathValue("id", "1")
+	rec := httptest.NewRecorder()
+	app.mkdirSiteFile(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid JSON in mkdirSiteFile, got %d", rec.Code)
 	}
 }

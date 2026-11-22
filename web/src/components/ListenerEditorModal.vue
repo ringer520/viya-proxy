@@ -70,7 +70,7 @@ import { hosts } from "../composables/useState";
               {{
                 hosts.filter((host) => host.listener_id === listener.id).length
               }}
-              个站点
+              {{ t("个站点") }}
             </option>
           </select></label
         >

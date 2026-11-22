@@ -315,6 +315,6 @@ onBeforeUnmount(() => clearInterval(timer))
 .compact .gauge-detail{grid-column:2;grid-row:2;font-size:10px;text-align:left;margin:0;white-space:normal;line-height:1.5}
 .compact .gauge-spark{grid-column:2;grid-row:3;position:static;width:100%;height:20px;margin:0;opacity:.8}
 .compact-sample-error{font-size:11px;color:#e05264;margin:8px 0 0}
-@media(max-width:1200px){.compact .gauge-card{grid-template-columns:70px minmax(0,1fr);padding:8px;gap:0 6px}.compact .gauge-body,.compact .gauge-ring{width:70px;height:70px}.compact .gauge-center b{font-size:18px}}
+@media(max-width:1200px){.compact .gauge-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}.compact .gauge-card{grid-template-columns:72px minmax(0,1fr);padding:10px 12px;gap:0 10px}.compact .gauge-body,.compact .gauge-ring{width:72px;height:72px}.compact .gauge-center b{font-size:18px}}
 @media(max-width:700px){.compact .gauge-grid{grid-template-columns:1fr}.compact .gauge-card{grid-template-columns:74px minmax(0,1fr);padding:8px 14px;gap:0 16px}.compact .gauge-state{margin-left:auto}.compact.system-observatory{padding:14px}.compact .meta-item{display:none}}
 </style>

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -113,6 +114,15 @@ func (a *App) updateUser(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, err)
 		return
 	}
+	var targetRole string
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COALESCE(role,'admin') FROM users WHERE id=?`, id).Scan(&targetRole); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			fail(w, http.StatusNotFound, errors.New("账号不存在"))
+		} else {
+			fail(w, http.StatusInternalServerError, errors.New("无法读取账号角色"))
+		}
+		return
+	}
 	var selfID int64
 	if err := a.db.QueryRowContext(r.Context(), `SELECT id FROM users WHERE username=?`, session.username).Scan(&selfID); err != nil {
 		fail(w, http.StatusInternalServerError, errors.New("无法识别当前账号"))
@@ -124,16 +134,17 @@ func (a *App) updateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Losing the last administrator would leave nobody able to manage the
-		// panel, so both demoting yourself and demoting the only admin are
-		// rejected rather than silently applied.
-		var admins int
-		if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users WHERE COALESCE(role,'admin')='admin'`).Scan(&admins); err != nil {
-			fail(w, http.StatusInternalServerError, errors.New("无法读取账号角色"))
-			return
-		}
-		if id == selfID || admins <= 1 {
-			fail(w, http.StatusConflict, errors.New("必须保留至少一个管理员"))
-			return
+		// panel, so demoting yourself or the only remaining admin is rejected.
+		if targetRole == roleAdmin && input.Role != roleAdmin {
+			var admins int
+			if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users WHERE COALESCE(role,'admin')='admin'`).Scan(&admins); err != nil {
+				fail(w, http.StatusInternalServerError, errors.New("无法读取账号角色"))
+				return
+			}
+			if id == selfID || admins <= 1 {
+				fail(w, http.StatusConflict, errors.New("必须保留至少一个管理员"))
+				return
+			}
 		}
 	}
 	if input.Role == "" && input.Password == "" {

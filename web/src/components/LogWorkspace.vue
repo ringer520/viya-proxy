@@ -6,7 +6,8 @@ import { ScrollText, Terminal, Settings, RefreshCw, ShieldCheck, History } from 
 import AccessLogTable from './AccessLogTable.vue'
 import { t } from '../i18n'
 import {hosts,readOnly} from '../composables/useState'
-import {pauseHidden} from '../composables/usePreferences'
+import {pauseHidden, refreshInterval} from '../composables/usePreferences'
+import type { AccessLogEvent, ProgramLogEvent } from '../types'
 
 interface AuditEntry {
   id: number
@@ -30,8 +31,8 @@ interface ConfigAuditEntry {
 
 const props = defineProps<{ csrf: string; autoRefresh: boolean }>()
 const tab = ref('access'),
-  events = ref<Record<string, any>[]>([]),
-  program = ref<Record<string, any>[]>([]),
+  events = ref<AccessLogEvent[]>([]),
+  program = ref<ProgramLogEvent[]>([]),
   audit = ref<AuditEntry[]>([]),
   changes = ref<ConfigAuditEntry[]>([]),
   error = ref(''),
@@ -107,12 +108,16 @@ async function select(value: string) {
   error.value = ''
   message.value = ''
   if (value === 'settings') {
+    const controller = new AbortController()
+    request = controller
     try {
-      const r = await fetch('/api/v1/logs/settings')
+      const r = await fetch('/api/v1/logs/settings', { signal: controller.signal })
       if (!r.ok) throw Error(t('读取失败'))
-      const data=await r.json();if(tab.value==='settings')settings.value=data
+      const data=await r.json();if(!controller.signal.aborted && tab.value==='settings')settings.value=data
     } catch {
-      error.value = t('读取设置失败')
+      if (!controller.signal.aborted && tab.value === 'settings') {
+        error.value = t('读取设置失败')
+      }
     }
   } else void load()
 }
@@ -145,12 +150,17 @@ function reasonLabel(entry: AuditEntry) {
 }
 
 let timer: ReturnType<typeof setInterval> | undefined
+function restartTimer() {
+  if (timer) clearInterval(timer)
+  timer = setInterval(() => {
+    if (props.autoRefresh&&(!pauseHidden.value||!document.hidden)) void load()
+  }, Math.max(1, refreshInterval.value) * 1000)
+}
+watch(refreshInterval, restartTimer)
 onMounted(() => {
   document.addEventListener('visibilitychange',visibility)
   void load()
-  timer = setInterval(() => {
-    if (props.autoRefresh&&(!pauseHidden.value||!document.hidden)) void load()
-  }, 5000)
+  restartTimer()
 })
 onBeforeUnmount(()=>{++sequence;request?.abort();clearInterval(timer);document.removeEventListener('visibilitychange',visibility)})
 </script>

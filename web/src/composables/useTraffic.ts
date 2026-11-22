@@ -252,4 +252,14 @@ export async function refreshTraffic() {
   }
 }
 
-registerRefreshTask("traffic",refreshTraffic,"sites");
+export function resetTrafficState() {
+  trafficSequence++;
+  traffic.value = {};
+  l4Traffic.value = {};
+  siteTrafficMonth.value = {};
+  forwardTrafficMonth.value = {};
+  trafficLoadedRange.value = null;
+  trafficError.value = "";
+}
+
+registerRefreshTask("traffic",refreshTraffic,"traffic");

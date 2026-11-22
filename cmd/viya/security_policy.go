@@ -61,6 +61,9 @@ func effectiveHostPolicy(h *Host, global SitePolicy, domains map[string]SitePoli
 	h.IPDenylist = p.IPDenylist
 	h.RateLimitRequests = p.RateLimit
 	h.RateLimitWindow = p.RateLimitWin
+	if h.RateLimitRequests > 0 && h.RateLimitWindow == "" {
+		h.RateLimitWindow = "1s"
+	}
 	h.MaxBodyBytes = p.MaxBodyBytes
 	h.AllowedMethods = p.AllowedMethods
 	h.HideServer = p.HideServer

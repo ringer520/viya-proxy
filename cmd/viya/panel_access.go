@@ -173,7 +173,15 @@ func (a *App) panelAccessGuard(next http.Handler) http.Handler {
 		if rules.HTTPSOnly && !a.panelRequestIsHTTPS(r) {
 			// Drop any port: TLS is served by Caddy on 443, while a direct hit on
 			// the panel port can never negotiate TLS.
-			target := "https://" + hostname(r.Host) + r.URL.RequestURI()
+			h := hostname(r.Host)
+			if h == "" {
+				fail(w, http.StatusBadRequest, errors.New("请求缺少 Host"))
+				return
+			}
+			if strings.Contains(h, ":") {
+				h = "[" + h + "]"
+			}
+			target := "https://" + h + r.URL.RequestURI()
 			http.Redirect(w, r, target, http.StatusPermanentRedirect)
 			return
 		}
@@ -184,24 +192,7 @@ func (a *App) panelAccessGuard(next http.Handler) http.Handler {
 // panelRequestIsHTTPS trusts X-Forwarded-Proto only from a configured proxy,
 // otherwise a direct client could claim HTTPS and skip the redirect.
 func (a *App) panelRequestIsHTTPS(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	peer := net.ParseIP(remoteIP(r))
-	if peer == nil || !a.isTrustedProxy(peer) {
-		return false
-	}
-	scheme := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
-	return strings.EqualFold(scheme, "https")
-}
-
-func (a *App) isTrustedProxy(ip net.IP) bool {
-	for _, network := range a.trustedProxies {
-		if network.Contains(ip) {
-			return true
-		}
-	}
-	return false
+	return requestScheme(r, a.trustedProxies) == "https"
 }
 
 func isLoopbackAddress(raw string) bool {
@@ -338,16 +329,39 @@ func upstreamTargetsPanel(upstream, panelListen string) bool {
 		return false
 	}
 	host := u.Hostname()
-	if strings.EqualFold(host, panelHost) {
+	if strings.EqualFold(host, panelHost) || isLoopbackAddress(host) || strings.EqualFold(host, "localhost") {
 		return true
 	}
-	// A panel bound to all interfaces is reachable through any local address.
+	// A panel bound to all interfaces is reachable through any local interface address.
+	if panelHost == "" {
+		return isLocalInterfaceAddress(host)
+	}
 	if ip := net.ParseIP(panelHost); ip != nil && ip.IsUnspecified() {
-		return true
+		return isLocalInterfaceAddress(host)
 	}
-	// A loopback address on either side still means "this host", so switching
-	// the bind between 127.0.0.1 and the LAN address must not empty the list.
-	return isLoopbackAddress(host) || isLoopbackAddress(panelHost)
+	return false
+}
+
+func isLocalInterfaceAddress(raw string) bool {
+	target, err := netip.ParseAddr(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	target = target.Unmap()
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, addr := range addrs {
+		prefix, err := netip.ParsePrefix(addr.String())
+		if err != nil {
+			continue
+		}
+		if prefix.Addr().Unmap() == target {
+			return true
+		}
+	}
+	return false
 }
 
 // panelHostAllowed matches the request Host (port stripped) against the list.

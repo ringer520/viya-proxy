@@ -317,9 +317,7 @@ html[data-palette] .engine-pill,
 html[data-palette] .stats article,
 html[data-palette] .traffic-summary,
 html[data-palette] .modal,
-html[data-palette] .site-log-tooltip,
-html[data-palette] .site-group,
-html[data-palette] .revision-row {
+html[data-palette] .site-group {
   background: var(--surface);
   border-color: var(--line);
   color: var(--text);
@@ -341,7 +339,6 @@ html[data-palette] .domain-entry-mode {
 }
 html[data-palette] .host-row,
 html[data-palette] .panel-head,
-html[data-palette] .revision-row,
 html[data-palette] .modal-actions,
 html[data-palette] .log-tabs {
   border-color: var(--line);
@@ -376,11 +373,17 @@ html[data-palette] .icon-btn:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
   color: var(--accent);
 }
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
 html[data-palette] .modal input:not([type="checkbox"]),
 html[data-palette] .modal select,
 html[data-palette] .modal textarea,
-html[data-palette] .site-list-tools select,
-html[data-palette] .drawer-input-label input {
+html[data-palette] .drawer-input-label input,
+html[data-palette] .sfd-search,
+html[data-palette] .sfd-preview textarea,
+html[data-palette] .op-toolbar :is(input, select),
+html[data-palette] .log-config-form :is(input, select) {
   background: var(--surface-2);
   border-color: var(--line);
   color: var(--text);
@@ -421,6 +424,12 @@ html[data-palette] .log-tabs button.selected {
 }
 html[data-palette] .log-level {
   color: var(--accent);
+}
+html[data-palette] .log-level.warn {
+  color: var(--warning);
+}
+html[data-palette] .log-level.error {
+  color: var(--danger);
 }
 html[data-palette] .site-log-trigger:hover,
 html[data-palette] .site-log-trigger:focus-visible {
@@ -656,6 +665,11 @@ html[data-palette] .dot {
   html[data-palette] .nav-menu {
     -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%);
     mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%);
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  html[data-palette] .nav-menu::-webkit-scrollbar {
+    display: none;
   }
   /* 工作区栏：style.css 窄屏写死了 height:52px 且允许换行，
      面包屑一长（如「配置历史」「SSL 证书」）徽标就被折到第二行并被裁切。
@@ -803,7 +817,7 @@ html[data-palette] .settings-launcher > svg { transition: transform 350ms var(--
 html[data-palette] .settings-launcher:hover > svg { transform: rotate(35deg); }
 html[data-palette] :is(.panel, .mission-counts, .mission-card, .system-observatory) { box-shadow: var(--shadow-card); }
 html[data-palette] :is(.panel-head, .site-columns, .forward-columns) { background: color-mix(in srgb, var(--surface-2) 65%, var(--surface)); }
-html[data-palette] :is(.host-row, .site-list-row, .forward-row, .revision-row) { transition: background 180ms ease, border-color 180ms ease; }
+html[data-palette] :is(.host-row, .site-list-row, .forward-row) { transition: background 180ms ease, border-color 180ms ease; }
 html[data-palette] :is(.site-list-row, .forward-row):hover { background: color-mix(in srgb, var(--accent) 3%, var(--surface)); }
 html[data-palette] :is(.site-icon, .forward-icon, .count-symbol) { box-shadow: inset 0 1px 0 #ffffff0a; }
 html[data-palette] .site-identity .site-icon { border-radius: 10px; }

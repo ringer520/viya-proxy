@@ -87,18 +87,13 @@ func logEventPort(value any) int {
 
 func (a *App) streamLogs(w http.ResponseWriter, r *http.Request) {
 	path := filepathJoin(a.dataDir, "access.log")
-	file, err := os.Open(path)
-	if err != nil {
-		http.Error(w, "access log is not ready", http.StatusServiceUnavailable)
+	var offset int64
+	if info, err := os.Stat(path); err == nil {
+		offset = info.Size()
+	} else if !errors.Is(err, os.ErrNotExist) {
+		http.Error(w, "access log is not ready", http.StatusInternalServerError)
 		return
 	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		http.Error(w, "access log is not ready", 500)
-		return
-	}
-	offset := info.Size()
 	if lastID := strings.TrimSpace(r.Header.Get("Last-Event-ID")); lastID != "" {
 		if resumeOffset, parseErr := strconv.ParseInt(lastID, 10, 64); parseErr == nil && resumeOffset >= 0 && resumeOffset <= offset && offset-resumeOffset <= 2<<20 {
 			offset = resumeOffset
@@ -134,6 +129,9 @@ func (a *App) streamLogs(w http.ResponseWriter, r *http.Request) {
 			for _, line := range lines {
 				var event map[string]any
 				if json.Unmarshal(line, &event) != nil {
+					continue
+				}
+				if caddyLogKind(event) != "access" {
 					continue
 				}
 				sanitizeAccessEvent(event)
@@ -220,6 +218,7 @@ func readLogLines(path string, offset int64) ([][]byte, int64, error) {
 	if _, err = f.Seek(offset, io.SeekStart); err != nil {
 		return nil, offset, err
 	}
+	const maxReadLogChunk = 2 << 20
 	reader := bufio.NewReader(f)
 	lines := [][]byte{}
 	consumed := int64(0)
@@ -228,6 +227,9 @@ func readLogLines(path string, offset int64) ([][]byte, int64, error) {
 		if e == nil {
 			lines = append(lines, line)
 			consumed += int64(len(line))
+			if consumed >= maxReadLogChunk {
+				break
+			}
 			continue
 		}
 		if e == io.EOF {

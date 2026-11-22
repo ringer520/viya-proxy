@@ -17,6 +17,22 @@
 .op-toolbar select {
   min-width: 0;
   max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 11px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+  outline: none;
+}
+.op-toolbar :is(input, select):focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.modal .op-callout {
+  margin-bottom: 18px;
 }
 .op-callout {
   padding: 12px 14px;

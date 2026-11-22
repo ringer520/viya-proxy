@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed, ref, watch } from "vue";
+import { Eye, EyeOff } from "@lucide/vue";
 import { t } from "../i18n";
 import {
   editingProviderID,
@@ -11,6 +13,41 @@ import {
 import { applyRetryVisible, saving } from "../composables/useState";
 
 import { retryApply } from "../composables/useApply";
+
+const revealedFields = ref<Record<string, boolean>>({});
+watch([showProvider, () => providerForm.value.provider_type], () => {
+  revealedFields.value = {};
+});
+
+const fieldLabels: Record<string, string> = {
+  api_token: "API Token",
+  secret_id: "SecretId",
+  secret_key: "SecretKey",
+  access_key_id: "AccessKey ID",
+  access_key_secret: "AccessKey Secret",
+  api_key: "API Key",
+  user: "用户名",
+  auth_token: "API Token",
+};
+const publicFields = new Set(["user", "secret_id", "access_key_id"]);
+
+function fieldLabel(field: string) {
+  const raw = fieldLabels[field];
+  return raw ? t(raw) : field;
+}
+
+const namePlaceholder = computed(() => {
+  switch (providerForm.value.provider_type) {
+    case "cloudflare":
+      return t("我的 Cloudflare");
+    case "tencentcloud":
+      return t("我的腾讯云 DNSPod");
+    case "alidns":
+      return t("我的阿里云 DNS");
+    default:
+      return t("我的 DNS 凭据");
+  }
+});
 </script>
 
 <template>
@@ -40,7 +77,7 @@ import { retryApply } from "../composables/useApply";
         >{{ t("名称")
         }}<input
           v-model="providerForm.name"
-          :placeholder="t('我的 Cloudflare')"
+          :placeholder="namePlaceholder"
           maxlength="100"
           required /></label
       ><label
@@ -60,18 +97,31 @@ import { retryApply } from "../composables/useApply";
       ><label
         v-for="field in providerFields[providerForm.provider_type]"
         :key="field"
-        >{{ field
-        }}<input
-          v-model="providerForm.credentials[field]"
-          type="text"
-          class="credential-input"
-          autocomplete="off"
-          autocapitalize="none"
-          spellcheck="false"
-          data-lpignore="true"
-          data-1p-ignore="true"
-          required
-      /></label>
+        >{{ fieldLabel(field) }}
+        <div class="credential-input-wrap">
+          <input
+            v-model="providerForm.credentials[field]"
+            :type="publicFields.has(field) || revealedFields[field] ? 'text' : 'password'"
+            autocomplete="off"
+            autocapitalize="none"
+            spellcheck="false"
+            data-lpignore="true"
+            data-1p-ignore="true"
+            required
+          />
+          <button
+            v-if="!publicFields.has(field)"
+            type="button"
+            class="icon-btn credential-toggle"
+            :aria-label="revealedFields[field] ? t('隐藏密钥') : t('显示密钥')"
+            :title="revealedFields[field] ? t('隐藏密钥') : t('显示密钥')"
+            @click="revealedFields[field] = !revealedFields[field]"
+          >
+            <EyeOff v-if="revealedFields[field]" :size="15" />
+            <Eye v-else :size="15" />
+          </button>
+        </div>
+      </label>
       <p class="auth-hint">
         {{
           t(
@@ -99,3 +149,22 @@ import { retryApply } from "../composables/useApply";
     </form>
   </div>
 </template>
+
+<style scoped>
+.credential-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+}
+.credential-input-wrap input {
+  margin-top: 0;
+  flex: 1;
+  min-width: 0;
+}
+.credential-toggle {
+  flex: none;
+  width: 38px;
+  height: 38px;
+}
+</style>

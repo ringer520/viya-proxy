@@ -5,6 +5,7 @@ import { Ban, Pencil, ShieldCheck } from "@lucide/vue";
 import { t } from "../i18n";
 
 import { openBan, removeBan, visibleBans } from "../composables/useNetwork";
+import { readOnly } from "../composables/useState";
 const kind=ref('manual');const counts=computed(()=>({manual:visibleBans.value.filter(b=>b.ip!=='foreign'&&b.source==='manual').length,region:visibleBans.value.filter(b=>b.ip==='foreign').length,auto:visibleBans.value.filter(b=>b.ip!=='foreign'&&b.source!=='manual').length}));const displayBans=computed(()=>visibleBans.value.filter(b=>kind.value==='region'?b.ip==='foreign':kind.value==='manual'?b.ip!=='foreign'&&b.source==='manual':b.ip!=='foreign'&&b.source!=='manual'));
 </script>
 
@@ -48,9 +49,9 @@ const kind=ref('manual');const counts=computed(()=>({manual:visibleBans.value.fi
                 }}</span
               >
             </div>
-            <button class="secondary" @click="openBan(ban)">
+            <button class="secondary" :disabled="readOnly" @click="openBan(ban)">
               <Pencil :size="14" />{{ t("编辑") }}</button
-            ><button class="secondary" @click="removeBan(ban.id)">
+            ><button class="secondary" :disabled="readOnly" @click="removeBan(ban.id)">
               {{ t("解除封禁") }}
             </button>
           </div>

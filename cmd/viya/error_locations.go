@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"time"
 )
 
 // errorLocation is an aggregated counter: one row per site and HTTP status.
@@ -20,7 +19,7 @@ type errorLocation struct {
 // the breakdown always adds up to the error count shown above it.
 func (a *App) webErrorLocations(w http.ResponseWriter, r *http.Request) {
 	window, hours := trafficWindow(r)
-	cutoff := time.Now().Unix()/3600*3600 - int64(hours-1)*3600
+	cutoff := trafficCutoff(window, hours, trafficLocation(r))
 	rows, err := a.db.QueryContext(r.Context(), `SELECT h.id,h.name,h.domain,e.status,SUM(e.count) FROM site_error_hours e JOIN proxy_hosts h ON h.id=e.site_id WHERE e.hour>=? AND e.status BETWEEN 400 AND 599 GROUP BY h.id,e.status ORDER BY 5 DESC,h.id,e.status`, cutoff)
 	if err != nil {
 		fail(w, 500, err)

@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -118,7 +117,6 @@ func (a *App) listNetworkInterfaces(w http.ResponseWriter, r *http.Request) {
 }
 
 func networkInterfaces() ([]NetworkInterface, error) {
-	temporaryAddresses := temporaryIPv6Addresses()
 	flags := ipv6AddressFlags()
 	items, err := net.Interfaces()
 	if err != nil {
@@ -151,7 +149,7 @@ func networkInterfaces() ([]NetworkInterface, error) {
 			if ip.IsPrivate() {
 				scope = "内网"
 			}
-			entry.Addresses = append(entry.Addresses, NetworkInterfaceAddress{IP: ip.String(), Family: family, Scope: scope, Temporary: family == "ipv6" && temporaryAddresses[ip.String()], Deprecated: flags[ip.String()]&0x20 != 0, Tentative: flags[ip.String()]&0x48 != 0})
+			entry.Addresses = append(entry.Addresses, NetworkInterfaceAddress{IP: ip.String(), Family: family, Scope: scope, Temporary: family == "ipv6" && flags[ip.String()]&0x01 != 0, Deprecated: flags[ip.String()]&0x20 != 0, Tentative: flags[ip.String()]&0x48 != 0})
 		}
 		sort.Slice(entry.Addresses, func(i, j int) bool {
 			if entry.Addresses[i].Scope != entry.Addresses[j].Scope {
@@ -168,32 +166,6 @@ func networkInterfaces() ([]NetworkInterface, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
-}
-
-// Linux exposes IPv6 temporary-address flags in /proc/net/if_inet6. When
-// available, mark privacy addresses so the UI can default to a stable address.
-func temporaryIPv6Addresses() map[string]bool {
-	result := map[string]bool{}
-	data, err := os.ReadFile("/proc/net/if_inet6")
-	if err != nil {
-		return result
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 6 || len(fields[0]) != 32 {
-			continue
-		}
-		parts := make([]string, 8)
-		for i := range parts {
-			parts[i] = fields[0][i*4 : (i+1)*4]
-		}
-		ip, err := netip.ParseAddr(strings.Join(parts, ":"))
-		flags, flagErr := strconv.ParseUint(fields[4], 16, 32)
-		if err == nil && flagErr == nil && flags&0x01 != 0 {
-			result[ip.String()] = true
-		}
-	}
-	return result
 }
 
 func interfaceIP(name string, v6 bool) (netip.Addr, error) {
@@ -232,13 +204,12 @@ func interfaceIP(name string, v6 bool) (netip.Addr, error) {
 		}
 		return netip.Addr{}, fmt.Errorf("网络接口 %q 没有可用的 %s 地址", name, family)
 	}
-	temporary := temporaryIPv6Addresses()
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].IsPrivate() != candidates[j].IsPrivate() {
 			return !candidates[i].IsPrivate()
 		}
-		if v6 && temporary[candidates[i].String()] != temporary[candidates[j].String()] {
-			return !temporary[candidates[i].String()]
+		if v6 && (flags[candidates[i].String()]&0x01 != 0) != (flags[candidates[j].String()]&0x01 != 0) {
+			return flags[candidates[i].String()]&0x01 == 0
 		}
 		return candidates[i].Less(candidates[j])
 	})
@@ -328,7 +299,7 @@ func validateDDNS(v *DDNSRecord) error {
 		case "http":
 			v.InterfaceName = ""
 		case "interface":
-			if _, err := interfaceIP(v.InterfaceName, v.RecordType == "AAAA"); err != nil {
+			if _, err := interfaceIPSelected(v.InterfaceName, v.RecordType == "AAAA", v.InterfaceIP); err != nil {
 				return err
 			}
 		default:
@@ -354,7 +325,14 @@ func sameDNSValue(recordType, current, desired string) bool {
 	if recordType == "CNAME" {
 		return strings.EqualFold(strings.TrimSuffix(strings.TrimSpace(current), "."), strings.TrimSuffix(strings.TrimSpace(desired), "."))
 	}
-	return current == desired
+	if recordType == "A" || recordType == "AAAA" {
+		a, errA := netip.ParseAddr(strings.TrimSpace(current))
+		b, errB := netip.ParseAddr(strings.TrimSpace(desired))
+		if errA == nil && errB == nil {
+			return a.Unmap() == b.Unmap()
+		}
+	}
+	return strings.TrimSpace(current) == strings.TrimSpace(desired)
 }
 
 func (a *App) saveDDNS(w http.ResponseWriter, r *http.Request, id int64, create bool) {

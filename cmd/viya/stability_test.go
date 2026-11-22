@@ -226,3 +226,80 @@ func TestLegacyArchiveAdapterKeepsUnknownTablesForRejection(t *testing.T) {
 		t.Fatalf("invalid compatibility filtering: %+v", tables)
 	}
 }
+
+func TestValidateRestoredBindingsAcceptsFilesSite(t *testing.T) {
+	a := stabilityApp(t)
+	if err := a.initListenerSites(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.initCertificateRequests(); err != nil {
+		t.Fatal(err)
+	}
+	shareDir := filepath.Join(a.dataDir, "sites", "files.test")
+	if err := os.MkdirAll(shareDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(
+		`INSERT INTO proxy_hosts(name,domain,listener_id,upstream,enabled,version,tls_mode,type,root_path,basic_auth_user,basic_auth_hash,browse,webdav,webdav_write) VALUES('files','files.test','http-main','',1,1,'none','files',?,'u','hash',1,1,1)`,
+		shareDir,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.validateRestoredBindings(context.Background()); err != nil {
+		t.Fatalf("validateRestoredBindings failed on valid files site: %v", err)
+	}
+}
+
+func TestRemoveStoredCertificatesWildcardPreservesApex(t *testing.T) {
+	certRoot := filepath.Join(t.TempDir(), "certificates")
+	apexDir := filepath.Join(certRoot, "acme-v02", "example.com")
+	wildDir := filepath.Join(certRoot, "acme-v02", "wildcard_.example.com")
+	if err := os.MkdirAll(apexDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(wildDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removeStoredCertificates(certRoot, "*.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	if _, statErr := os.Stat(wildDir); !os.IsNotExist(statErr) {
+		t.Fatal("wildcard directory should be removed")
+	}
+	if _, statErr := os.Stat(apexDir); statErr != nil {
+		t.Fatal("apex directory must be preserved when removing wildcard cert")
+	}
+}
+
+func TestSiteAccessLogsMissingFileAndWildcardHost(t *testing.T) {
+	a := stabilityApp(t)
+	if _, err := a.db.Exec(`INSERT INTO proxy_hosts(id,domain,upstream) VALUES(1,'*.example.com','http://127.0.0.1:8080')`); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/proxy-hosts/1/logs", nil)
+	req.SetPathValue("id", "1")
+	rec := httptest.NewRecorder()
+	a.siteAccessLogs(rec, req)
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("missing access.log status=%d body=%q, want 200 []", rec.Code, rec.Body.String())
+	}
+
+	logContent := `{"logger":"http.log.access","ts":1,"request":{"host":"api.example.com","uri":"/v1"},"status":200}` + "\n" +
+		`{"logger":"http.log.access","ts":2,"request":{"host":"other.test","uri":"/"},"status":200}` + "\n"
+	if err := os.WriteFile(filepath.Join(a.dataDir, "access.log"), []byte(logContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec2 := httptest.NewRecorder()
+	a.siteAccessLogs(rec2, req)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("wildcard siteAccessLogs status = %d", rec2.Code)
+	}
+	var events []map[string]any
+	if err := json.Unmarshal(rec2.Body.Bytes(), &events); err != nil || len(events) != 1 {
+		t.Fatalf("wildcard events = %v (err=%v), want 1", events, err)
+	}
+}

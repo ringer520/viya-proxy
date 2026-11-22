@@ -479,7 +479,9 @@ footer span {
   padding: 10px 11px;
   background: #fff;
   color: #263348;
-  font: 12px inherit;
+  font: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
   outline: none;
 }
 .modal textarea {
@@ -530,6 +532,9 @@ footer span {
 }
 .overlay-top {
   z-index: 110;
+}
+.break-anywhere {
+  overflow-wrap: anywhere;
 }
 .proxy-modal {
   width: min(620px, 100%);
@@ -938,53 +943,9 @@ footer {
 .site-panel {
   overflow: visible;
 }
-.traffic-spark {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 34px;
-  margin-top: 4px;
-}
-.traffic-spark i {
-  display: block;
-  background: #82aff8;
-  width: 7px;
-  border-radius: 2px 2px 0 0;
-}
-.traffic-spark i:hover {
-  background: #2563eb;
-}
-.site-log-tooltip {
-  display: none;
-  position: absolute;
-  left: 0;
-  top: 100%;
-  width: min(720px, 80vw);
-  background: #fff;
-  border: 1px solid #dce5f0;
-  box-shadow: 0 12px 36px #152e4a30;
-  border-radius: 10px;
-  padding: 16px;
-  z-index: 40;
-  color: #334155;
-}
-.site-log-heading {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 12px;
-}
-.site-log-heading > span {
-  font-size: 10px;
-  color: #8b97a8;
-  margin: 0;
-}
 .site-log-table-scroll {
   overflow: auto;
   max-height: 55vh;
-}
-.site-log-tooltip .site-log-table-scroll {
-  max-height: 230px;
 }
 .site-log-table {
   border-collapse: collapse;
@@ -1038,9 +999,6 @@ footer {
   font-size: 12px;
   color: #8390a3;
 }
-.site-log-tooltip .inline-action {
-  margin-top: 14px;
-}
 .site-log-modal {
   width: min(980px, 100%);
 }
@@ -1061,11 +1019,15 @@ footer {
   scrollbar-color: #354760 transparent;
 }
 @media (max-width: 760px) {
+  .nav-menu {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .nav-menu::-webkit-scrollbar {
+    display: none;
+  }
   .traffic-summary {
     padding: 16px;
-  }
-  .site-log-tooltip {
-    display: none !important;
   }
   .site-log-toolbar {
     align-items: flex-start;
@@ -1214,8 +1176,7 @@ html[data-theme="dark"] .advanced-toggle {
   border-color: #29364b;
   color: #c2cee0;
 }
-html[data-theme="dark"] .modal,
-html[data-theme="dark"] .site-log-tooltip {
+html[data-theme="dark"] .modal {
   background: #131d2d;
   border-color: #29364b;
   color: #e5ebf5;
@@ -1357,11 +1318,6 @@ html[data-theme="dark"] footer {
 .site-group-sites .host-row {
   padding-left: 14px;
 }
-.site-log-preview-wrap {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-}
 .site-log-trigger {
   display: grid;
   place-items: center;
@@ -1379,12 +1335,6 @@ html[data-theme="dark"] footer {
   background: #eef4ff;
   color: #2563eb;
   outline: none;
-}
-.site-log-preview-wrap:hover .site-log-tooltip {
-  display: block;
-}
-.site-log-tooltip {
-  z-index: 90;
 }
 .domain-entry-mode {
   display: grid;

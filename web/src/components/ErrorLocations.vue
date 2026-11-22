@@ -12,7 +12,7 @@ const total=computed(()=>groups.value.reduce((n,g)=>n+g.count,0))
 const share=computed(()=>requests.value?(total.value/requests.value*100).toFixed(1):'0.0')
 function percent(count:number){return requests.value?(count/requests.value*100).toFixed(1):'0.0'}
 async function load(){request?.abort();const controller=new AbortController();request=controller;busy.value=true;error.value='';groups.value=[]
- try{const r=await apiFetch('/api/v1/proxy-hosts/error-locations?range='+props.range,{signal:controller.signal});const data=await r.json();if(!r.ok)throw Error(t(data.error)||t('读取失败'));if(controller.signal.aborted)return;groups.value=data.groups||[];requests.value=Number(data.requests)||0}
+ try{const tz=-new Date().getTimezoneOffset()*60;const r=await apiFetch(`/api/v1/proxy-hosts/error-locations?range=${encodeURIComponent(props.range)}&tz=${tz}`,{signal:controller.signal});const data=await r.json();if(!r.ok)throw Error(t(data.error)||t('读取失败'));if(controller.signal.aborted)return;groups.value=data.groups||[];requests.value=Number(data.requests)||0}
  catch(e){if(!controller.signal.aborted)error.value=e instanceof Error?t(e.message):t('读取失败')}
  finally{if(request===controller)busy.value=false}
 }

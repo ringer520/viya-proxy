@@ -142,7 +142,7 @@ export function useFileUpload(options: FileUploadOptions) {
         overwrite,
         (p) => (uploadProgress.value = p),
       );
-      if (!body.ok && t(body.error)) throw Error(t(body.error) || t("上传失败"));
+      if (!body.ok) throw Error(t(body.error) || t("上传失败"));
       const stored = body.stored || 0;
       const extracted = body.extracted || 0;
       const skipped = body.skipped || 0;
@@ -183,6 +183,9 @@ export function useFileUpload(options: FileUploadOptions) {
         if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
       };
       xhr.onload = () => {
+        if (xhr.status === 401) {
+          window.dispatchEvent(new Event("viya:session-expired"));
+        }
         try {
           resolve({
             ...JSON.parse(xhr.responseText),

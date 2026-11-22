@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { formatBytes } from '../format'
 
@@ -10,10 +10,6 @@ const H = 190
 const PAD_X = 8
 const PAD_TOP = 14
 const PAD_BOTTOM = 26
-const drawn = ref(false)
-onMounted(() => {
-  requestAnimationFrame(() => (drawn.value = true))
-})
 
 // One day of bulk transfer can be a hundred times larger than a typical day.
 // Scaling against that maximum flattens every other point into the baseline, so
@@ -100,7 +96,7 @@ watch(()=>props.period,()=>{hovered.value=null})
   <section class="traffic-trend" :class="{embedded}" :aria-label="title">
     <header v-if="!embedded"><h2>{{title}}</h2><strong>{{formatBytes(total)}}</strong></header>
     <div class="trend-chart">
-      <span class="chart-ceiling">{{formatBytes(scaleMax)}}</span>
+      <span class="chart-ceiling">{{ hasData ? formatBytes(scaleMax) : '0 B' }}</span>
       <span v-if="clipped" class="chart-clip-note">{{t('峰值')}} {{formatBytes(peakValue)}}<template v-if="granularity === 'day'"> · {{label(peak.hour)}}</template></span>
       <svg :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" role="img" tabindex="0" :aria-label="title" @pointermove="inspect" @pointerleave="hovered=null" @keydown="inspectKey" @blur="hovered=null">
         <defs><linearGradient id="mission-trend-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity=".32"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/></linearGradient><linearGradient id="mission-trend-line" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="var(--accent-2)"/><stop offset="100%" stop-color="var(--accent)"/></linearGradient></defs>

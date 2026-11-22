@@ -79,7 +79,7 @@ async function checkPort(){checkBusy.value=true;checkNote.value='';try{const r=a
       <p class="auth-hint">
         {{
           t(
-            "监听端口会直接绑定 Debian 主机。低于 1024 的端口需相应系统权限；请勿占用管理接口或 HTTP/HTTPS 端口。",
+            "监听端口会直接绑定当前主机。低于 1024 的端口需相应系统权限；请勿占用管理接口或 HTTP/HTTPS 端口。",
           )
         }}
       </p>

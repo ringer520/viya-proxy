@@ -210,6 +210,9 @@ func validateSitePolicy(p SitePolicy) error {
 	}); err != nil {
 		return err
 	}
+	if p.RateLimit > 0 && p.RateLimitWin == "" {
+		p.RateLimitWin = "1s"
+	}
 	switch p.RateLimitWin {
 	case "", "1s", "10s", "1m", "1h":
 	default:

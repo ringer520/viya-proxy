@@ -146,7 +146,7 @@ defineExpose({
       <button class="secondary" :disabled="textBusy || textLoading" @click="closePreview">{{t('关闭预览')}}</button></header>
     <p v-if="previewError" class="sfd-error" role="alert">{{previewError}}</p>
     <p v-else-if="textLoading">{{t('加载中…')}}</p>
-    <img v-else-if="preview.image" :src="preview.image" :alt="preview.entry.name" class="sfd-image-preview" />
+    <img v-else-if="preview.image" :src="preview.image" :alt="preview.entry.name" class="sfd-image-preview" @error="previewError = t('图片加载失败，请下载后查看')" />
     <textarea v-else v-model="preview.content" :readonly="!preview.editable || textBusy" spellcheck="false" :aria-label="t('文件内容')" />
   </section>
 </template>
@@ -155,16 +155,17 @@ defineExpose({
 .sfd-preview { padding:16px; border-top:1px solid var(--line); flex:0 1 55vh; min-height:150px; overflow:auto; }
 .sfd-preview header { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px; }
 .sfd-preview header strong { flex:1; overflow-wrap:anywhere; }
-.sfd-preview textarea { width:100%; min-height:320px; max-height:55vh; resize:vertical; font:13px/1.7 ui-monospace,monospace; tab-size:2; white-space:pre; }
+.sfd-preview textarea { width:100%; min-height:320px; max-height:55vh; resize:vertical; font:13px/1.7 ui-monospace,monospace; tab-size:2; white-space:pre; border:1px solid var(--line-strong); border-radius:9px; background:var(--surface-2); color:var(--text); padding:10px 12px; box-sizing:border-box; outline:none; }
+.sfd-preview textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
 .sfd-image-preview {display:block; max-width:100%; max-height:50vh; object-fit:contain; margin:auto;}
 
 .sfd-error {
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  color: #dc2626;
-  background: #dc262610;
-  border: 1px solid #dc262633;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
   border-radius: 8px;
   padding: 8px 12px;
   overflow-wrap: anywhere;

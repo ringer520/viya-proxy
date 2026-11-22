@@ -122,7 +122,7 @@ func (a *App) changeAdminPassword(w http.ResponseWriter, r *http.Request) {
 	var id int64
 	var hash []byte
 	if err := a.db.QueryRowContext(r.Context(), `SELECT id,password_hash FROM users WHERE username=?`, session.username).Scan(&id, &hash); err != nil || bcrypt.CompareHashAndPassword(hash, []byte(input.Current)) != nil {
-		fail(w, http.StatusUnauthorized, errors.New("当前密码不正确"))
+		fail(w, http.StatusBadRequest, errors.New("当前密码不正确"))
 		return
 	}
 	newHash, err := bcrypt.GenerateFromPassword([]byte(input.New), bcrypt.DefaultCost)

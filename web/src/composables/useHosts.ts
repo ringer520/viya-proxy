@@ -10,7 +10,7 @@ import { apiFetch as fetch } from "../api";
 import { computed, nextTick, ref } from "vue";
 import { t, tr } from "../i18n";
 import { emptySecurityHeaders, type SitePolicy } from "../policy";
-import type { Host, SiteGroup } from "../types";
+import type { AccessLogEvent, Host, SiteGroup } from "../types";
 import { applyRetryVisible, confirmDeletion, csrfToken, deleteConfirmOptionResult, error, guardWrite, hosts, listSearch, matchesSearch, matchesStatus, saving } from "./useState";
 import { load, performDelete } from "./useRefresh";
 import { ArrowRight, Folder, FolderOpen, Globe2 } from "@lucide/vue";
@@ -153,9 +153,7 @@ export const siteGroups = computed<SiteGroup[]>(() =>
     .filter((group) => group.hosts.length),
 );
 
-// ---- file services page ----
-export const fileSearch = ref("");
-export const fileStatusFilter = ref<"all" | "enabled" | "disabled">("all");
+// ---- file services helper ----
 export function suggestedParentDomain() {
   const roots = siteRootDomains.value;
   if (!roots.length) return "";
@@ -341,7 +339,7 @@ export const siteLogs = ref<
   Record<
     number,
     {
-      events: Record<string, any>[];
+      events: AccessLogEvent[];
       loading: boolean;
       error: string;
       loadedAt: number;
@@ -350,7 +348,6 @@ export const siteLogs = ref<
 >({});
 export const viewingLogSite = ref<Host | null>(null);
 export const siteFilesHost = ref<Host | null>(null);
-export const previewLayout = ref<Record<string, string>>({});
 export async function loadSiteLogs(host: Host, force = false) {
   const cached = siteLogs.value[host.id];
   if (
@@ -386,24 +383,20 @@ export function openSiteLogs(host: Host) {
   viewingLogSite.value = host;
   loadSiteLogs(host, true);
 }
-export function previewSite(host: Host, event: MouseEvent | FocusEvent) {
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-  const width = Math.min(720, window.innerWidth - 32);
-  previewLayout.value = {
-    position: "fixed",
-    width: width + "px",
-    left:
-      Math.max(16, Math.min(rect.left, window.innerWidth - width - 16)) + "px",
-    ...(rect.bottom + 330 > window.innerHeight
-      ? { bottom: window.innerHeight - rect.top + "px", top: "auto" }
-      : { top: rect.bottom + "px", bottom: "auto" }),
-  };
-  loadSiteLogs(host);
-}
 export function openSiteFiles(
-  host: Host | { id: number; domain: string; root_path?: string },
+  host:
+    | Host
+    | {
+        id: number;
+        domain: string;
+        root_path?: string;
+        type?: Host["type"];
+        tls_mode?: string;
+        listener_id?: string;
+        path?: string;
+      },
 ) {
-  siteFilesHost.value = host as Host;
+  siteFilesHost.value = hosts.value.find((item) => item.id === host.id) || (host as Host);
 }
 export async function refreshSiteStat(id: number) {
   try {
@@ -433,6 +426,10 @@ export function openSiteFilesForForm() {
     id: editingID.value,
     domain: composedDomain.value || form.value.domain,
     root_path: form.value.root_path,
+    type: form.value.type,
+    tls_mode: form.value.tls_mode,
+    listener_id: form.value.listener_id,
+    path: form.value.path,
   });
 }
 
@@ -648,13 +645,19 @@ export async function testUpstream() {
         "Content-Type": "application/json",
         "X-CSRF-Token": csrfToken.value,
       },
-      body: JSON.stringify({ upstream: form.value.upstream }),
+      body: JSON.stringify({
+        upstream: form.value.upstream,
+        upstream_skip_tls_verify: !!form.value.upstream_skip_tls_verify,
+        upstream_tls_server_name: form.value.upstream_tls_server_name || "",
+      }),
     });
     const body = await r.json();
     if (!r.ok) throw Error(t(body.error) || t("上游连接测试失败"));
     upstreamCheck.value = {
       ok: true,
-      message: tr`TCP 端口可连通（${body.duration_ms} ms）`,
+      message: body.tls_checked
+        ? tr`HTTPS 握手正常（${body.duration_ms} ms）`
+        : tr`TCP 端口可连通（${body.duration_ms} ms）`,
     };
   } catch (e) {
     upstreamCheck.value = {
@@ -666,6 +669,7 @@ export async function testUpstream() {
   }
 }
 export async function save() {
+  if (!guardWrite() || saving.value) return;
   error.value = "";
   saving.value = true;
   try {
@@ -717,16 +721,21 @@ export async function save() {
         applyRetryVisible.value = true;
         partialSave.value = true;
         await load();
+        const normalizedPath = (form.value.path || "").trim();
         if (editingID.value === null) {
           const saved = hosts.value.find(
             (host) =>
               host.domain === hostDomain &&
-              host.listener_id === form.value.listener_id,
+              host.listener_id === form.value.listener_id &&
+              (host.path || "") === normalizedPath,
           );
           if (saved) {
             editingID.value = saved.id;
             form.value.version = saved.version;
           }
+        } else {
+          const saved = hosts.value.find((host) => host.id === editingID.value);
+          if (saved) form.value.version = saved.version;
         }
         error.value = tr`${t(body.error) || t("Caddy 未应用配置")}。数据库中的规则已保存，请勿重复新建；可先重新应用，或修正此规则后再次保存。`;
         return;
@@ -769,6 +778,18 @@ export async function toggleWebSearch() {
     await nextTick();
     webSearchInput.value?.focus();
   } else listSearch.value = "";
+}
+
+export function resetHostsState() {
+  show.value = false;
+  editingID.value = null;
+  partialSave.value = false;
+  viewingLogSite.value = null;
+  siteFilesHost.value = null;
+  siteLogs.value = {};
+  hostContentStats.value = {};
+  form.value.basic_auth_password = "";
+  webSearchOpen.value = false;
 }
 
 registerRefreshTask("hosts",async()=>{await loadWebListeners();void refreshStaticSiteStats()},"sites");

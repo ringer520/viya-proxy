@@ -14,7 +14,7 @@ import { retryApply } from "../composables/useApply";
 </script>
 
 <template>
-  <div v-if="showBan" class="overlay" v-dialog>
+  <div v-if="showBan" class="overlay overlay-top" v-dialog>
     <form class="modal" @submit.prevent="saveBan">
       <div class="modal-top">
         <div>

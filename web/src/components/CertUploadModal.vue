@@ -13,14 +13,14 @@ import { saving } from "../composables/useState";
 </script>
 
 <template>
-  <div v-if="showCert" class="overlay overlay-top">
+  <div v-if="showCert" class="overlay overlay-top" v-dialog>
     <form class="modal" @submit.prevent="saveCert">
       <div class="modal-top">
         <div>
           <span class="eyebrow">{{ t("自定义证书") }}</span>
           <h2>{{ t("上传 PEM 证书") }}</h2>
         </div>
-        <button type="button" class="icon-btn" @click="showCert = false">
+        <button type="button" class="icon-btn" :aria-label="t('关闭')" @click="showCert = false">
           ×
         </button>
       </div>

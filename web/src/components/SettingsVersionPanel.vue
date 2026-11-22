@@ -110,7 +110,7 @@ onBeforeUnmount(()=>{alive=false;requests.abort();clearInterval(poll)})
       <p v-if="available&&role==='viewer'" class="drawer-field-help">{{t('只读账号不能执行更新，请联系管理员。')}}</p>
       <p v-if="available&&blocked" class="drawer-field-help">{{t('请先保存或放弃未保存的修改，再执行更新。')}}</p>
       <div v-if="available&&managed&&!docker&&role==='admin'" class="settings-update-action"><span>{{t('最新版本')}} <b>{{latest}}</b></span><button class="primary" type="button" :disabled="!canUpdate||updating||checking" @click="update"><Download :size="14"/>{{updating?t('正在更新…'):t('更新并重启')}}</button></div>
-      <details v-if="identity.commit" class="settings-release-notes"><summary>{{t('构建信息')}}</summary><p>Commit: <code>{{identity.commit}}</code></p><p>{{t('构建时间')}}: {{identity.built_at}}</p><p>Source: <code style="overflow-wrap:anywhere">{{identity.source}}</code></p><p>{{t('数据库版本')}}: {{identity.schema_version}}</p></details>
+      <details v-if="identity.commit" class="settings-release-notes"><summary>{{t('构建信息')}}</summary><p>Commit: <code>{{identity.commit}}</code></p><p>{{t('构建时间')}}: {{identity.built_at}}</p><p>Source: <code class="break-anywhere">{{identity.source}}</code></p><p>{{t('数据库版本')}}: {{identity.schema_version}}</p></details>
       <details v-if="notes" class="settings-release-notes"><summary>{{t('更新说明')}}</summary><pre>{{notes}}</pre></details>
       <a v-if="url" :href="url" target="_blank" rel="noopener noreferrer" class="settings-release-link">{{t('查看更新日志')}} ↗</a>
     </div>

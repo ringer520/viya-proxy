@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"syscall"
 	"time"
 )
 
@@ -87,7 +88,7 @@ func (a *App) forwardRuntimeStates(ctx context.Context, rules []Layer4Rule) {
 				}
 				for _, socket := range sockets {
 					socketProtocol := "tcp"
-					if socket.Type == 2 {
+					if socket.Type == syscall.SOCK_DGRAM {
 						socketProtocol = "udp"
 					}
 					ip := net.ParseIP(socket.Laddr.IP)

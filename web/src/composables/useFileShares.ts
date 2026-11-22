@@ -23,3 +23,9 @@ export async function refreshFileShares(): Promise<void> {
     fileSharesLoading.value = false;
   }
 }
+
+export function resetFileSharesState(): void {
+  fileShares.value = [];
+  fileSharesError.value = "";
+  fileSharesLoading.value = false;
+}

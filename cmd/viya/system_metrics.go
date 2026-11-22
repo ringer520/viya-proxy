@@ -118,8 +118,14 @@ func (a *App) systemMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	wait, mine := claimMetricsSample()
 	if mine {
-		value := a.collectMetrics(r)
-		storeMetrics(value, wait)
+		var value map[string]any
+		defer func() {
+			if value == nil {
+				value = map[string]any{"sampled_at": time.Now().Unix(), "platform": runtime.GOOS, "cores": runtime.NumCPU()}
+			}
+			storeMetrics(value, wait)
+		}()
+		value = a.collectMetrics()
 		writeJSON(w, 200, value)
 		return
 	}
@@ -136,8 +142,12 @@ func (a *App) systemMetrics(w http.ResponseWriter, r *http.Request) {
 	fail(w, http.StatusServiceUnavailable, errors.New("系统指标暂不可用，请稍后重试"))
 }
 
-func (a *App) collectMetrics(r *http.Request) map[string]any {
-	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+func (a *App) collectMetrics() map[string]any {
+	baseCtx := a.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, 4*time.Second)
 	defer cancel()
 	result := map[string]any{"sampled_at": time.Now().Unix(), "platform": runtime.GOOS, "cores": runtime.NumCPU()}
 	errs := []string{}

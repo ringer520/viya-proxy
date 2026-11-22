@@ -73,9 +73,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // classifyHostWriteError turns SQLite constraint failures into actionable
 // messages instead of reporting every failure as a duplicate domain.
-
-// classifyHostWriteError turns SQLite constraint failures into actionable
-// messages instead of reporting every failure as a duplicate domain.
 func classifyHostWriteError(err error) (int, error) {
 	message := strings.ToLower(err.Error())
 	switch {
@@ -141,11 +138,6 @@ func internalFailure(err error) bool {
 // (which the browser surfaces as a bare "Failed to fetch"). It logs the stack
 // and, when nothing has been written yet, returns a clean 500 JSON so the UI
 // can show the real failure instead of a network error.
-
-// recoverPanic keeps a panic in any handler from tearing down the connection
-// (which the browser surfaces as a bare "Failed to fetch"). It logs the stack
-// and, when nothing has been written yet, returns a clean 500 JSON so the UI
-// can show the real failure instead of a network error.
 func recoverPanic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w}
@@ -168,8 +160,21 @@ func recoverPanic(next http.Handler) http.Handler {
 	})
 }
 
-// statusRecorder tracks whether a response has started so recoverPanic can
-// decide between a clean 500 and leaving an already-started response alone.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
+func (r *statusRecorder) Flush() {
+	if !r.wrote {
+		r.wrote = true
+		if r.status == 0 {
+			r.status = http.StatusOK
+		}
+	}
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
 
 func (r *statusRecorder) WriteHeader(code int) {
 	if !r.wrote {

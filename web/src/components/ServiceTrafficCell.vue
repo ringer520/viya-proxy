@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import AnimatedMetric from '../AnimatedMetric.vue'
 import { trafficCharts } from '../composables/usePreferences'
+import { trafficDayStart } from '../composables/useTraffic'
 import { t } from '../i18n'
 import type { SiteTraffic } from '../types'
 const props=defineProps<{stats:SiteTraffic;kind:'web'|'forward';protocol?:string}>()
@@ -10,8 +11,12 @@ const props=defineProps<{stats:SiteTraffic;kind:'web'|'forward';protocol?:string
 const hasTraffic=computed(()=>(props.stats.daily||[]).some(p=>p.upload+p.download>0))
 const unit=computed(()=>props.kind==='web'?t('次请求'):props.protocol==='udp'?t('会话'):props.protocol==='tcp'?t('连接'):t('连接 / 会话'))
 const line=computed(()=>{
- const days=new Map((props.stats.daily||[]).map(p=>[p.day,p.upload+p.download])); const now=Math.floor(Date.now()/86400000)*86400;
- const values=Array.from({length:30},(_,i)=>days.get(now-(29-i)*86400)||0),max=Math.max(1,...values);
+ const values=Array.from({length:30},()=>0)
+ for(const p of props.stats.daily||[]){
+  const index=29-Math.round((trafficDayStart.value-p.day)/86400)
+  if(index>=0&&index<30)values[index]+=p.upload+p.download
+ }
+ const max=Math.max(1,...values)
  return values.map((v,i)=>`${i*120/29},${22-v/max*18}`).join(' ')
 })
 </script>

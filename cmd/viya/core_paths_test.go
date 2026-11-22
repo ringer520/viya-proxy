@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -195,5 +196,53 @@ func TestCertificateMatchesDomainWildcardDepth(t *testing.T) {
 	}
 	if certificateMatchesDomain([]string{"other.example.com"}, "app.example.com") {
 		t.Error("unrelated name must not match")
+	}
+}
+
+func TestStatusRecorderSupportsFlushAndUnwrap(t *testing.T) {
+	base := httptest.NewRecorder()
+	rec := &statusRecorder{ResponseWriter: base}
+
+	var _ http.Flusher = rec
+	if _, ok := any(rec).(http.Flusher); !ok {
+		t.Fatal("statusRecorder must implement http.Flusher for SSE streaming")
+	}
+	rec.Flush()
+	if !base.Flushed {
+		t.Fatal("statusRecorder.Flush must forward to underlying ResponseWriter")
+	}
+	if rec.Unwrap() != base {
+		t.Fatal("statusRecorder.Unwrap must return underlying ResponseWriter")
+	}
+	rc := http.NewResponseController(rec)
+	if err := rc.Flush(); err != nil {
+		t.Fatalf("ResponseController.Flush failed through statusRecorder: %v", err)
+	}
+}
+
+func TestTestUpstreamChecksTLSHandshake(t *testing.T) {
+	srv := httptest.NewTLSServer(http.NewServeMux())
+	defer srv.Close()
+
+	app, db := newTestApp(t)
+	defer db.Close()
+
+	// Without skip verify, self-signed TLS server should return 502 with actionable TLS hint.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proxy-hosts/test-upstream", strings.NewReader(`{"upstream":"`+srv.URL+`"}`))
+	rec := httptest.NewRecorder()
+	app.testUpstream(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 on untrusted TLS upstream, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// With upstream_skip_tls_verify=true, TLS handshake succeeds and returns tls_checked=true.
+	reqSkip := httptest.NewRequest(http.MethodPost, "/api/v1/proxy-hosts/test-upstream", strings.NewReader(`{"upstream":"`+srv.URL+`","upstream_skip_tls_verify":true}`))
+	recSkip := httptest.NewRecorder()
+	app.testUpstream(recSkip, reqSkip)
+	if recSkip.Code != http.StatusOK {
+		t.Fatalf("expected 200 with skip TLS verify, got %d: %s", recSkip.Code, recSkip.Body.String())
+	}
+	if !strings.Contains(recSkip.Body.String(), `"tls_checked":true`) {
+		t.Fatalf("expected tls_checked=true, got %s", recSkip.Body.String())
 	}
 }

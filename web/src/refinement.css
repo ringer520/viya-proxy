@@ -79,7 +79,7 @@
   padding: 0;
   display: grid;
   gap: 6px;
-  max-height: 260px;
+  max-height: 55vh;
   overflow: auto;
 }
 .l4-log-list li {
@@ -123,22 +123,6 @@
   height: 16px;
 }
 
-/* ---- 站点流量块更紧凑，避免与操作按钮抢位 ---- */
-.host-row .traffic-spark {
-  gap: 2px;
-  height: 31px;
-  margin-top: 6px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
-}
-.host-row .traffic-spark i {
-  width: 4px;
-  border-radius: 2px 2px 1px 1px;
-  background: color-mix(in srgb, var(--accent) 42%, transparent);
-}
-.host-row .traffic-spark i:hover {
-  background: var(--accent);
-}
-
 /* ---- 状态胶囊：深色主题下不再出现白底 ---- */
 .badge {
   letter-spacing: 0.01em;
@@ -163,12 +147,6 @@
   .host-row .host-main {
     flex: 1 1 100%;
     min-width: 0;
-  }
-  .host-row .traffic-spark {
-    max-width: 100%;
-  }
-  .host-row .traffic-spark i {
-    width: 3px;
   }
   /* 转发日志入口在窄屏脱离详情行，固定在卡片右上角，避免独占一行 */
 }
@@ -807,18 +785,15 @@ html[data-copy="compact"] .dependency-help > span {
 .site-detail-footer .secondary { min-width:112px; }
 .group-security-btn { width:auto;min-width:94px;display:inline-flex;gap:6px;padding:0 9px; }
 .group-security-btn .security-default-label { white-space:nowrap;font-size:11px;font-weight:650; }
-.group-security-btn.enabled { color:#0b8a58;border-color:color-mix(in srgb,#10b981 45%,var(--line));background:color-mix(in srgb,#10b981 9%,var(--surface));box-shadow:0 0 0 2px color-mix(in srgb,#10b981 10%,transparent); }
-.group-security-btn.enabled .security-default-label { color:#08784d; }
+.group-security-btn.enabled { color:var(--success);border-color:color-mix(in srgb,var(--success) 45%,var(--line));background:color-mix(in srgb,var(--success) 10%,var(--surface));box-shadow:0 0 0 2px color-mix(in srgb,var(--success) 10%,transparent); }
+.group-security-btn.enabled .security-default-label { color:var(--success); }
 .security-dot { top:3px;right:3px; }
-.list-status { min-width:196px;flex:none; }
-.list-status select { width:176px;min-width:176px;box-sizing:border-box; }
-.site-list-tools label select { min-width:128px;box-sizing:border-box; }
 .dependency-help { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 12px;padding:12px 14px;margin:8px 0 16px;line-height:1.55;overflow-wrap:anywhere; }
 .dependency-help .inline-action { justify-self:end;padding:7px 10px;border:1px solid color-mix(in srgb,var(--accent) 25%,var(--line));border-radius:7px;background:var(--surface); }
 .form-error-banner { position:sticky;top:0;z-index:5;box-shadow:0 4px 16px color-mix(in srgb,#dc2626 12%,transparent); }
 .delete-confirm-option { display:flex!important;align-items:center;gap:10px;margin:14px 0!important;padding:12px 14px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);font-size:13px!important;line-height:1.45!important;cursor:pointer; }
 .delete-confirm-option input { flex:none;width:17px;height:17px;margin:0!important;accent-color:var(--accent); }
-@media(max-width:560px) { .dependency-help { grid-template-columns:1fr; }.dependency-help .inline-action { justify-self:start; }.list-status { min-width:0; } }
+@media(max-width:560px) { .dependency-help { grid-template-columns:1fr; }.dependency-help .inline-action { justify-self:start; } }
 .listener-create-options { display:grid;gap:10px;padding:0;margin:0;border:0; }
 .listener-create-options label { display:grid;gap:6px; }
 .listener-create-options label:first-child { font-weight:600; }

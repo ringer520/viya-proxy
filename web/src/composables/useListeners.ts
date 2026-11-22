@@ -61,16 +61,33 @@ async function checkSelectedPort() {
       };
   }
 }
-export async function loadWebListeners() {
-  if (listenerLoaded.value) return;
+export async function loadWebListeners(force = false) {
+  if (listenerLoaded.value && !force) return;
   try {
+    const previousID = webListeners.value[selectedListener.value]?.id;
     const r = await fetch("/api/v1/web-listeners");
     if (r.ok) {
-      webListeners.value = await r.json();
+      const next: WebListener[] = await r.json();
+      webListeners.value = next;
       listenerLoaded.value = true;
-      selectListener(0);
+      const idx = previousID ? next.findIndex((item) => item.id === previousID) : -1;
+      selectListener(idx >= 0 ? idx : 0);
     }
   } catch {}
+}
+
+export function resetListeners() {
+  selectedPortSequence++;
+  listenerLoaded.value = false;
+  showListenerEditor.value = false;
+  listenerEditingIndex.value = null;
+  selectedListener.value = 0;
+  siteExposureFilter.value = "https";
+  selectedPortState.value = { checking: false, available: null, message: "" };
+  webListeners.value = [
+    { id: "https-main", protocol: "https", port: 443 },
+    { id: "http-main", protocol: "http", port: 80 },
+  ];
 }
 export function selectListener(index: number) {
   selectedListener.value = index;
@@ -205,4 +222,3 @@ export async function deleteListener() {
     return;
   await persistListeners(webListeners.value.filter((_, i) => i !== index));
 }
-/** Hosts whose WebDAV address was just copied, so the row can confirm inline. */

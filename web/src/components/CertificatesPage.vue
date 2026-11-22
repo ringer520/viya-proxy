@@ -2,7 +2,7 @@
 import ResourceUsage from "./ResourceUsage.vue";
 import { Copy, Pencil, Plus, ShieldCheck, Trash2 } from "@lucide/vue";
 import { t } from "../i18n";
-import { deleteBusy, hasListFilter } from "../composables/useState";
+import { deleteBusy, hasListFilter, readOnly } from "../composables/useState";
 
 import { automaticCertificates, certError, certForm, openManagedCert, removeAutomaticCert, removeCert, removeManagedCert, showCert, visibleCerts, visibleManagedCerts } from "../composables/useCertificates";
 </script>
@@ -90,6 +90,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
               }}</span
             ><button
               class="icon-btn"
+              :disabled="readOnly"
               :title="t('编辑证书')"
               :aria-label="t('编辑证书')"
               @click="openManagedCert(cert)"
@@ -97,6 +98,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
               <Pencil :size="16" /></button
             ><button
               class="icon-btn"
+              :disabled="readOnly"
               :title="t('克隆证书')"
               :aria-label="t('克隆证书')"
               @click="openManagedCert(cert, true)"
@@ -104,6 +106,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
               <Copy :size="16" /></button
             ><button
               class="icon-btn danger"
+              :disabled="readOnly"
               :title="t('删除证书')"
               :aria-label="t('删除证书')"
               @click="removeManagedCert(cert)"
@@ -194,7 +197,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
               class="icon-btn danger"
               :title="t('删除证书和申请')"
               :aria-label="t('删除证书和申请')"
-              :disabled="deleteBusy"
+              :disabled="readOnly || deleteBusy"
               @click="removeAutomaticCert(cert)"
             >
               <Trash2 :size="16" />
@@ -225,6 +228,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
           </div>
           <button
             class="secondary"
+            :disabled="readOnly"
             @click="
               certError = '';
               certForm.name = '';
@@ -247,6 +251,7 @@ import { automaticCertificates, certError, certForm, openManagedCert, removeAuto
             </div>
             <button
               class="icon-btn danger"
+              :disabled="readOnly"
               :title="t('删除证书')"
               @click="removeCert(cert)"
             >

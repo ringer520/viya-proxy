@@ -103,11 +103,11 @@ export const l4Form = ref({
   enabled: true,
 });
 export const l4Logs = ref<Record<number, RuleLogState>>({});
-export const l4PreviewLayout = ref<Record<string, string>>({});
-export async function loadL4Logs(rule: Layer4Rule) {
+export const viewingLogL4 = ref<Layer4Rule | null>(null);
+export async function loadL4Logs(rule: Layer4Rule, force = false) {
   const current = l4Logs.value[rule.id];
   if (current?.loading) return;
-  if (current && Date.now() - current.loadedAt < 4000) return;
+  if (!force && current && Date.now() - current.loadedAt < 4000) return;
   l4Logs.value = {
     ...l4Logs.value,
     [rule.id]: {
@@ -137,22 +137,9 @@ export async function loadL4Logs(rule: Layer4Rule) {
     };
   }
 }
-export function previewL4(rule: Layer4Rule, event: MouseEvent | FocusEvent) {
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-  const width = Math.min(540, window.innerWidth - 32);
-  l4PreviewLayout.value = {
-    position: "fixed",
-    width: width + "px",
-    left:
-      Math.max(
-        16,
-        Math.min(rect.right - width, window.innerWidth - width - 16),
-      ) + "px",
-    ...(rect.bottom + 300 > window.innerHeight
-      ? { bottom: window.innerHeight - rect.top + "px", top: "auto" }
-      : { top: rect.bottom + "px", bottom: "auto" }),
-  };
-  void loadL4Logs(rule);
+export function openL4Logs(rule: Layer4Rule) {
+  viewingLogL4.value = rule;
+  void loadL4Logs(rule, true);
 }
 export function openL4(rule?: Layer4Rule) {
   if (!guardWrite()) return;
@@ -214,6 +201,9 @@ export async function saveL4() {
             l4EditingID.value = saved.id;
             l4Form.value = { ...saved };
           }
+        } else if (l4EditingID.value !== null) {
+          const saved = l4Rules.value.find((rule) => rule.id === l4EditingID.value);
+          if (saved) l4Form.value = { ...saved };
         }
         l4Error.value = tr`${t(body.error) || t("Caddy 未应用配置")}。规则已保存，请勿重复新建；可重新应用或修正后再次保存。`;
         return;
@@ -402,7 +392,7 @@ export async function openDDNS(record?: DDNSRecord) {
   void loadDDNSZones(false);
 }
 export async function saveDDNS() {
-  if (!guardWrite()) return;
+  if (!guardWrite() || saving.value) return;
   saving.value = true;
   ddnsError.value = "";
   try {
@@ -553,6 +543,7 @@ export function openProvider() {
   showProvider.value = true;
 }
 export function editProvider(provider: Provider) {
+  if (!guardWrite()) return;
   editingProviderID.value = provider.id;
   providerForm.value = {
     name: provider.name,
@@ -563,6 +554,7 @@ export function editProvider(provider: Provider) {
   showProvider.value = true;
 }
 export async function saveProvider() {
+  if (!guardWrite() || saving.value) return;
   saving.value = true;
   providerError.value = "";
   try {
@@ -603,8 +595,30 @@ export async function removeProvider(provider: Provider) {
 
   let usage:string[]=[];try{const r=await fetch(`/api/v1/dns-providers/${provider.id}/usage`);const d=await r.json();if(!r.ok)throw Error(t(d.error));usage=d.map((v:{kind:string;name:string})=>v.kind+': '+v.name)}catch(e){error.value=e instanceof Error?t(e.message):t('读取失败');return}
  if(usage.length){error.value=t('此凭据仍在使用，请先修改关联资源后再删除')+'：'+usage.join('；');return}
-  if (await confirmDeletion(tr`删除 DNS 凭据“${provider.name}”？`+(usage.length?"\n"+t("当前关联：")+usage.join("；"):"")))
+  if (await confirmDeletion(tr`删除 DNS 凭据“${provider.name}”？`))
     await performDelete(`/api/v1/dns-providers/${provider.id}`);
+}
+
+export function resetNetworkState() {
+  showBan.value = false;
+  editingBanID.value = null;
+  banError.value = "";
+  banPreview.value = null;
+  banRiskConfirmed.value = false;
+  showL4.value = false;
+  l4EditingID.value = null;
+  l4Error.value = "";
+  l4PartialSave.value = false;
+  l4Logs.value = {};
+  viewingLogL4.value = null;
+  showDDNS.value = false;
+  ddnsEditingID.value = null;
+  ddnsError.value = "";
+  ddnsFeedback.value = {};
+  showProvider.value = false;
+  editingProviderID.value = null;
+  providerError.value = "";
+  providerForm.value = { name: "", provider_type: "cloudflare", credentials: {} };
 }
 
 // ---- list filtering ----

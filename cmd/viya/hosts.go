@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -63,13 +63,20 @@ func (a *App) reapplyConfig(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) testUpstream(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Upstream string `json:"upstream"`
+		Upstream              string `json:"upstream"`
+		UpstreamSkipTLSVerify bool   `json:"upstream_skip_tls_verify"`
+		UpstreamTLSServerName string `json:"upstream_tls_server_name"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&input); err != nil {
 		fail(w, http.StatusBadRequest, errors.New("上游测试请求无效"))
 		return
 	}
 	u, err := parseUpstream(input.Upstream)
+	if err != nil {
+		fail(w, http.StatusBadRequest, err)
+		return
+	}
+	sni, err := validateUpstreamTLSServerName(input.UpstreamTLSServerName)
 	if err != nil {
 		fail(w, http.StatusBadRequest, err)
 		return
@@ -82,8 +89,33 @@ func (a *App) testUpstream(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadGateway, errors.New("无法连接上游端口，请确认地址正确且目标服务正在运行"))
 		return
 	}
-	_ = conn.Close()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "duration_ms": time.Since(started).Milliseconds()})
+	if u.Scheme == "https" {
+		serverName := u.Hostname()
+		if sni != "" {
+			serverName = sni
+		}
+		tlsConn := tls.Client(conn, &tls.Config{
+			ServerName:         serverName,
+			InsecureSkipVerify: input.UpstreamSkipTLSVerify,
+		})
+		if tlsErr := tlsConn.HandshakeContext(ctx); tlsErr != nil {
+			_ = tlsConn.Close()
+			if !input.UpstreamSkipTLSVerify {
+				fail(w, http.StatusBadGateway, errors.New("TCP 端口已连通，但上游 TLS 证书校验失败；如为内网自签证书请勾选“跳过上游 TLS 证书校验”，或填写正确的 TLS 证书域名 (SNI)"))
+			} else {
+				fail(w, http.StatusBadGateway, errors.New("TCP 端口已连通，但上游 TLS 握手失败，请确认上游确实启用了 HTTPS"))
+			}
+			return
+		}
+		_ = tlsConn.Close()
+	} else {
+		_ = conn.Close()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":          true,
+		"tls_checked": u.Scheme == "https",
+		"duration_ms": time.Since(started).Milliseconds(),
+	})
 }
 
 func (a *App) createHost(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +304,7 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 			rootPath = managedStaticSiteRoot(a, domain)
 		}
 		rootPath = filepath.Clean(strings.TrimSpace(rootPath))
-		rows, queryErr := tx.QueryContext(r.Context(), `SELECT domain,root_path FROM proxy_hosts WHERE type='static' AND id<>?`, id)
+		rows, queryErr := tx.QueryContext(r.Context(), `SELECT domain,root_path FROM proxy_hosts WHERE type IN ('static','files') AND id<>?`, id)
 		if queryErr != nil {
 			fail(w, 500, errors.New("无法检查共享静态站点文件"))
 			return
@@ -290,7 +322,7 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 			} else {
 				otherRoot = filepath.Clean(otherRoot)
 			}
-			if otherRoot == rootPath || (runtime.GOOS == "windows" && strings.EqualFold(otherRoot, rootPath)) {
+			if pathOverlaps(rootPath, otherRoot) {
 				sharedSiteFiles = true
 				break
 			}
@@ -337,19 +369,8 @@ func (a *App) deleteHost(w http.ResponseWriter, r *http.Request) {
 		failSavedApplication(w)
 		return
 	}
-	if deleteSiteFiles && !sharedSiteFiles {
-		if err := a.removeManagedStaticSite(rootPath); err != nil {
-			slog.Error("could not remove deleted static site files", "error", err)
-			fail(w, 500, errors.New("站点已删除，但静态文件未能移除"))
-			return
-		}
-	}
 	w.WriteHeader(http.StatusNoContent)
 }
-
-// validateStaticRoot checks a static site root: it must be an absolute path
-// with no parent-directory segments. The directory itself may not exist yet;
-// prepareSiteStorage creates it when the panel manages it.
 
 // validateStaticRoot checks a static site root: it must be an absolute path
 // with no parent-directory segments. The directory itself may not exist yet;
@@ -372,10 +393,6 @@ func validateStaticRoot(root string) error {
 	}
 	return nil
 }
-
-// managedSitesDir is the only tree the panel may write into (the systemd unit
-// gives the service write access to its data directory alone). File uploads
-// are accepted only for static sites rooted here.
 
 // managedSitesDir is the only tree the panel may write into (the systemd unit
 // gives the service write access to its data directory alone). File uploads
@@ -404,30 +421,13 @@ func managedStaticSiteRoot(a *App, domain string) string {
 // prepareSiteStorage resolves a static site's root and makes sure it exists.
 // Roots inside the managed tree are created on demand; external roots must
 // already exist because the service cannot write outside its data directory.
-
-// prepareSiteStorage resolves a static site's root and makes sure it exists.
-// Roots inside the managed tree are created on demand; external roots must
-// already exist because the service cannot write outside its data directory.
 func (a *App) prepareSiteStorage(h *Host) error {
 	if h.Type != "static" && h.Type != "files" {
 		return nil
 	}
 	root := strings.TrimSpace(h.RootPath)
 	if root == "" {
-		slug := strings.ToLower(h.Domain)
-		var b strings.Builder
-		for _, r := range slug {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '.' {
-				b.WriteRune(r)
-			} else {
-				b.WriteByte('-')
-			}
-		}
-		name := strings.Trim(b.String(), "-.")
-		if name == "" {
-			name = "site"
-		}
-		root = filepath.Join(a.managedSitesDir(), name)
+		root = managedStaticSiteRoot(a, h.Domain)
 		h.RootPath = root
 	}
 	if err := validateStaticRoot(root); err != nil {

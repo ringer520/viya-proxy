@@ -12,7 +12,7 @@ import PanelSettingsDrawer from "./components/PanelSettingsDrawer.vue";
 import AnimeBackdrop from "./components/AnimeBackdrop.vue";
 import ThemeEmblem from "./components/ThemeEmblem.vue";
 import { animeThemes } from "./animeThemes";
-import SiteFilesDrawer from "./components/SiteFilesDrawer.vue";
+const SiteFilesDrawer = defineAsyncComponent(() => import("./components/SiteFilesDrawer.vue"));
 import LanguagePicker from "./components/LanguagePicker.vue";
 import ListenerEditorModal from "./components/ListenerEditorModal.vue";
 import BanModal from "./components/BanModal.vue";
@@ -22,7 +22,7 @@ import SecurityDefaultsDialog from "./components/SecurityDefaultsDialog.vue";
 import DeleteConfirmDialog from "./components/DeleteConfirmDialog.vue";
 import ConfigApplyBar from "./components/ConfigApplyBar.vue";
 import SiteDetailsDrawer from "./components/SiteDetailsDrawer.vue";
-import SiteFormModal from "./components/SiteFormModal.vue";
+const SiteFormModal = defineAsyncComponent(() => import("./components/SiteFormModal.vue"));
 import ProviderModal from "./components/ProviderModal.vue";
 import L4Modal from "./components/L4Modal.vue";
 import DDNSModal from "./components/DDNSModal.vue";
@@ -58,15 +58,16 @@ import {
   Settings,
 } from "@lucide/vue";
 
-import { authenticated, csrfToken, authChecked, setupRequired, panelUsername, panelRole, readOnly, error, saving, applyRetryVisible, online, refreshing, resolveDelete, listSearch, statusFilter } from "./composables/useState";
-import { loadSection } from "./composables/useRefresh";
+import { authenticated, csrfToken, authChecked, setupRequired, panelUsername, panelRole, readOnly, error, saving, applyRetryVisible, online, refreshing, resolveDelete, listSearch, statusFilter, hosts, providers, l4Rules, ddnsRecords, certificates, certExpiring, ipBans, upstreamHealth, networkInterfaces } from "./composables/useState";
+import { loadSection, resetLoadedScopes } from "./composables/useRefresh";
 import { retryApply } from "./composables/useApply";
-import { trafficRange, refreshTraffic } from "./composables/useTraffic";
+import { resetTrafficState, trafficRange, refreshTraffic } from "./composables/useTraffic";
 import {
   managedCertificates,
   openManagedCert,
   refreshManagedCertificates,
   refreshCertificateInventory,
+  resetCertificatesState,
 } from "./composables/useCertificates";
 import {
   viewingLogSite,
@@ -76,8 +77,8 @@ import {
   openCreate,
   show as siteFormOpen,
   webSearchOpen,
-  fileSearch,
-  fileStatusFilter,
+  resetHostsState,
+  resetListeners,
 } from "./composables/useHosts";
 import {
   openBan,
@@ -85,7 +86,13 @@ import {
   openDDNS,
   refreshDDNS,
   openProvider,
+  loadL4Logs,
+  viewingLogL4,
+  resetNetworkState,
 } from "./composables/useNetwork";
+import { closeSiteDetails } from "./composables/useSiteWorkspace";
+import { resetSecurityState } from "./composables/useSecurity";
+import { resetFileSharesState } from "./composables/useFileShares";
 import {
   autoRefresh,
   compactMode,
@@ -94,7 +101,6 @@ import {
   landingPage,
   pauseHidden,
   showFileServices,
-  previewLimit,
   refreshInterval,
   themeChoice,
   themeMedia,
@@ -113,7 +119,6 @@ function resetPanelPreferences() {
   autoRefresh.value = true;
   pauseHidden.value = true;
   trafficCharts.value = true;
-  previewLimit.value = 5;
   landingPage.value = "overview";
   showFileServices.value = false;
   panelSettingsError.value = "";
@@ -325,6 +330,11 @@ async function initializeAuth() {
     const status = await r.json();
     setupRequired.value = status.setup_required;
     if (!setupRequired.value) await refreshSession();
+    if (!authenticated.value) {
+      document.title = setupRequired.value
+        ? `${t("初始化")} · Viya`
+        : `${t("登录")} · Viya`;
+    }
   } catch {
     authError.value = t("无法连接管理服务");
   } finally {
@@ -349,8 +359,8 @@ async function refreshSession() {
       panelListenPort.value = Number(data.listen_port) || 8181;
     }
   } catch {}
-  // Fetch the build version once for the sidebar footer.
-  fetch("/api/v1/version")
+  // Fetch the build version once for the sidebar footer (skip remote GitHub lookup).
+  fetch("/api/v1/version?local=1")
     .then((r) => (r.ok ? r.json() : Promise.resolve({})))
     .then((d: Record<string, unknown>) => {
       if (d && typeof d.current === "string") appVersion.value = d.current;
@@ -379,12 +389,48 @@ async function authenticate() {
     });
     const data = await r.json();
     if (!r.ok) throw Error(t(data.error) || t("认证失败"));
+    setupRequired.value = false;
     await refreshSession();
   } catch (e) {
     authError.value = e instanceof Error ? t(e.message) : t("认证失败");
   } finally {
     authBusy.value = false;
   }
+}
+function clearSessionState() {
+  authenticated.value = false;
+  csrfToken.value = "";
+  panelUsername.value = "";
+  panelRole.value = "admin";
+  appVersion.value = "";
+  showPanelSettings.value = false;
+  resolveDelete(false);
+  closeSiteDetails();
+  resetHostsState();
+  resetListeners();
+  resetNetworkState();
+  resetTrafficState();
+  resetCertificatesState();
+  resetSecurityState();
+  resetFileSharesState();
+  authForm.value.password = "";
+  authForm.value.confirm = "";
+  hosts.value = [];
+  providers.value = [];
+  l4Rules.value = [];
+  ddnsRecords.value = [];
+  certificates.value = [];
+  certExpiring.value = [];
+  ipBans.value = [];
+  upstreamHealth.value = {};
+  networkInterfaces.value = [];
+  managedCertificates.value = [];
+  online.value = false;
+  error.value = "";
+  resetLoadedScopes();
+  document.title = setupRequired.value
+    ? `${t("初始化")} · Viya`
+    : `${t("登录")} · Viya`;
 }
 async function logout() {
   try {
@@ -395,15 +441,11 @@ async function logout() {
   } catch {
     // Even if the server is unreachable, clear the local session.
   } finally {
-    authenticated.value = false;
-    csrfToken.value = "";
-    authForm.value.password = "";
-    authForm.value.confirm = "";
+    clearSessionState();
   }
 }
 function onSessionExpired() {
-  authenticated.value = false;
-  csrfToken.value = "";
+  clearSessionState();
 }
 
 // ---- navigation ----
@@ -529,14 +571,14 @@ const pageInstructions: Record<string, string[]> = {
     t("站点分三类：反向代理（转发到上游）、静态站点（由 Caddy 直接托管文件，可上传管理）、URL 重定向。"),
     t("先选择 HTTP / HTTPS 监听，再添加域名；已有主域名可直接添加子域名；访问路径留空表示匹配整个域名。"),
     t("静态站点文件上传后立即对外生效、无需重启；开启目录浏览可公开文件列表。"),
-    t("日志图标支持悬浮预览；克隆可复用配置；删除前会再次确认。"),
+    t("点击日志图标查看访问记录；克隆可复用配置；删除前会再次确认。"),
   ],
   "file-services": [
     t("卡片集中展示静态站点与共享目录：目录位置、访问认证、读写权限与 WebDAV 地址一目了然。"),
     t("点“管理文件”上传与编辑站点内容；右上角“新建共享”创建支持 HTTPS 与访问认证的 WebDAV 共享。"),
   ],
   layer4: [
-    t("填写 Debian 主机监听地址、端口和上游 host:port；选择 TCP、UDP 或两者。"),
+    t("填写当前主机监听地址、端口和上游 host:port；选择 TCP、UDP 或两者。"),
     t("监听端口需可用并放行防火墙，不能占用面板或 Web 服务端口。"),
   ],
   ddns: [
@@ -576,8 +618,6 @@ function syncActiveSection() {
   listSearch.value = "";
   webSearchOpen.value = false;
   statusFilter.value = "all";
-  fileSearch.value = "";
-  fileStatusFilter.value = "all";
   let section = window.location.hash.slice(1);
   if (section === "dns-ddns") section = "dns-providers";
   activeSection.value = visibleNavigationItems.value.some((item) => item.id === section)
@@ -615,12 +655,13 @@ function restartTrafficTimer() {
     // steady stream of requests nobody was looking at.
     if (["overview", "proxy-sites", "layer4"].includes(activeSection.value)) void refreshTraffic();
     if (viewingLogSite.value) void loadSiteLogs(viewingLogSite.value, true);
+    if (viewingLogL4.value) void loadL4Logs(viewingLogL4.value, true);
   }, refreshInterval.value * 1000);
 }
 function synchronizeAutoRefresh() {
   documentHidden.value = document.hidden;
   if (!canAutoRefresh()) return;
-  void refreshTraffic();
+  if (["overview", "proxy-sites", "layer4"].includes(activeSection.value)) void refreshTraffic();
   if (activeSection.value === "ddns") void refreshDDNS();
   if (activeSection.value === "certificates") void refreshManagedCertificates();
 }
@@ -633,7 +674,6 @@ watch(
     autoRefresh,
     pauseHidden,
     trafficCharts,
-    previewLimit,
     landingPage,
     showFileServices,
   ],
@@ -641,12 +681,15 @@ watch(
     applyPanelSettings();
     // Hiding Files & Shares must also leave its page.
     if (!showFileServices.value && activeSection.value === "file-services") {
+      if (landingPage.value === "file-services") landingPage.value = "overview";
       activeSection.value = visibleNavigationItems.value.some(
         (item) => item.id === landingPage.value,
       )
         ? landingPage.value
         : "overview";
       history.replaceState(null, "", `#${activeSection.value}`);
+      document.title = `${currentPage.value.label} · Viya`;
+      if (authenticated.value) void loadSection(activeSection.value);
     }
     if (trafficTimer) restartTrafficTimer();
     synchronizeAutoRefresh();
@@ -808,7 +851,7 @@ onBeforeUnmount(() => {
             @click="openPanelSettings"
           >
             <Settings :size="19" /><span>{{ t("面板设置") }}</span
-            ><kbd>,</kbd>
+            ><kbd aria-hidden="true">,</kbd>
           </button>
         </div>
         <button
@@ -833,7 +876,6 @@ onBeforeUnmount(() => {
       v-model:auto-refresh="autoRefresh"
       v-model:pause-hidden="pauseHidden"
       v-model:charts="trafficCharts"
-      v-model:preview-limit="previewLimit"
       v-model:landing="landingPage"
       v-model:show-file-services="showFileServices"
       v-model:port="panelListenPort"
@@ -862,13 +904,7 @@ onBeforeUnmount(() => {
     />
     <SiteFilesDrawer
       v-if="siteFilesHost"
-      :host="{
-        id: siteFilesHost.id,
-        type: siteFilesHost.type,
-        domain: siteFilesHost.domain,
-        root_path: siteFilesHost.root_path,
-        tls_mode: siteFilesHost.tls_mode,
-      }"
+      :host="siteFilesHost"
       :csrf="csrfToken"
       @close="closeSiteFiles"
     />
@@ -986,12 +1022,12 @@ onBeforeUnmount(() => {
     </main>
     <ListenerEditorModal />
     <!-- Form overlays close only through their explicit close, cancel, or save controls. Keep this behavior for future edit/create forms. -->
-    <BanModal />
     <ManagedCertModal />
     <SiteLogModal :auto-refresh="autoRefresh" :refresh-interval="refreshInterval" />
+    <BanModal />
     <SecurityDefaultsDialog />
     <DeleteConfirmDialog />
-    <SiteFormModal />
+    <SiteFormModal v-if="siteFormOpen" />
     <SiteDetailsDrawer />
     <ProviderModal />
     <L4Modal />
