@@ -1,4 +1,5 @@
 /data/
+/node_modules/
 /web/node_modules/
 /web/dist/
 # 前端产物由构建生成，不再入库（go:embed 目标，构建步骤见 README.md）
