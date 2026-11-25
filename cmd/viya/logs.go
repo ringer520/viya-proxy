@@ -128,7 +128,7 @@ func (a *App) streamLogs(w http.ResponseWriter, r *http.Request) {
 			offset = newOffset
 			for _, line := range lines {
 				var event map[string]any
-				if json.Unmarshal(line, &event) != nil {
+				if json.Unmarshal(line.data, &event) != nil {
 					continue
 				}
 				if caddyLogKind(event) != "access" {
@@ -136,7 +136,7 @@ func (a *App) streamLogs(w http.ResponseWriter, r *http.Request) {
 				}
 				sanitizeAccessEvent(event)
 				b, _ := json.Marshal(event)
-				if _, e = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", newOffset, b); e != nil {
+				if _, e = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", line.end, b); e != nil {
 					return
 				}
 				flusher.Flush()
@@ -202,7 +202,15 @@ func readRecentLogFileWhere(path string, limit int, keep func(map[string]any) bo
 	}
 	return ring, scanner.Err()
 }
-func readLogLines(path string, offset int64) ([][]byte, int64, error) {
+// logLine is one complete line plus the absolute file offset where it ends.
+// The SSE stream resumes from that offset, so a client that reconnects in the
+// middle of a batch re-reads only what it never received.
+type logLine struct {
+	data []byte
+	end  int64
+}
+
+func readLogLines(path string, offset int64) ([]logLine, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, offset, err
@@ -220,13 +228,13 @@ func readLogLines(path string, offset int64) ([][]byte, int64, error) {
 	}
 	const maxReadLogChunk = 2 << 20
 	reader := bufio.NewReader(f)
-	lines := [][]byte{}
+	lines := []logLine{}
 	consumed := int64(0)
 	for {
 		line, e := reader.ReadBytes('\n')
 		if e == nil {
-			lines = append(lines, line)
 			consumed += int64(len(line))
+			lines = append(lines, logLine{data: line, end: offset + consumed})
 			if consumed >= maxReadLogChunk {
 				break
 			}
@@ -311,7 +319,7 @@ func (a *App) watchAccessLogs() {
 			offset = next
 			changed := false
 			for _, line := range lines {
-				if a.observeAttack(line) {
+				if a.observeAttack(line.data) {
 					changed = true
 				}
 			}

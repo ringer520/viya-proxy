@@ -227,3 +227,25 @@ func TestDownloadStallTimeout(t *testing.T) {
 		t.Fatalf("expected stalled error, got: %v", err)
 	}
 }
+
+// Mirrors occasionally disagree (stale cache or an error page that still
+// parses). The checksum must come from a quorum, not from whichever mirror
+// answered first, otherwise one bad source blocks every download.
+func TestPickChecksumUsesMajorityVote(t *testing.T) {
+	good := strings.Repeat("a", 64)
+	bad := strings.Repeat("b", 64)
+	other := strings.Repeat("c", 64)
+
+	if got, n := pickChecksum(map[string]int{good: 3, bad: 1}); got != good || n != 3 {
+		t.Fatalf("majority vote = %q/%d, want %q/3", got, n, good)
+	}
+	if got, _ := pickChecksum(map[string]int{bad: 2, good: 2, other: 1}); got != good {
+		t.Fatalf("tie should break deterministically on the smaller value, got %q", got)
+	}
+	if got, _ := pickChecksum(map[string]int{bad: 1}); got != bad {
+		t.Fatalf("single mirror = %q, want %q", got, bad)
+	}
+	if got, n := pickChecksum(nil); got != "" || n != 0 {
+		t.Fatalf("empty votes = %q/%d", got, n)
+	}
+}

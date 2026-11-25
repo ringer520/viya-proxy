@@ -353,6 +353,18 @@ func probeSingleMirror(ctx context.Context, base, asset string) (string, time.Du
 	return sum, duration, true, nil
 }
 
+// pickChecksum returns the checksum the most mirrors agree on. Ties break on
+// the lexicographically smaller value so the result is deterministic.
+func pickChecksum(votes map[string]int) (string, int) {
+	best, bestCount := "", 0
+	for sum, count := range votes {
+		if count > bestCount || (count == bestCount && sum < best) {
+			best, bestCount = sum, count
+		}
+	}
+	return best, bestCount
+}
+
 func probeReleaseMirrors(bases []string, asset string, totalTimeout time.Duration) (orderedBases []string, wantSum string, gotValidFormat bool, err error) {
 	if len(bases) == 0 {
 		return nil, "", false, errors.New("无法下载校验文件")
@@ -385,6 +397,9 @@ func probeReleaseMirrors(bases []string, asset string, totalTimeout time.Duratio
 
 	var successes []mirrorProbeResult
 	seenSuccess := make(map[string]bool)
+	// Every mirror that answered contributes its published checksum; the
+	// winner is decided by majority below instead of by arrival order.
+	sumVotes := map[string]int{}
 	completed := 0
 	var graceTimer *time.Timer
 	var graceCh <-chan time.Time
@@ -397,8 +412,8 @@ func probeReleaseMirrors(bases []string, asset string, totalTimeout time.Duratio
 				gotValidFormat = true
 			}
 			if r.res.err == nil && r.res.sum != "" {
-				if wantSum == "" {
-					wantSum = r.res.sum
+				sumVotes[r.res.sum]++
+				if graceCh == nil {
 					// After the fastest mirror responds, wait a brief grace period (350ms)
 					// to collect other close contenders so we can rank them.
 					graceTimer = time.NewTimer(350 * time.Millisecond)
@@ -422,6 +437,19 @@ func probeReleaseMirrors(bases []string, asset string, totalTimeout time.Duratio
 			return nil, "", true, errors.New("校验文件中找不到当前架构的产物")
 		}
 		return nil, "", false, errors.New("无法下载校验文件")
+	}
+
+	// Mirrors can disagree (stale cache, or a captive-portal page that still
+	// parses as a checksum file). Trust the value most mirrors publish rather
+	// than whichever one answered first, so a single bad mirror cannot make
+	// every download fail verification.
+	if len(sumVotes) > 0 {
+		best, bestCount := pickChecksum(sumVotes)
+		if len(sumVotes) > 1 {
+			slog.Warn("self-update: mirrors published different checksums",
+				"distinct", len(sumVotes), "chosen", best, "agreeing", bestCount, "mirrors", len(successes))
+		}
+		wantSum = best
 	}
 
 	// Sort successes by duration ascending (fastest first)

@@ -105,4 +105,27 @@ eval 'exec /usr/bin/install '"$args"
         self.assertEqual(old,(self.root/'opt/viya/bin/viya').read_bytes())
         self.assertEqual(self.key,(self.root/'etc/viya/secrets/master.key').read_bytes())
 
+class InstallScriptMirrorTests(unittest.TestCase):
+    """Static checks on install.sh: they run on every platform."""
+
+    def setUp(self):
+        self.text = (ROOT / 'install.sh').read_text()
+
+    def test_gh_proxy_is_normalised_before_first_url_use(self):
+        # The sudo re-exec and the OpenWrt bootstrap prefix a full URL with
+        # GH_PROXY, so the trailing slash must be added before them.
+        normalise = self.text.index('GH_PROXY="${GH_PROXY}/"')
+        first_url = self.text.index('${GH_PROXY}https://raw.githubusercontent.com')
+        self.assertLess(normalise, first_url)
+
+    def test_download_fallback_unwraps_mirror_prefix(self):
+        # A URL that already points at a mirror must still fall back to the
+        # other mirrors, so the canonical GitHub address is extracted first.
+        self.assertIn('${url##*https://github.com/}', self.text)
+        self.assertIn('if [ "$mirror_url" = "$url" ]', self.text)
+
+    def test_openwrt_bootstrap_exports_proxy(self):
+        self.assertIn('export GH_PROXY', self.text)
+
+
 if __name__=='__main__':unittest.main()

@@ -10,6 +10,18 @@
 
 set -eu
 
+# Normalise GH_PROXY before any early branch reads it. The sudo re-exec and the
+# OpenWrt bootstrap both prefix a full URL with this value, so a missing
+# trailing slash turns the mirror into "https://ghproxy.nethttps://…" and the
+# bootstrap fetch fails.
+GH_PROXY="${GH_PROXY:-}"
+if [ -n "$GH_PROXY" ]; then
+  case "$GH_PROXY" in
+    */) ;;
+    *) GH_PROXY="${GH_PROXY}/" ;;
+  esac
+fi
+
 if [ "$(id -u)" -ne 0 ]; then
   if ! command -v sudo >/dev/null 2>&1; then
     echo "Error: this installer needs root privileges. Install sudo or run the command as root." >&2
@@ -31,9 +43,12 @@ fi
 if [ -r /etc/openwrt_release ]; then
   stage=$(mktemp -d /tmp/viya-bootstrap.XXXXXX)
   trap 'rm -rf "$stage"' EXIT
-  if command -v curl >/dev/null 2>&1; then curl -fL --retry 2 --connect-timeout 15 --max-time 120 "${GH_PROXY:-}https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh" -o "$stage/install.sh"
-  elif command -v wget >/dev/null 2>&1; then wget -O "$stage/install.sh" "${GH_PROXY:-}https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh"
+  if command -v curl >/dev/null 2>&1; then curl -fL --retry 2 --connect-timeout 15 --max-time 120 "${GH_PROXY}https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh" -o "$stage/install.sh"
+  elif command -v wget >/dev/null 2>&1; then wget -O "$stage/install.sh" "${GH_PROXY}https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh"
   else echo 'Install curl or wget first.' >&2; exit 1; fi
+  # The OpenWrt installer resolves the release through the same prefix; it only
+  # sees exported values.
+  export GH_PROXY
   sh "$stage/install.sh"
   exit $?
 fi
@@ -117,24 +132,37 @@ download() {
     exit 1
   fi
 
-  # Fallback: if direct GitHub download failed (e.g. connection reset or empty reply), retry with mirrors
+  # Fallback: if the chosen route failed (connection reset, empty reply, or a
+  # dead mirror), retry the other mirrors. The URL may already carry a mirror
+  # prefix, so reduce it to the canonical GitHub address first and skip the
+  # mirror that just failed.
+  raw_url=""
   case "$url" in
     https://github.com/*)
-      for mirror in "https://ghproxy.net/" "https://gh-proxy.com/"; do
-        mirror_url="${mirror}${url}"
-        echo "==> Download failed. Retrying via mirror: ${mirror_url}"
-        if command -v curl >/dev/null 2>&1; then
-          if curl -fL --retry 2 --connect-timeout 15 --max-time 600 --progress-bar "$mirror_url" -o "$dest"; then
-            return 0
-          fi
-        elif command -v wget >/dev/null 2>&1; then
-          if wget "$mirror_url" -O "$dest"; then
-            return 0
-          fi
-        fi
-      done
+      raw_url="$url"
+      ;;
+    *https://github.com/*)
+      raw_url="https://github.com/${url##*https://github.com/}"
       ;;
   esac
+  if [ -n "$raw_url" ]; then
+    for mirror in "https://ghproxy.net/" "https://gh-proxy.com/"; do
+      mirror_url="${mirror}${raw_url}"
+      if [ "$mirror_url" = "$url" ]; then
+        continue
+      fi
+      echo "==> Download failed. Retrying via mirror: ${mirror_url}"
+      if command -v curl >/dev/null 2>&1; then
+        if curl -fL --retry 2 --connect-timeout 15 --max-time 600 --progress-bar "$mirror_url" -o "$dest"; then
+          return 0
+        fi
+      elif command -v wget >/dev/null 2>&1; then
+        if wget "$mirror_url" -O "$dest"; then
+          return 0
+        fi
+      fi
+    done
+  fi
 
   echo "Error: failed to download $url" >&2
   exit 1

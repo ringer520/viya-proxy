@@ -101,7 +101,7 @@ func TestReadLogLinesLeavesPartialLineForNextRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lines) != 1 || string(lines[0]) != "{\"a\":1}\n" || offset != int64(len("{\"a\":1}\n")) {
+	if len(lines) != 1 || string(lines[0].data) != "{\"a\":1}\n" || offset != int64(len("{\"a\":1}\n")) {
 		t.Fatalf("lines=%d offset=%d", len(lines), offset)
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
@@ -116,7 +116,7 @@ func TestReadLogLinesLeavesPartialLineForNextRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lines) != 1 || string(lines[0]) != "{\"b\":2}\n" || offset != int64(len("{\"a\":1}\n{\"b\":2}\n")) {
+	if len(lines) != 1 || string(lines[0].data) != "{\"b\":2}\n" || offset != int64(len("{\"a\":1}\n{\"b\":2}\n")) {
 		t.Fatalf("lines=%v offset=%d", lines, offset)
 	}
 }
