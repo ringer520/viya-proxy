@@ -55,21 +55,24 @@ cleanup(){
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
-# One attempt. $3=1 marks the release archive, which gets the low-speed circuit
-# breaker: abort once the transfer stays below 30 KB/s for 20 seconds instead of
-# waiting out the whole --max-time on a crawling link.
+# One attempt. $3 picks the timeout policy: fast (small files), big (release
+# archive with the low-speed circuit breaker: abort once the transfer stays below
+# 30 KB/s for 20 seconds), slow (last resort, no speed guard).
 download_once(){
- url=$1;dest=$2;big=${3:-0}
+ url=$1;dest=$2;mode=${3:-fast}
  if command -v curl >/dev/null 2>&1;then
-  if [ "$big" -eq 1 ];then curl -fL --retry 2 --connect-timeout 15 --max-time 900 --speed-limit 30720 --speed-time 20 --progress-bar "$url" -o "$dest"
-  else curl -fL --retry 2 --connect-timeout 15 --max-time 120 --progress-bar "$url" -o "$dest";fi
+  case "$mode" in
+   big) curl -fL --retry 2 --connect-timeout 15 --max-time 900 --speed-limit 30720 --speed-time 20 --progress-bar "$url" -o "$dest";;
+   slow) curl -fL --retry 2 --connect-timeout 15 --max-time 1800 --progress-bar "$url" -o "$dest";;
+   *) curl -fL --retry 2 --connect-timeout 15 --max-time 120 --progress-bar "$url" -o "$dest";;
+  esac
  elif command -v wget >/dev/null 2>&1;then
-  wget -T 20 -O "$dest" "$url"
+  if [ "$mode" = slow ];then wget -T 60 -O "$dest" "$url";else wget -T 20 -O "$dest" "$url";fi
  else echo 'Install curl or wget first.' >&2;exit 1;fi
 }
 download(){
- url=$1;dest=$2;big=${3:-0}
- download_once "$url" "$dest" "$big" && return 0
+ url=$1;dest=$2;mode=${3:-fast}
+ download_once "$url" "$dest" "$mode" && return 0
  raw=''
  case "$url" in
   https://github.com/*) raw="$url";;
@@ -80,16 +83,21 @@ download(){
   mirror_url="${mirror}${raw}"
   [ "$mirror_url" = "$url" ] && continue
   echo "==> Download failed. Retrying via mirror: ${mirror_url}"
-  download_once "$mirror_url" "$dest" "$big" && return 0
+  download_once "$mirror_url" "$dest" "$mode" && return 0
  done
+ # Slow but working link: retry the original URL with the guard removed.
+ if [ "$mode" = big ];then
+  echo "==> Every mirror was too slow; retrying $url without the speed guard"
+  download_once "$url" "$dest" slow && return 0
+ fi
  return 1
 }
 PKG=viya-linux-$ARCH
 DOWNLOAD_FREE=$(df -Pk "$STAGE" | awk 'END{print $4}')
 [ "$DOWNLOAD_FREE" -ge 131072 ] || { echo 'At least 128 MiB free in /tmp is required for download and extraction.' >&2;exit 1; }
 echo "==> Downloading $PKG"
-download "$BASE/$PKG.tar.gz" "$STAGE/$PKG.tar.gz" 1 || { echo 'Release archive download failed on every mirror.' >&2;exit 1; }
-download "$BASE/sha256sums.txt" "$STAGE/sha256sums.txt" 0 || { echo 'Checksum download failed on every mirror.' >&2;exit 1; }
+download "$BASE/$PKG.tar.gz" "$STAGE/$PKG.tar.gz" big || { echo 'Release archive download failed on every mirror.' >&2;exit 1; }
+download "$BASE/sha256sums.txt" "$STAGE/sha256sums.txt" fast || { echo 'Checksum download failed on every mirror.' >&2;exit 1; }
 EXPECTED=$(awk -v f="$PKG.tar.gz" '$2==f{print $1;exit}' "$STAGE/sha256sums.txt")
 [ "${#EXPECTED}" -eq 64 ] || { echo 'Release checksum missing.' >&2;exit 1; }
 ACTUAL=$(sha256sum "$STAGE/$PKG.tar.gz" | awk '{print $1}')

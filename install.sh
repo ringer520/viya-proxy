@@ -57,27 +57,40 @@ probe_mirror() {
   return 0
 }
 
-# One download attempt. "$3" is 1 for the release archive, which gets the
-# low-speed circuit breaker; the checksum file is a few hundred bytes and would
-# trip that guard for no reason.
+# One download attempt. "$3" picks the timeout policy:
+#   fast  small files (checksums, bootstrap script)
+#   big   release archive: low-speed circuit breaker
+#   slow  last resort: no speed guard and a generous ceiling, so a working but
+#         slow link still finishes instead of failing the install
 download_once() {
   url="$1"
   dest="$2"
-  big="${3:-0}"
+  mode="${3:-fast}"
   if command -v curl >/dev/null 2>&1; then
-    if [ "$big" -eq 1 ]; then
-      # Abort as soon as the transfer drops below 30 KB/s for 20 seconds: the
-      # old --max-time 600 alone let a 25 MB archive crawl for ten minutes
-      # before the mirror fallback ever ran.
-      curl -fL --retry 1 --connect-timeout 10 --max-time 600 \
-        --speed-limit 30720 --speed-time 20 --progress-bar "$url" -o "$dest"
-    else
-      curl -fL --retry 1 --connect-timeout 10 --max-time 120 --progress-bar "$url" -o "$dest"
-    fi
+    case "$mode" in
+      big)
+        # Abort once the transfer stays below 30 KB/s for 20 seconds: the old
+        # --max-time 600 alone let a 25 MB archive crawl for ten minutes before
+        # the mirror fallback ever ran.
+        curl -fL --retry 1 --connect-timeout 10 --max-time 600 \
+          --speed-limit 30720 --speed-time 20 --progress-bar "$url" -o "$dest"
+        ;;
+      slow)
+        curl -fL --retry 1 --connect-timeout 15 --max-time 1800 --progress-bar "$url" -o "$dest"
+        ;;
+      *)
+        curl -fL --retry 1 --connect-timeout 10 --max-time 120 --progress-bar "$url" -o "$dest"
+        ;;
+    esac
   elif command -v wget >/dev/null 2>&1; then
     # -T bounds a stalled read on both GNU and busybox wget; --tries differs
-    # between the two, so leave retries to the mirror loop below.
-    wget -T 20 "$url" -O "$dest"
+    # between the two, so leave retries to the mirror loop below. wget has no
+    # byte-rate guard, which is why the slow mode also raises its timeout.
+    if [ "$mode" = slow ]; then
+      wget -T 60 "$url" -O "$dest"
+    else
+      wget -T 20 "$url" -O "$dest"
+    fi
   else
     echo "Error: neither curl nor wget is available. Install one and retry." >&2
     exit 1
@@ -90,8 +103,8 @@ download_once() {
 download() {
   url="$1"
   dest="$2"
-  big="${3:-0}"
-  if download_once "$url" "$dest" "$big"; then
+  mode="${3:-fast}"
+  if download_once "$url" "$dest" "$mode"; then
     return 0
   fi
 
@@ -114,10 +127,20 @@ download() {
         continue
       fi
       echo "==> Download failed. Retrying via mirror: ${mirror_url}"
-      if download_once "$mirror_url" "$dest" "$big"; then
+      if download_once "$mirror_url" "$dest" "$mode"; then
         return 0
       fi
     done
+  fi
+
+  # Nothing answered at a usable speed. Retry the original URL with the speed
+  # guard removed and a much longer ceiling: a genuinely slow line must still be
+  # able to install, which the old --max-time 600 download allowed.
+  if [ "$mode" = big ]; then
+    echo "==> Every mirror was too slow; retrying $url without the speed guard"
+    if download_once "$url" "$dest" slow; then
+      return 0
+    fi
   fi
 
   echo "Error: failed to download $url" >&2
@@ -146,14 +169,13 @@ if [ "$(uname -s)" != "Linux" ]; then
   exit 1
 fi
 
-probe_mirror
-
 # OpenWrt uses procd and its persistent-storage installer.
 if [ -r /etc/openwrt_release ]; then
+  probe_mirror
   stage=$(mktemp -d /tmp/viya-bootstrap.XXXXXX)
   trap 'rm -rf "$stage"' EXIT
   export GH_PROXY
-  download "${GH_PROXY}https://raw.githubusercontent.com/${REPO}/main/deploy/install-openwrt.sh" "$stage/install.sh" 0
+  download "${GH_PROXY}https://raw.githubusercontent.com/${REPO}/main/deploy/install-openwrt.sh" "$stage/install.sh" fast
   sh "$stage/install.sh"
   exit $?
 fi
@@ -165,6 +187,10 @@ if [ ! -d /run/systemd/system ] || ! command -v systemctl >/dev/null 2>&1 || ! s
   echo "For OpenWrt / procd, follow the manual install steps in the README." >&2
   exit 1
 fi
+
+# Probing takes up to a few seconds per mirror, so it only runs once the host is
+# known to be a supported systemd machine (or the OpenWrt branch above).
+probe_mirror
 
 # Detect the CPU architecture and pick the matching prebuilt release.
 case "$(uname -m)" in
@@ -254,8 +280,8 @@ TASK_TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TASK_TMPDIR"' EXIT
 
 echo "==> Downloading Viya from ${BASE_URL}"
-download "$BASE_URL" "$TASK_TMPDIR/$TARBALL" 1
-download "$CHECKSUM_URL" "$TASK_TMPDIR/sha256sums.txt" 0
+download "$BASE_URL" "$TASK_TMPDIR/$TARBALL" big
+download "$CHECKSUM_URL" "$TASK_TMPDIR/sha256sums.txt" fast
 
 EXPECTED=$(awk -v file="$TARBALL" '$2 == file { print $1; exit }' "$TASK_TMPDIR/sha256sums.txt")
 if [ "${#EXPECTED}" -ne 64 ]; then
