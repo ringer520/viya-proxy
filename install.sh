@@ -98,6 +98,53 @@ download_once() {
   fi
 }
 
+# Sample ~512 KiB from a candidate and print its speed in bytes per second.
+# A HEAD request only proves reachability; mirrors routinely differ by 10x in
+# throughput, so the fixed order in MIRRORS can pick a working-but-slow route.
+sample_speed() {
+  url="$1"
+  # --max-filesize makes a server that ignores Range fail immediately instead of
+  # streaming the whole 27 MB archive into /dev/null just to time it. Throughput
+  # is computed from the transfer window only: on a 512 KiB sample, TLS and
+  # time-to-first-byte would otherwise dominate and flatten every fast mirror
+  # into the same few hundred KB/s.
+  metrics=$(curl -s -o /dev/null -r 0-524287 -m 6 --max-filesize 1048576 \
+    -w '%{size_download} %{time_total} %{time_starttransfer}' "$url" 2>/dev/null || true)
+  # shellcheck disable=SC2086
+  set -- $metrics
+  awk -v size="${1:-0}" -v total="${2:-0}" -v ttfb="${3:-0}" 'BEGIN {
+    if (size <= 0) { print 0; exit }
+    window = total - ttfb
+    if (window < 0.05) window = 0.05
+    printf "%.0f\n", size / window
+  }'
+}
+
+# Print the candidates fastest-first, keeping failures at the end so the caller
+# still tries them. Falls back to the plain URL when curl is unavailable or the
+# sampling produced nothing usable.
+rank_download_routes() {
+  url="$1"
+  if ! command -v curl >/dev/null 2>&1; then
+    printf '%s\n' "$url"
+    return 0
+  fi
+  ranked=$(
+    {
+      printf '%s\n' "$url"
+      for mirror in $MIRRORS; do printf '%s\n' "${mirror}${url}"; done
+      [ -z "${GH_PROXY:-}" ] || printf '%s\n' "${GH_PROXY}${url}"
+    } | awk '!seen[$0]++' | while IFS= read -r candidate; do
+      printf '%s %s\n' "$(sample_speed "$candidate")" "$candidate"
+    done | sort -k1,1 -rn | awk '{ sub(/^[^ ]+ /, ""); print }'
+  )
+  if [ -n "$ranked" ]; then
+    printf '%s\n' "$ranked"
+  else
+    printf '%s\n' "$url"
+  fi
+}
+
 # Try the chosen route first, then every other mirror. The URL may already
 # carry a mirror prefix, so reduce it to the canonical GitHub address and skip
 # the mirror that just failed.
@@ -105,6 +152,27 @@ download() {
   url="$1"
   dest="$2"
   mode="${3:-fast}"
+  if [ "$mode" = big ]; then
+    # Large files are worth ranking first: sampling costs a couple of megabytes
+    # but avoids spending minutes on a route that only just clears the guard.
+    ranked=$(rank_download_routes "$url")
+    while IFS= read -r candidate; do
+      [ -n "$candidate" ] || continue
+      [ "$candidate" = "$url" ] || echo "==> Trying ranked route: $candidate"
+      if download_once "$candidate" "$dest" "$mode"; then
+        return 0
+      fi
+    done <<EOF
+$ranked
+EOF
+    echo "==> No ranked route completed; retrying $url without the speed guard."
+    echo "    This can take several minutes on a slow link; progress is shown below."
+    if download_once "$url" "$dest" slow; then
+      return 0
+    fi
+    echo "Error: failed to download $url" >&2
+    exit 1
+  fi
   if download_once "$url" "$dest" "$mode"; then
     return 0
   fi

@@ -145,7 +145,7 @@ curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-
 curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://gh-proxy.com/ sh
 ```
 
-The installer verifies the release SHA-256, creates a systemd service and enables it at boot. It needs `curl` or `wget`, `tar`, `python3` (3.6+) and system CA certificates, and will try to install missing dependencies with the system package manager. Downloads fall back to a mirror automatically; the release archive switches source as soon as the average drops below 120 KB/s over 15 seconds, and only falls back to an unthrottled long download when every route is that slow. Running it as a normal user works too: it re-runs itself through `sudo`.
+The installer verifies the release SHA-256, creates a systemd service and enables it at boot. It needs `curl` or `wget`, `tar`, `python3` (3.6+) and system CA certificates, and will try to install missing dependencies with the system package manager. Downloads fall back to a mirror automatically; before fetching the release archive the installer samples 512 KiB from every route, orders them by measured throughput, switches source as soon as the average drops below 120 KB/s over 15 seconds, and only falls back to an unthrottled long download when every route is that slow. Running it as a normal user works too: it re-runs itself through `sudo`.
 
 <details>
 <summary>Port conflicts, firewall and pinning a version</summary>

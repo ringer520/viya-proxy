@@ -145,7 +145,7 @@ curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-
 curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://gh-proxy.com/ sh
 ```
 
-安装会校验 Release 包的 SHA-256、创建 systemd 服务并设置开机自启。需要 `curl` 或 `wget`、`tar`、`python3`（3.6+）与系统 CA 证书，安装器会尝试用系统包管理器补齐；缺少时会自动切换到可用镜像；下载 Release 包时若 15 秒内平均速度低于 120 KB/s 会立即换源，所有路径都慢时才退回不限速的长时间下载。普通用户可执行同一命令，安装器会通过 `sudo` 重新运行。
+安装会校验 Release 包的 SHA-256、创建 systemd 服务并设置开机自启。需要 `curl` 或 `wget`、`tar`、`python3`（3.6+）与系统 CA 证书，安装器会尝试用系统包管理器补齐；缺少时会自动切换到可用镜像；下载 Release 包前会先各取 512 KiB 实测速度、按快慢排序选源，若 15 秒内平均速度仍低于 120 KB/s 会立即换下一个源，只有所有路径都这么慢时才退回不限速的长时间下载。普通用户可执行同一命令，安装器会通过 `sudo` 重新运行。
 
 <details>
 <summary>端口冲突、防火墙与版本固定</summary>
