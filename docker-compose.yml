@@ -1,0 +1,26 @@
+# Minimal self-hosted deployment for Viya. This mirrors the YAML shown in the
+# README's Docker section:
+#
+#   sudo mkdir -p /opt/viya/data && cd /opt/viya
+#   curl -fsSLO https://raw.githubusercontent.com/ringer520/viya-proxy/main/docker-compose.yml
+#   docker compose up -d
+#
+# Everything the panel manages (database, site files, certificates, master key)
+# lives under /opt/viya/data, so `docker compose down` keeps your data and only
+# `docker compose down -v` discards it. Ports 80/443 are published because
+# managed sites have to be reachable from the internet; 8181 is the panel.
+services:
+  viya:
+    image: ringer520/viya-proxy:latest
+    container_name: viya
+    restart: unless-stopped
+    environment:
+      # Bind inside the container only; publish the port from the ports section.
+      VIYA_LISTEN: 0.0.0.0:8181
+    ports:
+      - "8181:8181"       # panel
+      - "80:80"           # HTTP sites and HTTP-01 validation
+      - "443:443"         # HTTPS sites
+      - "443:443/udp"     # HTTP/3 (optional)
+    volumes:
+      - /opt/viya/data:/var/lib/viya

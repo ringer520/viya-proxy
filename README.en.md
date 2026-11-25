@@ -145,7 +145,7 @@ curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-
 curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://gh-proxy.com/ sh
 ```
 
-The installer verifies the release SHA-256, creates a systemd service and enables it at boot. It needs `curl` or `wget`, `tar`, `python3` and system CA certificates, and will try to install missing dependencies with the system package manager. Running it as a normal user works too: it re-runs itself through `sudo`.
+The installer verifies the release SHA-256, creates a systemd service and enables it at boot. It needs `curl` or `wget`, `tar`, `python3` (3.6+) and system CA certificates, and will try to install missing dependencies with the system package manager. Downloads fall back to a mirror automatically and abort a stalled transfer once it stays below 30 KB/s. Running it as a normal user works too: it re-runs itself through `sudo`.
 
 <details>
 <summary>Port conflicts, firewall and pinning a version</summary>
@@ -161,7 +161,7 @@ With a host firewall enabled, allow the panel TCP port from your LAN as well as 
 Pin a release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.7.1 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.7.2 sh
 ```
 
 Environment variables must stay on the right side of the pipe.
@@ -195,7 +195,7 @@ If a second listener belongs to a different PID, stop that process with `sudo ki
 
 ### Docker
 
-The database, certificates, site files, Caddy data, logs and master key all live in `/var/lib/viya` inside the container, so map a single host directory.
+The database, certificates, site files, Caddy data, logs and master key all live in `/var/lib/viya` inside the container, so map a single host directory. The repository ships the same configuration as [`docker-compose.yml`](docker-compose.yml), ready for `docker compose up -d`.
 
 ```sh
 sudo mkdir -p /opt/viya/data && cd /opt/viya
@@ -261,7 +261,7 @@ Pin a version and port:
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.7.1 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.7.2 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 Requires `curl` or `wget`, `tar`, `sha256sum`, `netstat`, UCI and HTTPS CA certificates (`ca-bundle` on opkg systems, `ca-certificates` on apk systems). `/opt` must be persistent or an attached external volume, and downloads need roughly 128 MiB free in `/tmp`. The installer never opens WAN ports on its own. On low-memory routers, prefer external storage or a separate Linux host.
@@ -316,7 +316,7 @@ wget -qO- https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh
 
 ## Backups and restore
 
-The backup tools live in `/opt/viya/scripts/` and need Python 3.11 or newer.
+The backup tools live in `/opt/viya/scripts/` and need Python 3.6 or newer (standard library only). Installers keep the three newest installer snapshots (`/var/backups/viya/installer-*`, or `/opt/viya/backups/install-*` on OpenWrt) and prune the rest.
 
 ```sh
 sh /opt/viya/scripts/backup-linux.sh

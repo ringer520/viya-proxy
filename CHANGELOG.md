@@ -6,6 +6,18 @@
 
 暂无。
 
+## v0.7.2
+
+[完整说明](docs/releases/v0.7.2.md) — 导入配置不再清空流量统计、`automatic_https.skip` 按监听器计算、外部文件根统一只读；SSE 日志流改为按行续传，自更新校验和改为多镜像多数投票；安装脚本兼容 Python 3.6，镜像探测前移到 OpenWrt 分支之前并补齐多镜像回退与 30 KB/s 低速熔断，安装器备份只保留最近 3 份；Docker 镜像补充 `HEALTHCHECK` 并新增 `docker-compose.yml`。
+
+## v0.7.1
+
+[完整说明](docs/releases/v0.7.1.md) — 网页端自更新改为并发测速优选镜像、低速主动熔断与停滞超时，解决直连 GitHub 受限环境升级缓慢或卡死。无 schema 变更。
+
+## v0.7.0
+
+[完整说明](docs/releases/v0.7.0.md) — 全链路稳定性、安全性与界面交互修复，精简冗余逻辑，Web 服务与四层转发日志统一为点击弹窗查看。无 schema 变更。
+
 ## v0.6.10
 
 [完整说明](docs/releases/v0.6.10.md) — 反向代理站点支持自定义上游 `Host` 请求头（`upstream_host`）与 HTTPS 上游 TLS 证书域名 SNI（`upstream_tls_server_name`），解决 Cockpit WebSocket 等上游 Host/SNI 校验问题（#2）；优化 `install.sh` 国内镜像下载回退。启动自动补列，无破坏性迁移。

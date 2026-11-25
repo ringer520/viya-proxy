@@ -70,4 +70,10 @@ WORKDIR /var/lib/viya
 VOLUME ["/var/lib/viya"]
 EXPOSE 8181 80 443 443/udp
 
+# The runtime image has no curl, but busybox wget is present. The port is taken
+# from VIYA_LISTEN at run time, so a custom listen address still probes the
+# right endpoint; the shell (not the builder) expands the parameter.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -q -O /dev/null "http://127.0.0.1:${VIYA_LISTEN##*:}/api/v1/health" || exit 1
+
 ENTRYPOINT ["/opt/viya/bin/viya"]

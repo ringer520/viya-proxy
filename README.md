@@ -145,7 +145,7 @@ curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-
 curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | GH_PROXY=https://gh-proxy.com/ sh
 ```
 
-安装会校验 Release 包的 SHA-256、创建 systemd 服务并设置开机自启。需要 `curl` 或 `wget`、`tar`、`python3` 与系统 CA 证书，安装器会尝试用系统包管理器补齐。普通用户可执行同一命令，安装器会通过 `sudo` 重新运行。
+安装会校验 Release 包的 SHA-256、创建 systemd 服务并设置开机自启。需要 `curl` 或 `wget`、`tar`、`python3`（3.6+）与系统 CA 证书，安装器会尝试用系统包管理器补齐；缺少时会自动切换到可用镜像，并在速度持续低于 30 KB/s 时主动断开重试。普通用户可执行同一命令，安装器会通过 `sudo` 重新运行。
 
 <details>
 <summary>端口冲突、防火墙与版本固定</summary>
@@ -161,7 +161,7 @@ curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.s
 固定版本安装：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.7.1 sh
+curl -fsSL https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh | VERSION=v0.7.2 sh
 ```
 
 环境变量必须放在管道右侧。
@@ -195,7 +195,7 @@ sudo journalctl -u viya.service | grep 'Viya API listening'   # 启动日志含 
 
 ### Docker
 
-数据库、证书、网站文件、Caddy 数据、日志与主密钥统一放在容器内 `/var/lib/viya`，建议只映射一个宿主机目录。
+数据库、证书、网站文件、Caddy 数据、日志与主密钥统一放在容器内 `/var/lib/viya`，建议只映射一个宿主机目录。仓库根目录的 [`docker-compose.yml`](docker-compose.yml) 就是下面这份配置，也可以直接下载后 `docker compose up -d`。
 
 ```sh
 sudo mkdir -p /opt/viya/data && cd /opt/viya
@@ -267,7 +267,7 @@ uci commit uhttpd && /etc/init.d/uhttpd restart
 
 ```sh
 wget -O /tmp/viya-install.sh https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh
-VERSION=v0.7.1 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
+VERSION=v0.7.2 VIYA_INSTALL_PORT=8181 sh /tmp/viya-install.sh
 ```
 
 需要 `curl` 或 `wget`、`tar`、`sha256sum`、`netstat`、UCI 与 HTTPS CA 证书（opkg 系安装 `ca-bundle`，apk 系安装 `ca-certificates`）。`/opt` 必须是持久化目录或已挂载的外部存储，下载解压还需 `/tmp` 约 128 MiB 可用空间。安装器不会自动开放 WAN 端口。小内存路由器建议挂外部存储或改用独立 Linux 主机。
@@ -322,7 +322,7 @@ wget -qO- https://ghproxy.net/https://raw.githubusercontent.com/ringer520/viya-p
 
 ## 备份与恢复
 
-备份工具位于 `/opt/viya/scripts/`，需要 Python 3.11 或更新版本。
+备份工具位于 `/opt/viya/scripts/`，需要 Python 3.6 或更新版本（只用标准库，无需额外依赖）。安装与升级脚本会自动保留最近 3 份安装器备份（`/var/backups/viya/installer-*`、OpenWrt 为 `/opt/viya/backups/install-*`），更早的会自动清理。
 
 ```sh
 sh /opt/viya/scripts/backup-linux.sh
