@@ -2,6 +2,7 @@
 // module singleton so page components can read them without prop-drilling.
 import { ref } from "vue";
 import type { Palette, ThemeChoice } from "../types";
+import { ensureAnimeTheme } from "./useAnimeTheme"
 
 export const paletteChoices: Palette[] = [
   "light",
@@ -66,6 +67,7 @@ export function applyPanelSettings() {
   // new token layer, so every palette is a real theme instead of a tint.
   root.dataset.theme = LIGHT_PALETTES.has(palette) ? "light" : "dark";
   root.dataset.palette = palette;
+  ensureAnimeTheme(palette);
   root.dataset.density = compactMode.value ? "compact" : "comfortable";
   root.dataset.copy = simpleDisplay.value ? "compact" : "full";
   const values: Record<string, string> = {

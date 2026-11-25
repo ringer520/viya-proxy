@@ -6,7 +6,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { Cpu, MemoryStick, HardDrive, RefreshCw, Activity } from '@lucide/vue'
 
-const props = defineProps<{ autoRefresh: boolean; compact?: boolean }>()
+const props = defineProps<{ autoRefresh: boolean; compact?: boolean; intervalSeconds?: number }>()
 type Usage = { percent: number; used: number; total: number; path?: string }
 type HostInfo = { hostname?: string; platform?: string; platform_version?: string; kernel?: string; arch?: string }
 type Metrics = { cpu_percent?: number; cores: number; platform: string; host?: HostInfo; uptime?: number; memory?: Usage; disk?: Usage; sampled_at: number; errors: string[] }
@@ -133,7 +133,7 @@ onMounted(() => {
   void load()
   timer = setInterval(() => {
     if (props.autoRefresh) void load()
-  }, 5000)
+  }, Math.max(5, props.intervalSeconds ?? 5) * 1000)
 })
 onBeforeUnmount(() => clearInterval(timer))
 </script>

@@ -28,7 +28,7 @@ html[data-palette="sakura"] {
   --danger: #b93855;
   --shadow-card: 0 5px 25px -14px #6c3d6738, inset 0 1px 0 #ffffffa8;
   --shadow-float: 0 22px 65px -20px #4b274a66;
-  --scene-image: url("/themes/sakura.webp");
+  --scene-image: url("./assets/themes/sakura.webp");
   --scene-glass: #fff9fcd9;
   --scene-veil: #f3e7ef24;
   --scene-scrim: #f7edf25e;
@@ -63,7 +63,7 @@ html[data-palette="neon"] {
   --danger: #f39cb3;
   --shadow-card: 0 10px 35px -22px #0009, inset 0 1px 0 #85e8ff0a;
   --shadow-float: 0 22px 65px -15px #000b;
-  --scene-image: url("/themes/neon.webp");
+  --scene-image: url("./assets/themes/neon.webp");
   --scene-glass: #0f1b2fd6;
   --scene-veil: #060c2310;
   --scene-scrim: #080f2338;
@@ -98,7 +98,7 @@ html[data-palette="lunar"] {
   --danger: #f1a0b1;
   --shadow-card: 0 10px 35px -22px #0009, inset 0 1px 0 #e4d3a80e;
   --shadow-float: 0 22px 65px -15px #000b;
-  --scene-image: url("/themes/lunar.webp");
+  --scene-image: url("./assets/themes/lunar.webp");
   --scene-glass: #151d35d6;
   --scene-veil: #10132d10;
   --scene-scrim: #10152c38;

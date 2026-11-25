@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vite build",
+    "build": "vite build && node scripts/precompress.mjs",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint .",

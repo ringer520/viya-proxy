@@ -9,7 +9,7 @@ import TrafficTrend from './TrafficTrend.vue'
 import { hosts, l4Rules, ddnsRecords, certExpiring, upstreamHealth, online } from '../composables/useState'
 import { webHosts } from '../composables/useHosts'
 import { trafficLoadedRange, trafficRange, trafficTrend, trafficTotals, trafficWebTotals, trafficForwardTotals, trafficTrendSpan, trafficLifetimeTotals, trafficRanking, trafficError } from '../composables/useTraffic'
-import { autoRefresh, pauseHidden, documentHidden, trafficCharts } from '../composables/usePreferences'
+import { autoRefresh, pauseHidden, documentHidden, trafficCharts, refreshInterval } from '../composables/usePreferences'
 import { openSiteDetails } from '../composables/useSiteWorkspace'
 import { formatBytes } from '../format'
 import { reducedMotion } from '../composables/useMotion'
@@ -54,7 +54,7 @@ const events = computed(() => [
       <a v-for="item in counts" :key="item.href" :href="item.href" class="mission-count" :style="{'--signal':item.color}"><span class="count-symbol"><component :is="item.icon" :size="18"/></span><div><span>{{item.label}}</span><strong><AnimatedMetric :value="item.count"/></strong><small>{{item.detail}}</small></div><ArrowUpRight class="count-jump" :size="14"/></a>
       <button type="button" @click="showAttention" class="mission-count" :class="{warning:alerts.length}" :style="{'--signal':alerts.length?'#fb7185':'#34d399'}"><span class="count-symbol"><CircleAlert v-if="alerts.length" :size="18"/><ShieldCheck v-else :size="18"/></span><div><span>{{t('待处理异常')}}</span><strong><AnimatedMetric :value="alerts.length"/></strong><small>{{t('点击查看详情')}}</small></div></button>
     </div>
-    <SystemGauges compact :auto-refresh="activeSampling"/>
+    <SystemGauges compact :auto-refresh="activeSampling" :interval-seconds="refreshInterval"/>
     <div class="mission-grid">
       <section class="mission-card mission-traffic" :class="{'range-loading':!rangeReady}" :aria-busy="!rangeReady && !trafficError">
         <header class="mission-card-head"><div><span v-if="showKicker" class="mission-kicker">NETWORK ACTIVITY</span><h2>{{t('流量分析')}}</h2></div><div class="mission-periods" role="group" :aria-label="t('统计周期')"><button v-for="period in periods" :key="period.id" :class="{selected:trafficRange===period.id}" :aria-pressed="trafficRange===period.id" @click="trafficRange=period.id">{{period.label}}</button></div></header>

@@ -30,7 +30,6 @@ import './forward-list.css'
 import './security-policy.css'
 import './settings-panel.css'
 import './operations.css'
-import './anime-themes.css'
 import './traffic-display.css'
 
 createApp(App).directive('dialog', dialog).mount('#app')

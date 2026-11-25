@@ -1,9 +1,17 @@
-import en from './locales/en.json'
+// The English catalogue is ~140 KB. Chinese users never need it, so it lives in
+// a separate chunk that is only fetched for English sessions (top-level await below).
+let enCatalog: Record<string, string> | null = null
 export type Language = 'zh-CN' | 'en'
 const saved=localStorage.getItem('viya-language')
 export const language:Language=saved==='en'||(!saved&&!navigator.language.toLowerCase().startsWith('zh'))?'en':'zh-CN'
 document.documentElement.lang=language
 export function setLanguage(next:Language){if(next===language)return;localStorage.setItem('viya-language',next);window.location.reload()}
+// Await the catalogue at module evaluation: callers build navigation labels and
+// tab names at module scope, so t() must have the strings before they run.
+// The import is a separate chunk; Chinese sessions never fetch it.
+if(language==='en'){
+  enCatalog=(await import('./locales/en.json')).default as Record<string,string>
+}
 
 // Network failures surface as a bare "Failed to fetch" TypeError message; map
 // the common variants to a friendly, actionable prompt instead of leaking the
@@ -22,7 +30,7 @@ const friendlyErrorsEn: Record<string, string> = {
 }
 export function t(text:string|undefined|null):string {
   if(!text)return "";
-  if(language==='en')return (en as Record<string,string>)[text]??friendlyErrorsEn[text]??text;
+  if(language==='en')return enCatalog?.[text]??friendlyErrorsEn[text]??text;
   return friendlyErrors[text]??text;
 }
 

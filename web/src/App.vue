@@ -61,7 +61,7 @@ import {
 import { authenticated, csrfToken, authChecked, setupRequired, panelUsername, panelRole, readOnly, error, saving, applyRetryVisible, online, refreshing, resolveDelete, listSearch, statusFilter, hosts, providers, l4Rules, ddnsRecords, certificates, certExpiring, ipBans, upstreamHealth, networkInterfaces } from "./composables/useState";
 import { loadSection, resetLoadedScopes } from "./composables/useRefresh";
 import { retryApply } from "./composables/useApply";
-import { resetTrafficState, trafficRange, refreshTraffic } from "./composables/useTraffic";
+import { resetTrafficState, refreshTraffic } from "./composables/useTraffic";
 import {
   managedCertificates,
   openManagedCert,
@@ -326,10 +326,14 @@ const authError = ref("");
 
 async function initializeAuth() {
   try {
+    // Start /auth/me at the same time as /auth/status: in the normal case the
+    // session cookie is valid and we save one RTT before loading page data.
+    // When setup is required the 401 response is simply never consumed.
+    const meResponse = fetch("/api/v1/auth/me").catch(() => null);
     const r = await fetch("/api/v1/auth/status");
     const status = await r.json();
     setupRequired.value = status.setup_required;
-    if (!setupRequired.value) await refreshSession();
+    if (!setupRequired.value) await refreshSession(meResponse);
     if (!authenticated.value) {
       document.title = setupRequired.value
         ? `${t("初始化")} · Viya`
@@ -341,9 +345,9 @@ async function initializeAuth() {
     authChecked.value = true;
   }
 }
-async function refreshSession() {
-  const r = await fetch("/api/v1/auth/me");
-  if (!r.ok) {
+async function refreshSession(meResponse?: Promise<Response | null>) {
+  const r = await (meResponse ?? fetch("/api/v1/auth/me").catch(() => null));
+  if (!r || !r.ok) {
     authenticated.value = false;
     return;
   }
@@ -352,13 +356,13 @@ async function refreshSession() {
   panelRole.value = data.role === "viewer" ? "viewer" : "admin";
   csrfToken.value = data.csrf_token;
   authenticated.value = true;
-  try {
-    const settings = await fetch("/api/v1/panel/settings");
-    if (settings.ok) {
-      const data = await settings.json();
-      panelListenPort.value = Number(data.listen_port) || 8181;
-    }
-  } catch {}
+  // The saved panel port is only a sidebar label; it must not hold up page data.
+  void fetch("/api/v1/panel/settings")
+    .then((settings) => (settings.ok ? settings.json() : Promise.resolve(null)))
+    .then((data: { listen_port?: number } | null) => {
+      panelListenPort.value = Number(data?.listen_port) || 8181;
+    })
+    .catch(() => {});
   // Fetch the build version once for the sidebar footer (skip remote GitHub lookup).
   fetch("/api/v1/version?local=1")
     .then((r) => (r.ok ? r.json() : Promise.resolve({})))
@@ -366,8 +370,9 @@ async function refreshSession() {
       if (d && typeof d.current === "string") appVersion.value = d.current;
     })
     .catch(() => {});
+  // syncActiveSection already starts loadSection for the active page; the
+  // previous second call was swallowed by the de-duplication guard.
   syncActiveSection();
-  await loadSection(activeSection.value);
 }
 async function authenticate() {
   authBusy.value = true;
@@ -450,6 +455,34 @@ function onSessionExpired() {
 
 // ---- navigation ----
 const activeSection = ref("overview");
+// KeepAlive keeps each page's local state and avoids re-fetching on every tab
+// switch (config backups, file shares, log rows, host metrics used to reload).
+const workspacePages: Record<string, Component> = {
+  overview: OverviewDashboard,
+  "proxy-sites": ProxySitesPage,
+  "file-services": FileHub,
+  "dns-providers": DnsProvidersPage,
+  certificates: CertificatesPage,
+  layer4: Layer4Page,
+  ddns: Ddnspage,
+  "config-history": ConfigHistoryPage,
+  "access-logs": LogWorkspace,
+  "ip-bans": IpBansPage,
+};
+const workspaceComponent = computed<Component>(() =>
+  activeSection.value === "file-services" && !showFileServices.value
+    ? OverviewDashboard
+    : (workspacePages[activeSection.value] ?? OverviewDashboard),
+);
+const workspaceProps = computed(() =>
+  activeSection.value === "access-logs"
+    ? {
+        csrf: csrfToken.value,
+        autoRefresh:
+          autoRefresh.value && (!pauseHidden.value || !documentHidden.value),
+      }
+    : {},
+);
 const navigationGroups = [
   t("概览"),
   t("网络服务"),
@@ -627,7 +660,9 @@ function syncActiveSection() {
       : "overview";
   if (section !== activeSection.value)
     history.replaceState(null, "", `#${activeSection.value}`);
-  if (activeSection.value !== 'overview' && trafficRange.value !== '24h') trafficRange.value = '24h';
+  // Do not reset the traffic window when leaving the overview: changing the
+  // ref used to fire the 4 traffic aggregation requests on every page switch.
+  // The user's choice stays until they change it on the overview itself.
   document.title = `${currentPage.value.label} · Viya`;
   window.scrollTo({ top: 0, behavior: "instant" });
   // Visiting a page for the first time loads only the data groups it renders.
@@ -715,20 +750,22 @@ onMounted(() => {
   themeMedia.addEventListener("change", applyPanelSettings);
   initializeAuth();
   restartTrafficTimer();
-  // Progress/DNS polling: 2s is still perceived as live and halves the request
-  // volume compared with the old 1s tick.
+  // Only genuinely live work uses the 2s tick: DDNS refreshes every 6s, the
+  // certificate inventory every 30s, and managed certificates only while an
+  // issuance is pending. Previously all three ran every 2 seconds.
+  let progressTick = 0;
   certificateProgressTimer = setInterval(() => {
     if (!canAutoRefresh()) return;
-    if (activeSection.value === "ddns") void refreshDDNS();
-    if (activeSection.value === "certificates")
-      void refreshCertificateInventory();
-    if (
-      activeSection.value === "certificates" &&
-      managedCertificates.value.some(
+    progressTick += 1;
+    if (activeSection.value === "ddns" && progressTick % 3 === 1)
+      void refreshDDNS();
+    if (activeSection.value === "certificates") {
+      const pending = managedCertificates.value.some(
         (cert) => !["issued", "expired"].includes(cert.status),
-      )
-    )
-      refreshManagedCertificates();
+      );
+      if (pending || progressTick % 15 === 1) void refreshCertificateInventory();
+      if (pending) refreshManagedCertificates();
+    }
   }, 2000);
 });
 onBeforeUnmount(() => {
@@ -999,22 +1036,11 @@ onBeforeUnmount(() => {
           {{ saving ? t("正在应用…") : t("重新应用到 Caddy") }}
         </button>
       </div>
-      <Transition name="workspace" mode="out-in">
+      <Transition name="workspace">
       <div :key="activeSection" class="workspace-view">
-      <OverviewDashboard v-if="activeSection === 'overview'" />
-      <ProxySitesPage v-if="activeSection === 'proxy-sites'" />
-      <FileHub v-if="activeSection === 'file-services' && showFileServices" />
-      <DnsProvidersPage v-if="activeSection === 'dns-providers'" />
-      <CertificatesPage v-if="activeSection === 'certificates'" />
-      <Layer4Page v-if="activeSection === 'layer4'" />
-      <Ddnspage v-if="activeSection === 'ddns'" />
-      <ConfigHistoryPage v-if="activeSection === 'config-history'" />
-      <LogWorkspace
-        v-if="activeSection === 'access-logs'"
-        :csrf="csrfToken"
-        :auto-refresh="autoRefresh && (!pauseHidden || !documentHidden)"
-      />
-      <IpBansPage v-if="activeSection === 'ip-bans'" />
+        <KeepAlive>
+          <component :is="workspaceComponent" v-bind="workspaceProps" />
+        </KeepAlive>
       </div>
       </Transition>
 

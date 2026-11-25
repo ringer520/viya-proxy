@@ -15,10 +15,13 @@ import { refreshErrors,applyRetryVisible,authenticated,csrfToken,error,deleteBus
 // ---- request sequencing (cross-domain) ----
 type Scope = "core" | "sites" | "layer4" | "ddns" | "certs" | "dns" | "bans" | "traffic" | "security";
 const allScopes: Scope[] = ["core", "sites", "layer4", "ddns", "certs", "dns", "bans", "traffic", "security"];
-type Task = { scope: Scope; refresh: () => Promise<unknown> };
+// needsTargets marks tasks that read data written by the list requests (e.g.
+// static-site stats iterate `hosts`). Independent tasks start in parallel with
+// those requests instead of waiting for a second round trip.
+type Task = { scope: Scope; refresh: () => Promise<unknown>; needsTargets?: boolean };
 const domainRefreshers = new Map<string, Task>();
-export function registerRefreshTask(name: string, refresh: () => Promise<unknown>, scope: Scope = "core") {
-  domainRefreshers.set(name, { scope, refresh });
+export function registerRefreshTask(name: string, refresh: () => Promise<unknown>, scope: Scope = "core", needsTargets = false) {
+  domainRefreshers.set(name, { scope, refresh, needsTargets });
 }
 export let loadRequestSequence = 0;
 
@@ -65,12 +68,19 @@ async function execute(list: Target[], runTasks: boolean, requestedScopes: Scope
   let succeeded = false;
   try {
     const failedScopes = new Set<Scope>();
-    const results = await Promise.allSettled(list.map(async target => {
+    const allTasks = [...domainRefreshers.entries()].filter(([, task]) => requestedScopes.includes(task.scope));
+    const earlyTasks = runTasks ? allTasks.filter(([, task]) => !task.needsTargets) : [];
+    const lateTasks = runTasks ? allTasks.filter(([, task]) => task.needsTargets) : [];
+    const targetPromises = list.map(async target => {
       const response = await fetch(target.url);
       if (response.status === 401) throw Error('unauthorized');
       if (!response.ok) throw Error(String(response.status));
       return response.json();
-    }));
+    });
+    const [results, earlyResults] = await Promise.all([
+      Promise.allSettled(targetPromises),
+      Promise.allSettled(earlyTasks.map(([, task]) => task.refresh())),
+    ]);
     if (requestSequence !== loadRequestSequence) return;
     if (results.some(result => result.status === 'rejected' && result.reason?.message === 'unauthorized')) {
       authenticated.value = false; csrfToken.value = ''; return;
@@ -90,10 +100,7 @@ async function execute(list: Target[], runTasks: boolean, requestedScopes: Scope
         if (target.scope === 'core' && target.url.endsWith('/health')) online.value = false;
       }
     });
-    if (runTasks) {
-      const tasks = [...domainRefreshers.entries()].filter(([, task]) => requestedScopes.includes(task.scope));
-      const taskResults = await Promise.allSettled(tasks.map(([, task]) => task.refresh()));
-      if (requestSequence !== loadRequestSequence) return;
+    const applyTaskResults = (taskResults: PromiseSettledResult<unknown>[], tasks: [string, Task][]) => {
       taskResults.forEach((result, index) => {
         const [name, task] = tasks[index]!;
         if (result.status === 'rejected' || (result.status === 'fulfilled' && result.value === false)) {
@@ -104,6 +111,14 @@ async function execute(list: Target[], runTasks: boolean, requestedScopes: Scope
           delete refreshErrors.value[name];
         }
       });
+    };
+    applyTaskResults(earlyResults, earlyTasks);
+    if (lateTasks.length) {
+      // These read data written by the list requests above; keep them strictly
+      // after `apply` so they never see the previous site/certificate lists.
+      const lateResults = await Promise.allSettled(lateTasks.map(([, task]) => task.refresh()));
+      if (requestSequence !== loadRequestSequence) return;
+      applyTaskResults(lateResults, lateTasks);
     }
     for (const scope of requestedScopes) {
       if (!failedScopes.has(scope)) loadedScopes.add(scope);
