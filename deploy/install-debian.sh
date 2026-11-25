@@ -14,6 +14,13 @@ if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 is required for consistent database backup, migration and readiness checks." >&2
   exit 1
 fi
+# The helper scripts and inline snippets keep to the 3.6 language and standard
+# library, so fail here with a readable message instead of a traceback halfway
+# through an upgrade.
+if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 6) else 1)' 2>/dev/null; then
+  echo "Error: $(python3 -V 2>&1) is too old. Viya needs Python 3.6 or newer for backup, migration and readiness checks." >&2
+  exit 1
+fi
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   echo "curl or wget is required for the service readiness check." >&2
   exit 1
@@ -278,8 +285,11 @@ FAMILIES = [
 def owner_via_ss(port, socktype):
     flag = "-lntp" if socktype == socket.SOCK_STREAM else "-lnup"
     try:
+        # stdout/stderr/universal_newlines keep this working on Python 3.6,
+        # which is still the default python3 on several long-term distros.
         out = subprocess.run(
-            ["ss", "-H", flag], capture_output=True, text=True, timeout=5
+            ["ss", "-H", flag], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=5
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return []
@@ -516,13 +526,16 @@ if [ ! -s /var/lib/viya/viya.db ] && [ -s /var/lib/viya/crpm.db ]; then
     echo "python3 is required to migrate the legacy crpm database." >&2
     exit 1
   fi
-  python3 - /var/lib/viya/crpm.db /var/lib/viya/viya.db <<'PY'
+  # Reuse the helper instead of duplicating the copy logic: Connection.backup
+  # is Python 3.7+, so calling it directly aborts the migration with a
+  # traceback on the Python 3.6 that CentOS, Rocky 8 and Alibaba Cloud Linux
+  # still ship. The helper falls back to a transactional dump replay there.
+  python3 "$ROOT/scripts/backup_archive.py" copy-db /var/lib/viya/crpm.db /var/lib/viya/viya.db
+  python3 - /var/lib/viya/viya.db <<'PY'
 import sqlite3, sys
-src = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True, timeout=15)
-dst = sqlite3.connect(sys.argv[2])
-src.backup(dst)
-result = dst.execute("PRAGMA integrity_check").fetchone()[0]
-dst.close(); src.close()
+db = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True)
+result = db.execute("PRAGMA integrity_check").fetchone()[0]
+db.close()
 if result != "ok":
     raise SystemExit("Legacy Viya database migration failed integrity_check: " + str(result))
 PY

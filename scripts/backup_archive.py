@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Create, verify and safely extract Viya archives using the standard library."""
+"""Create, verify and safely extract Viya archives using the standard library.
+
+Deliberately compatible with Python 3.6, because that is still what several
+long-term distributions ship as ``python3`` (CentOS 7, Rocky 8, Alibaba Cloud
+Linux 2). Do not introduce APIs newer than 3.6 here; the installer calls this
+script on the target host, where a traceback aborts the upgrade halfway.
+"""
 import argparse
 import hashlib
 import json
@@ -7,21 +13,76 @@ import os
 from pathlib import Path, PurePosixPath
 import shutil
 import sqlite3
+import sys
 import tarfile
 import tempfile
 from contextlib import closing
 from datetime import datetime, timezone
 
+if sys.version_info < (3, 6):
+    raise SystemExit('Viya backup requires Python 3.6 or newer; found ' + sys.version.split()[0])
+
+# Read in fixed chunks instead of pulling the whole file into memory: archives
+# may hold multi-gigabyte site data, and hashlib.file_digest is Python 3.11+.
+CHUNK = 1 << 20
+
 
 def digest(path):
+    hasher = hashlib.sha256()
     with open(path, 'rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+        for block in iter(lambda: stream.read(CHUNK), b''):
+            hasher.update(block)
+    return hasher.hexdigest()
+
+
+def is_within(path, parent):
+    """Path.is_relative_to is 3.9+; both sides are already resolved here."""
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def remove_quietly(path):
+    """Path.unlink with the missing_ok flag is 3.8+."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def check_db(path):
     with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as db:
         if db.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
             raise ValueError('SQLite integrity check failed')
+
+
+def copy_database(source, destination):
+    """Copy a live database so the result never needs leftover WAL/SHM files.
+
+    sqlite3.Connection.backup is Python 3.7+, and the fallback SQLite would
+    need (VACUUM INTO, 3.27+) is missing from the SQLite that ships with those
+    same distributions. Replaying a logical dump inside one read transaction is
+    the portable option: readers see a single snapshot, and TEXT quotes, BLOBs,
+    NULLs and REALs all round-trip (the dump quotes them as SQL literals).
+    """
+    source = Path(source).resolve(strict=True)
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(source.as_uri() + '?mode=ro', uri=True, timeout=30)) as src:
+        with closing(sqlite3.connect(str(destination))) as dst:
+            if hasattr(src, 'backup'):
+                src.backup(dst)
+            else:
+                src.isolation_level = None
+                src.execute('BEGIN')
+                try:
+                    dump = '\n'.join(src.iterdump())
+                finally:
+                    src.execute('COMMIT')
+                dst.executescript(dump)
+            dst.commit()
 
 
 def create(args):
@@ -32,12 +93,11 @@ def create(args):
     key_bytes = key.read_bytes()
     if len(key_bytes) != 32: raise ValueError('Master key must be exactly 32 bytes')
     output = Path(args.archive).resolve()
-    if output.is_relative_to(root): raise ValueError('Backup destination must be outside the data directory')
+    if is_within(output, root): raise ValueError('Backup destination must be outside the data directory')
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='viya-backup-') as tmp:
         stage = Path(tmp); data = stage / 'data'; data.mkdir(mode=0o700)
-        with closing(sqlite3.connect(source.as_uri() + '?mode=ro', uri=True, timeout=30)) as src:
-            with closing(sqlite3.connect(data / 'viya.db')) as dst: src.backup(dst)
+        copy_database(source, data / 'viya.db')
         check_db(data / 'viya.db')
         excluded = []
         for base, directories, files in os.walk(root, followlinks=False):
@@ -65,17 +125,17 @@ def create(args):
         (stage / 'MANIFEST.txt').write_text('Viya backup format: 2\nIncludes database, managed websites and certificate storage.\nExternal website roots are not included. Contains sensitive data; protect this archive.\n', encoding='utf-8')
         temporary = output.with_suffix(output.suffix + '.tmp')
         try:
-            with tarfile.open(temporary, 'w:gz', dereference=True) as archive:
+            with tarfile.open(str(temporary), 'w:gz', dereference=True) as archive:
                 for name in ('data', 'MANIFEST.json', 'MANIFEST.txt'): archive.add(stage / name, arcname=name)
-            os.chmod(temporary, 0o600); verify(temporary); os.replace(temporary, output)
-        finally: temporary.unlink(missing_ok=True)
+            os.chmod(str(temporary), 0o600); verify(temporary); os.replace(str(temporary), str(output))
+        finally: remove_quietly(temporary)
     print(output)
 
 
 def verify(archive_path, extract=None):
     with tempfile.TemporaryDirectory(prefix='viya-verify-') as tmp:
         stage = Path(tmp); seen = set(); total = 0
-        with tarfile.open(archive_path, 'r:gz') as archive:
+        with tarfile.open(str(archive_path), 'r:gz') as archive:
             for index, member in enumerate(archive):
                 path = PurePosixPath(member.name); name = str(path)
                 if name == '.': continue
@@ -109,19 +169,32 @@ def verify(archive_path, extract=None):
         check_db(db)
         if extract:
             target = Path(extract)
-            if target.exists() and any(target.iterdir()): raise ValueError('Extraction directory must be empty')
-            target.mkdir(parents=True, exist_ok=True); shutil.copytree(stage, target, dirs_exist_ok=True)
+            if target.exists():
+                if not target.is_dir() or any(target.iterdir()): raise ValueError('Extraction directory must be empty')
+            else:
+                target.mkdir(parents=True, exist_ok=True)
+            # The dirs_exist_ok flag on shutil.copytree is 3.8+; the target is empty
+            # by now, so copy each top-level entry on its own.
+            for child in sorted(stage.iterdir()):
+                destination = target / child.name
+                if child.is_dir(): shutil.copytree(str(child), str(destination))
+                else: shutil.copyfile(str(child), str(destination))
         return manifest
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(); sub = parser.add_subparsers(dest='action', required=True)
+    parser = argparse.ArgumentParser(); sub = parser.add_subparsers(dest='action')
     c = sub.add_parser('create'); c.add_argument('archive'); c.add_argument('--data', required=True); c.add_argument('--key', required=True)
     c.add_argument('--include-key', action='store_true'); c.add_argument('--consistency', default='online-database')
     v = sub.add_parser('verify'); v.add_argument('archive'); v.add_argument('--extract')
+    d = sub.add_parser('copy-db'); d.add_argument('source'); d.add_argument('destination')
     args = parser.parse_args()
+    # The required flag on add_subparsers is 3.7+; enforce it by hand so an old
+    # python3 prints one clear line instead of a TypeError traceback.
+    if not args.action: parser.error('choose an action: create, verify or copy-db')
     try:
         if args.action == 'create': create(args)
+        elif args.action == 'copy-db': copy_database(args.source, args.destination)
         else: print(json.dumps(verify(args.archive, args.extract)))
     except (ValueError, OSError, sqlite3.Error, tarfile.TarError) as error:
-        raise SystemExit('Backup validation failed: ' + str(error))
+        raise SystemExit('Viya backup helper failed: ' + str(error))

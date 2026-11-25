@@ -60,13 +60,8 @@ PY
 if [ "$MODE" = dry-run ]; then echo "Backup, database and master key verified; installation unchanged."; exit 0; fi
 if [ -f "$MASTER_KEY_FILE" ]; then cp "$MASTER_KEY_FILE" "$stage/original-master.key"; original_key=1; fi
 if [ ! -s "$stage/data/viya.db" ] && [ -s "$stage/data/crpm.db" ]; then
-  python3 - "$stage/data/crpm.db" "$stage/data/viya.db" <<'PY'
-import sqlite3, sys
-src = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True)
-dst = sqlite3.connect(sys.argv[2])
-src.backup(dst)
-dst.close(); src.close()
-PY
+  # Helper keeps the copy working on Python 3.6 (no Connection.backup there).
+  python3 "$(dirname -- "$0")/backup_archive.py" copy-db "$stage/data/crpm.db" "$stage/data/viya.db"
 fi
 if [ ! -s "$stage/data/viya.db" ] || [ ! -f "$stage/MANIFEST.txt" ]; then echo "Archive is missing the database or manifest." >&2; exit 1; fi
 python3 - "$stage/data/viya.db" <<'PY'
@@ -110,7 +105,7 @@ python3 - "$DATA_DIR/viya.db" <<'PY'
 import json, os, shlex, sqlite3, subprocess, sys, time, urllib.request
 environment = subprocess.check_output(
     ["systemctl", "show", "viya.service", "--property=Environment", "--value"],
-    text=True,
+    universal_newlines=True,
 )
 listen = next(
     (item.split("=", 1)[1] for item in shlex.split(environment) if item.startswith("VIYA_LISTEN=")),

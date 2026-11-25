@@ -225,6 +225,12 @@ have tar || { echo "Error: tar is required." >&2; exit 1; }
 { have curl || have wget; } || { echo "Error: neither curl nor wget is available." >&2; exit 1; }
 have sha256sum || { echo "Error: sha256sum is required to verify the release archive." >&2; exit 1; }
 have python3 || { echo "Error: python3 is required for safe database backup and migration." >&2; exit 1; }
+# The backup helper sticks to the Python 3.6 standard library so older
+# long-term distributions keep working; anything older fails with one clear line.
+if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 6) else 1)' 2>/dev/null; then
+  echo "Error: $(python3 -V 2>&1) is too old. Viya needs Python 3.6 or newer for safe database backup and migration." >&2
+  exit 1
+fi
 
 TASK_TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TASK_TMPDIR"' EXIT
@@ -265,7 +271,7 @@ if [ -z "$PANEL_PORT" ]; then
 import shlex, sqlite3, subprocess
 port = "8181"
 try:
-    env = subprocess.check_output(["systemctl", "show", "viya.service", "--property=Environment", "--value"], text=True)
+    env = subprocess.check_output(["systemctl", "show", "viya.service", "--property=Environment", "--value"], universal_newlines=True)
     settings = dict(item.split("=", 1) for item in shlex.split(env) if "=" in item)
     listen = settings.get("VIYA_LISTEN", "")
     if listen.startswith("["):
@@ -309,7 +315,7 @@ import shlex, subprocess
 try:
     env = subprocess.check_output(
         ["systemctl", "show", "viya.service", "--property=Environment", "--value"],
-        text=True,
+        universal_newlines=True,
     )
     settings = dict(item.split("=", 1) for item in shlex.split(env) if "=" in item)
     listen = settings.get("VIYA_LISTEN", "")
