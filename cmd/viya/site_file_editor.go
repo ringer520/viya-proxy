@@ -21,7 +21,7 @@ var siteEditorMu sync.Mutex
 
 // Keep file access rooted even if a directory is replaced with a symlink.
 func (a *App) siteTextFile(r *http.Request) (*os.Root, string, bool, error) {
-	id, root, err := a.loadStaticSite(r)
+	_, root, err := a.loadStaticSite(r)
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -33,12 +33,10 @@ func (a *App) siteTextFile(r *http.Request) (*os.Root, string, bool, error) {
 	if err != nil {
 		return nil, "", false, err
 	}
-	var kind string
-	if err = a.db.QueryRowContext(r.Context(), "SELECT type FROM proxy_hosts WHERE id=?", id).Scan(&kind); err != nil {
-		return nil, "", false, err
-	}
 	fs, err := os.OpenRoot(root)
-	return fs, rel, a.underManagedRoot(root) || kind == "files", err
+	// Text editing follows the same rule as upload and delete: a root outside
+	// the managed sites directory is read-only, whatever the site type is.
+	return fs, rel, a.underManagedRoot(root), err
 }
 
 func readSiteText(root *os.Root, name string) ([]byte, os.FileInfo, error) {

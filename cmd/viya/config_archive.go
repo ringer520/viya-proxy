@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -677,6 +678,15 @@ func (a *App) importConfiguration(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Replacing proxy_hosts / layer4_rules / ddns_records cascades into the
+	// hourly statistics and the DDNS run history, so a successful import used
+	// to wipe every counter the user had accumulated.
+	if err == nil {
+		if e := a.restoreRuntimeAfterImport(recoveryCtx, runtime); e != nil {
+			slog.Error("import: restoring runtime statistics failed", "error", e)
+			err = e
+		}
+	}
 	if err == nil {
 		var imported []WebListener
 		imported, err = a.webListeners(recoveryCtx)
@@ -724,6 +734,26 @@ func (a *App) importConfiguration(w http.ResponseWriter, r *http.Request) {
 	a.reloadConfigCaches()
 	a.configureProgramLogging()
 	writeJSON(w, 200, map[string]any{"ok": true, "preferences": payload.Preferences, "requires_login": false, "message": "业务配置已恢复，当前账号和登录保持不变；面板端口在下次重启后生效"})
+}
+
+// restoreRuntimeAfterImport puts the hourly statistics and DDNS run history
+// back after the configuration tables were replaced. Rows whose parent object
+// no longer exists are dropped (the rule recovery points already use), so
+// importing a configuration from another instance cannot attach stale traffic
+// to unrelated sites.
+func (a *App) restoreRuntimeAfterImport(ctx context.Context, runtime []tableDump) error {
+	if len(runtime) == 0 {
+		return nil
+	}
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err = restoreRecoveryRuntime(ctx, tx, runtime); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
 func (a *App) reloadConfigCaches() {

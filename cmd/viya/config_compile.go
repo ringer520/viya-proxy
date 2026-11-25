@@ -88,7 +88,10 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	policySeen := map[string]bool{}
-	noTLSHosts := []string{}
+	// Skipping automatic HTTPS is a per-server decision: a domain that is
+	// plain HTTP on one listener (cloned copies carry tls_mode=none) must not
+	// suppress certificate automation on a different HTTPS listener.
+	noTLSByListener := map[string][]string{}
 	usesInternalTLS := managedInternal
 	// Ban rules are a security policy: if they cannot be read, refuse to push a
 	// configuration that silently drops every rule. Capture all errors instead
@@ -119,7 +122,7 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 	}
 	for _, host := range hosts {
 		if host.TLSMode == "none" {
-			noTLSHosts = append(noTLSHosts, host.Domain)
+			noTLSByListener[host.ListenerID] = append(noTLSByListener[host.ListenerID], host.Domain)
 		}
 		hostRoutes := []any{}
 		hostMatcher := map[string]any{"host": []string{host.Domain}}
@@ -403,7 +406,11 @@ func (a *App) compileConfig(ctx context.Context) ([]byte, error) {
 		server := map[string]any{"listen": []string{fmt.Sprintf(":%d", listener.Port)}, "logs": map[string]any{"default_logger_name": "viya_access_" + listener.ID, "should_log_credentials": false}}
 		if listener.Protocol == "https" {
 			server["tls_connection_policies"] = []any{map[string]any{}}
-			server["automatic_https"] = map[string]any{"skip": noTLSHosts, "disable_redirects": true}
+			skip := noTLSByListener[listener.ID]
+			if skip == nil {
+				skip = []string{}
+			}
+			server["automatic_https"] = map[string]any{"skip": skip, "disable_redirects": true}
 		} else {
 			redirects := []any{}
 			for _, host := range hosts {
