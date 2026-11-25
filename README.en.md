@@ -6,6 +6,8 @@
 
 <p align="center"><a href="README.md">简体中文</a> · English</p>
 
+<p align="center"><a href="https://viya.861010.xyz/"><strong>Project website: viya.861010.xyz</strong></a> — features, screenshots and nine live themes</p>
+
 <p align="center">
   <a href="https://github.com/ringer520/viya-proxy/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/ringer520/viya-proxy?color=blue"></a>
   <a href="https://hub.docker.com/r/ringer520/viya-proxy"><img alt="Docker" src="https://img.shields.io/badge/docker-ringer520%2Fviya--proxy-2496ed?logo=docker&logoColor=white"></a>
