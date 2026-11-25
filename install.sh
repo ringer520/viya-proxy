@@ -10,10 +10,16 @@
 
 set -eu
 
-# Normalise GH_PROXY before any early branch reads it. The sudo re-exec and the
-# OpenWrt bootstrap both prefix a full URL with this value, so a missing
-# trailing slash turns the mirror into "https://ghproxy.nethttps://…" and the
-# bootstrap fetch fails.
+REPO="ringer520/viya-proxy"
+
+# Mirror candidates in one place: the Go self-updater probes the same hosts, and
+# third-party mirrors come and go, so keeping the list here avoids editing three
+# loops whenever it changes.
+MIRRORS="https://ghfast.top/ https://ghproxy.net/ https://gh-proxy.com/"
+
+# Normalise GH_PROXY before anything reads it: the sudo re-exec, the OpenWrt
+# bootstrap and the release URLs all concatenate it with an absolute URL, so a
+# missing trailing slash produces "https://ghproxy.nethttps://…".
 GH_PROXY="${GH_PROXY:-}"
 if [ -n "$GH_PROXY" ]; then
   case "$GH_PROXY" in
@@ -22,14 +28,115 @@ if [ -n "$GH_PROXY" ]; then
   esac
 fi
 
+# Pick a mirror when direct GitHub access is unavailable. This runs before the
+# OpenWrt branch: routers in mainland China are exactly the hosts that cannot
+# reach raw.githubusercontent.com, and they used to hit the bootstrap download
+# with no mirror at all.
+probe_mirror() {
+  [ -z "${GH_PROXY:-}" ] || return 0
+  target="https://github.com/${REPO}/releases/latest/download/sha256sums.txt"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -I --connect-timeout 4 --max-time 8 "$target" >/dev/null 2>&1 && return 0
+    for mirror in $MIRRORS; do
+      if curl -fsSL -I --connect-timeout 4 --max-time 8 "${mirror}${target}" >/dev/null 2>&1; then
+        GH_PROXY="$mirror"
+        echo "==> Direct GitHub releases unreachable; using mirror: $GH_PROXY"
+        return 0
+      fi
+    done
+  elif command -v wget >/dev/null 2>&1; then
+    wget --spider -T 6 -q "$target" >/dev/null 2>&1 && return 0
+    for mirror in $MIRRORS; do
+      if wget --spider -T 6 -q "${mirror}${target}" >/dev/null 2>&1; then
+        GH_PROXY="$mirror"
+        echo "==> Direct GitHub releases unreachable; using mirror: $GH_PROXY"
+        return 0
+      fi
+    done
+  fi
+  return 0
+}
+
+# One download attempt. "$3" is 1 for the release archive, which gets the
+# low-speed circuit breaker; the checksum file is a few hundred bytes and would
+# trip that guard for no reason.
+download_once() {
+  url="$1"
+  dest="$2"
+  big="${3:-0}"
+  if command -v curl >/dev/null 2>&1; then
+    if [ "$big" -eq 1 ]; then
+      # Abort as soon as the transfer drops below 30 KB/s for 20 seconds: the
+      # old --max-time 600 alone let a 25 MB archive crawl for ten minutes
+      # before the mirror fallback ever ran.
+      curl -fL --retry 1 --connect-timeout 10 --max-time 600 \
+        --speed-limit 30720 --speed-time 20 --progress-bar "$url" -o "$dest"
+    else
+      curl -fL --retry 1 --connect-timeout 10 --max-time 120 --progress-bar "$url" -o "$dest"
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    # -T bounds a stalled read on both GNU and busybox wget; --tries differs
+    # between the two, so leave retries to the mirror loop below.
+    wget -T 20 "$url" -O "$dest"
+  else
+    echo "Error: neither curl nor wget is available. Install one and retry." >&2
+    exit 1
+  fi
+}
+
+# Try the chosen route first, then every other mirror. The URL may already
+# carry a mirror prefix, so reduce it to the canonical GitHub address and skip
+# the mirror that just failed.
+download() {
+  url="$1"
+  dest="$2"
+  big="${3:-0}"
+  if download_once "$url" "$dest" "$big"; then
+    return 0
+  fi
+
+  raw_url=""
+  case "$url" in
+    https://github.com/*|https://raw.githubusercontent.com/*)
+      raw_url="$url"
+      ;;
+    *https://github.com/*)
+      raw_url="https://github.com/${url##*https://github.com/}"
+      ;;
+    *https://raw.githubusercontent.com/*)
+      raw_url="https://raw.githubusercontent.com/${url##*https://raw.githubusercontent.com/}"
+      ;;
+  esac
+  if [ -n "$raw_url" ]; then
+    for mirror in $MIRRORS; do
+      mirror_url="${mirror}${raw_url}"
+      if [ "$mirror_url" = "$url" ]; then
+        continue
+      fi
+      echo "==> Download failed. Retrying via mirror: ${mirror_url}"
+      if download_once "$mirror_url" "$dest" "$big"; then
+        return 0
+      fi
+    done
+  fi
+
+  echo "Error: failed to download $url" >&2
+  exit 1
+}
+
 if [ "$(id -u)" -ne 0 ]; then
   if ! command -v sudo >/dev/null 2>&1; then
     echo "Error: this installer needs root privileges. Install sudo or run the command as root." >&2
     exit 1
   fi
-
-  # Re-fetch under sudo: this script may itself be arriving through a pipe,
-  # whose stdin cannot safely be handed to a second shell after self-copying.
+  if [ -f "$0" ]; then
+    # Started from a saved file (`curl -o install.sh` then `sh install.sh`):
+    # reuse it instead of fetching the script again over the same flaky link.
+    exec sudo env VERSION="${VERSION:-}" VIYA_INSTALL_LISTEN="${VIYA_INSTALL_LISTEN:-}" \
+      GH_PROXY="${GH_PROXY:-}" sh "$0"
+  fi
+  # Piped through `curl | sh`: the script body lives on stdin, so it cannot be
+  # handed to a second shell and has to be fetched again under sudo.
   exec sudo env VERSION="${VERSION:-}" VIYA_INSTALL_LISTEN="${VIYA_INSTALL_LISTEN:-}" GH_PROXY="${GH_PROXY:-}" \
     sh -c 'set -eu; task=$(mktemp -d); trap "rm -rf \"$task\"" EXIT; if command -v curl >/dev/null 2>&1; then curl -fL --retry 2 --connect-timeout 15 --max-time 120 "${GH_PROXY:-}https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh" -o "$task/install.sh"; else wget -O "$task/install.sh" "${GH_PROXY:-}https://raw.githubusercontent.com/ringer520/viya-proxy/main/install.sh"; fi; sh "$task/install.sh"'
 fi
@@ -39,16 +146,14 @@ if [ "$(uname -s)" != "Linux" ]; then
   exit 1
 fi
 
+probe_mirror
+
 # OpenWrt uses procd and its persistent-storage installer.
 if [ -r /etc/openwrt_release ]; then
   stage=$(mktemp -d /tmp/viya-bootstrap.XXXXXX)
   trap 'rm -rf "$stage"' EXIT
-  if command -v curl >/dev/null 2>&1; then curl -fL --retry 2 --connect-timeout 15 --max-time 120 "${GH_PROXY}https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh" -o "$stage/install.sh"
-  elif command -v wget >/dev/null 2>&1; then wget -O "$stage/install.sh" "${GH_PROXY}https://raw.githubusercontent.com/ringer520/viya-proxy/main/deploy/install-openwrt.sh"
-  else echo 'Install curl or wget first.' >&2; exit 1; fi
-  # The OpenWrt installer resolves the release through the same prefix; it only
-  # sees exported values.
   export GH_PROXY
+  download "${GH_PROXY}https://raw.githubusercontent.com/${REPO}/main/deploy/install-openwrt.sh" "$stage/install.sh" 0
   sh "$stage/install.sh"
   exit $?
 fi
@@ -69,43 +174,8 @@ case "$(uname -m)" in
   *) echo "Error: unsupported architecture '$(uname -m)'. Viya supports x86_64, aarch64 and armv7." >&2; exit 1 ;;
 esac
 
-REPO="ringer520/viya-proxy"
 PKG="viya-linux-$ARCH"
 TARBALL="$PKG.tar.gz"
-# Mirror / Proxy support (especially useful in mainland China)
-GH_PROXY="${GH_PROXY:-}"
-if [ -z "$GH_PROXY" ]; then
-  # Probe actual release download endpoint with a short timeout
-  PROBE_TARGET="https://github.com/${REPO}/releases/latest/download/sha256sums.txt"
-  if command -v curl >/dev/null 2>&1; then
-    if ! curl -fsSL -I --connect-timeout 4 "$PROBE_TARGET" >/dev/null 2>&1; then
-      for mirror in "https://ghproxy.net/" "https://gh-proxy.com/"; do
-        if curl -fsSL -I --connect-timeout 4 "${mirror}${PROBE_TARGET}" >/dev/null 2>&1; then
-          GH_PROXY="$mirror"
-          echo "==> Direct GitHub releases unreachable; using mirror: $GH_PROXY"
-          break
-        fi
-      done
-    fi
-  elif command -v wget >/dev/null 2>&1; then
-    if ! wget --spider --timeout=4 -q "$PROBE_TARGET" >/dev/null 2>&1; then
-      for mirror in "https://ghproxy.net/" "https://gh-proxy.com/"; do
-        if wget --spider --timeout=4 -q "${mirror}${PROBE_TARGET}" >/dev/null 2>&1; then
-          GH_PROXY="$mirror"
-          echo "==> Direct GitHub releases unreachable; using mirror: $GH_PROXY"
-          break
-        fi
-      done
-    fi
-  fi
-fi
-
-if [ -n "$GH_PROXY" ]; then
-  case "$GH_PROXY" in
-    */) ;;
-    *) GH_PROXY="${GH_PROXY}/" ;;
-  esac
-fi
 
 # Pin a version with: curl ... | VERSION=v1.2.3 sh
 if [ -n "${VERSION:-}" ]; then
@@ -115,58 +185,6 @@ else
 fi
 BASE_URL="${RELEASE_URL}/${TARBALL}"
 CHECKSUM_URL="${RELEASE_URL}/sha256sums.txt"
-
-download() {
-  url="$1"
-  dest="$2"
-  if command -v curl >/dev/null 2>&1; then
-    if curl -fL --retry 1 --connect-timeout 10 --max-time 600 --progress-bar "$url" -o "$dest"; then
-      return 0
-    fi
-  elif command -v wget >/dev/null 2>&1; then
-    if wget "$url" -O "$dest"; then
-      return 0
-    fi
-  else
-    echo "Error: neither curl nor wget is available. Install one and retry." >&2
-    exit 1
-  fi
-
-  # Fallback: if the chosen route failed (connection reset, empty reply, or a
-  # dead mirror), retry the other mirrors. The URL may already carry a mirror
-  # prefix, so reduce it to the canonical GitHub address first and skip the
-  # mirror that just failed.
-  raw_url=""
-  case "$url" in
-    https://github.com/*)
-      raw_url="$url"
-      ;;
-    *https://github.com/*)
-      raw_url="https://github.com/${url##*https://github.com/}"
-      ;;
-  esac
-  if [ -n "$raw_url" ]; then
-    for mirror in "https://ghproxy.net/" "https://gh-proxy.com/"; do
-      mirror_url="${mirror}${raw_url}"
-      if [ "$mirror_url" = "$url" ]; then
-        continue
-      fi
-      echo "==> Download failed. Retrying via mirror: ${mirror_url}"
-      if command -v curl >/dev/null 2>&1; then
-        if curl -fL --retry 2 --connect-timeout 15 --max-time 600 --progress-bar "$mirror_url" -o "$dest"; then
-          return 0
-        fi
-      elif command -v wget >/dev/null 2>&1; then
-        if wget "$mirror_url" -O "$dest"; then
-          return 0
-        fi
-      fi
-    done
-  fi
-
-  echo "Error: failed to download $url" >&2
-  exit 1
-}
 
 # --- Dependency preflight ---------------------------------------------------
 # The release tarball ships the Viya and Caddy binaries as static builds, so
@@ -236,8 +254,8 @@ TASK_TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TASK_TMPDIR"' EXIT
 
 echo "==> Downloading Viya from ${BASE_URL}"
-download "$BASE_URL" "$TASK_TMPDIR/$TARBALL"
-download "$CHECKSUM_URL" "$TASK_TMPDIR/sha256sums.txt"
+download "$BASE_URL" "$TASK_TMPDIR/$TARBALL" 1
+download "$CHECKSUM_URL" "$TASK_TMPDIR/sha256sums.txt" 0
 
 EXPECTED=$(awk -v file="$TARBALL" '$2 == file { print $1; exit }' "$TASK_TMPDIR/sha256sums.txt")
 if [ "${#EXPECTED}" -ne 64 ]; then

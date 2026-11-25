@@ -466,6 +466,11 @@ if [ "$viya_upgrade" -eq 1 ]; then
     rollback_archive=$(VIYA_DATA_DIR=/var/lib/viya VIYA_BACKUP_DIR="$rollback_dir" sh "$ROOT/scripts/backup-linux.sh")
   fi
   rollback_ready=1
+  # Each snapshot holds both binaries, the unit, the master key and a full data
+  # archive. Keep the three newest so repeated upgrades cannot exhaust the disk.
+  ls -1dt /var/backups/viya/installer-* 2>/dev/null | tail -n +4 | while IFS= read -r old; do
+    [ "$old" = "$rollback_dir" ] || rm -rf -- "$old" || true
+  done
 fi
 
 if ! id viya >/dev/null 2>&1; then

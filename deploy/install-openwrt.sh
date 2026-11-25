@@ -10,6 +10,27 @@ if [ ! -s /etc/ssl/certs/ca-certificates.crt ] && [ ! -s /etc/ssl/cert.pem ];the
 fi
 GH_PROXY="${GH_PROXY:-}"
 if [ -n "$GH_PROXY" ]; then case "$GH_PROXY" in */) ;; *) GH_PROXY="${GH_PROXY}/" ;; esac; fi
+# Same mirror list as install.sh and the Go self-updater. A router in mainland
+# China usually cannot reach github.com at all, and this installer used to have
+# no fallback whatsoever: one dead URL and the upgrade stalled.
+MIRRORS="https://ghfast.top/ https://ghproxy.net/ https://gh-proxy.com/"
+probe_mirror(){
+ [ -z "$GH_PROXY" ] || return 0
+ target='https://github.com/ringer520/viya-proxy/releases/latest/download/sha256sums.txt'
+ if command -v curl >/dev/null 2>&1;then
+  curl -fsSL -I --connect-timeout 4 --max-time 8 "$target" >/dev/null 2>&1 && return 0
+  for mirror in $MIRRORS;do
+   if curl -fsSL -I --connect-timeout 4 --max-time 8 "${mirror}${target}" >/dev/null 2>&1;then GH_PROXY="$mirror";echo "==> Direct GitHub releases unreachable; using mirror: $GH_PROXY";return 0;fi
+  done
+ else
+  wget --spider -T 6 -q "$target" >/dev/null 2>&1 && return 0
+  for mirror in $MIRRORS;do
+   if wget --spider -T 6 -q "${mirror}${target}" >/dev/null 2>&1;then GH_PROXY="$mirror";echo "==> Direct GitHub releases unreachable; using mirror: $GH_PROXY";return 0;fi
+  done
+ fi
+ return 0
+}
+probe_mirror
 BASE="${GH_PROXY}https://github.com/ringer520/viya-proxy/releases/latest/download"
 [ -z "${VERSION:-}" ] || BASE="${GH_PROXY}https://github.com/ringer520/viya-proxy/releases/download/$VERSION"
 STAGE=$(mktemp -d /tmp/viya-install.XXXXXX)
@@ -34,13 +55,41 @@ cleanup(){
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
-download(){ if command -v curl >/dev/null 2>&1;then curl -fL --retry 2 --connect-timeout 15 --max-time 600 --progress-bar "$1" -o "$2";elif command -v wget >/dev/null 2>&1;then wget -O "$2" "$1";else echo 'Install curl or wget first.' >&2;exit 1;fi; }
+# One attempt. $3=1 marks the release archive, which gets the low-speed circuit
+# breaker: abort once the transfer stays below 30 KB/s for 20 seconds instead of
+# waiting out the whole --max-time on a crawling link.
+download_once(){
+ url=$1;dest=$2;big=${3:-0}
+ if command -v curl >/dev/null 2>&1;then
+  if [ "$big" -eq 1 ];then curl -fL --retry 2 --connect-timeout 15 --max-time 900 --speed-limit 30720 --speed-time 20 --progress-bar "$url" -o "$dest"
+  else curl -fL --retry 2 --connect-timeout 15 --max-time 120 --progress-bar "$url" -o "$dest";fi
+ elif command -v wget >/dev/null 2>&1;then
+  wget -T 20 -O "$dest" "$url"
+ else echo 'Install curl or wget first.' >&2;exit 1;fi
+}
+download(){
+ url=$1;dest=$2;big=${3:-0}
+ download_once "$url" "$dest" "$big" && return 0
+ raw=''
+ case "$url" in
+  https://github.com/*) raw="$url";;
+  *https://github.com/*) raw="https://github.com/${url##*https://github.com/}";;
+ esac
+ [ -n "$raw" ] || return 1
+ for mirror in $MIRRORS;do
+  mirror_url="${mirror}${raw}"
+  [ "$mirror_url" = "$url" ] && continue
+  echo "==> Download failed. Retrying via mirror: ${mirror_url}"
+  download_once "$mirror_url" "$dest" "$big" && return 0
+ done
+ return 1
+}
 PKG=viya-linux-$ARCH
 DOWNLOAD_FREE=$(df -Pk "$STAGE" | awk 'END{print $4}')
 [ "$DOWNLOAD_FREE" -ge 131072 ] || { echo 'At least 128 MiB free in /tmp is required for download and extraction.' >&2;exit 1; }
 echo "==> Downloading $PKG"
-download "$BASE/$PKG.tar.gz" "$STAGE/$PKG.tar.gz"
-download "$BASE/sha256sums.txt" "$STAGE/sha256sums.txt"
+download "$BASE/$PKG.tar.gz" "$STAGE/$PKG.tar.gz" 1 || { echo 'Release archive download failed on every mirror.' >&2;exit 1; }
+download "$BASE/sha256sums.txt" "$STAGE/sha256sums.txt" 0 || { echo 'Checksum download failed on every mirror.' >&2;exit 1; }
 EXPECTED=$(awk -v f="$PKG.tar.gz" '$2==f{print $1;exit}' "$STAGE/sha256sums.txt")
 [ "${#EXPECTED}" -eq 64 ] || { echo 'Release checksum missing.' >&2;exit 1; }
 ACTUAL=$(sha256sum "$STAGE/$PKG.tar.gz" | awk '{print $1}')
@@ -139,6 +188,11 @@ NEED=$((NEED * 2 + 8192));FREE=$(df -Pk /opt/viya | awk 'END{print $4}')
 [ "$FREE" -ge "$NEED" ] || { echo "Insufficient persistent storage: need about $NEED KiB, available $FREE KiB." >&2;exit 1; }
 BACKUP=/opt/viya/backups/install-$(date -u +%Y%m%d-%H%M%S)
 mkdir -p "$BACKUP";chmod 700 "$BACKUP"
+# Every snapshot copies both binaries and the whole data directory. Keep the
+# three newest so repeated upgrades cannot fill the overlay.
+ls -1dt /opt/viya/backups/install-* 2>/dev/null | tail -n +4 | while IFS= read -r old;do
+ [ "$old" = "$BACKUP" ] || rm -rf "$old" || true
+done
 if [ -f /etc/init.d/viya ];then
  HAD_SERVICE=1
  /etc/init.d/viya running >/dev/null 2>&1 && WAS_RUNNING=1 || true
