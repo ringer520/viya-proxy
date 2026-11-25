@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { apiFetch as fetch } from "../api";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { t, tr } from "../i18n";
 import { formatBytes } from "../format";
 import { FolderUp, X, FolderPlus, Upload, ArrowUp, Download, Trash2, File, Folder, FolderOpen, AlertTriangle, Loader2, ExternalLink } from "@lucide/vue";
 import FilePreviewPane from "./site-files/FilePreviewPane.vue";
 import { fileApi, fileHeaders } from "./site-files/client";
 import type { Entry } from "./site-files/types";
+import { deepestFirst, filterEntries, pruneSelection, selectionState, toggleAll, toggleEntry } from "./site-files/selection";
 import type { Host } from "../types";
 import { useFileUpload } from "../composables/useFileUpload";
 import { siteURL as buildSiteURL } from "../composables/useHosts";
@@ -51,8 +52,22 @@ const mkdirInput = ref<HTMLInputElement | null>(null);
 const previewPane = ref<PreviewPaneHandle | null>(null);
 const previewLocked = ref(false);
 const search = ref("");
+const selectedPaths = ref<Set<string>>(new Set());
+const pendingBatchDelete = ref(false);
 
-const visibleEntries = computed(() => entries.value.filter(e => e.name.toLowerCase().includes(search.value.toLowerCase())).sort((a,b) => Number(b.is_dir)-Number(a.is_dir) || a.name.localeCompare(b.name)));
+const visibleEntries = computed(() => filterEntries(entries.value, search.value));
+const selection = computed(() => selectionState(selectedPaths.value, visibleEntries.value));
+// The drawer is kept alive while a different host is opened, so selections and
+// the current directory must be reset when the host changes.
+watch(search, () => {
+  selectedPaths.value = pruneSelection(selectedPaths.value, visibleEntries.value);
+});
+watch(() => props.host.id, () => {
+  selectedPaths.value = new Set();
+  pendingBatchDelete.value = false;
+  path.value = "";
+  void load();
+});
 
 const crumbs = computed(() => {
   const parts = path.value ? path.value.split("/").filter(Boolean) : [];
@@ -90,6 +105,7 @@ async function load() {
     const body = await r.json();
     if (!r.ok) throw Error(t(body.error) || t("读取目录失败"));
     entries.value = body.items || [];
+    selectedPaths.value = new Set();
     writable.value = !!body.writable;
     truncated.value = !!body.truncated;
     path.value = body.path && body.path !== "." ? body.path : "";
@@ -168,6 +184,47 @@ async function remove(entry: Entry) {
   } finally { busy.value = false; }
 }
 
+function selectEntry(entry: Entry, checked: boolean) {
+  selectedPaths.value = toggleEntry(selectedPaths.value, entry.path, checked);
+}
+function selectAll(checked: boolean) {
+  selectedPaths.value = toggleAll(selectedPaths.value, visibleEntries.value, checked);
+}
+function clearSelection() {
+  selectedPaths.value = new Set();
+}
+
+async function confirmBatchDelete() {
+  const chosen = deepestFirst(entries.value.filter((entry) => selectedPaths.value.has(entry.path)));
+  pendingBatchDelete.value = false;
+  if (!chosen.length || busy.value || !canWrite.value) return;
+  busy.value = true; error.value = ""; note.value = "";
+  let deleted = 0;
+  const failed: string[] = [];
+  try {
+    for (const entry of chosen) {
+      try {
+        const recursive = entry.is_dir ? "&recursive=1" : "";
+        const r = await fetch(api(`?path=${encodeURIComponent(entry.path)}${recursive}`), {
+          method: "DELETE", headers: headers(), credentials: "same-origin",
+        });
+        if (!r.ok) throw Error(String(r.status));
+        deleted += 1;
+      } catch {
+        failed.push(entry.name);
+      }
+    }
+    note.value = tr`已删除 ${deleted} 项`;
+    if (failed.length) error.value = t("部分项目删除失败") + "：" + failed.join("、");
+    clearSelection();
+    await load();
+  } catch (e) {
+    error.value = e instanceof Error ? t(e.message) : t("删除失败");
+  } finally {
+    busy.value = false;
+  }
+}
+
 function download(entry: Entry) {
   window.open(api(`/download?path=${encodeURIComponent(entry.path)}`));
 }
@@ -181,6 +238,7 @@ function onKeydown(event: KeyboardEvent) {
   const pane = previewPane.value;
   if (pane?.isOpen()) { event.preventDefault(); event.stopImmediatePropagation(); pane.requestClose(); return; }
   if (conflictPrompt.value) { event.preventDefault(); event.stopPropagation(); conflictPrompt.value = null; return; }
+  if (pendingBatchDelete.value) { event.preventDefault(); event.stopPropagation(); pendingBatchDelete.value = false; return; }
   if (pendingDelete.value) { event.preventDefault(); event.stopPropagation(); pendingDelete.value = null; return; }
   if (mkdirOpen.value) { event.preventDefault(); event.stopPropagation(); cancelMkdir(); return; }
   if (busy.value || previewLocked.value) return;
@@ -341,6 +399,16 @@ onBeforeUnmount(() => {
         <span>{{ Math.round((uploadProgress || 0) * 100) }}%</span>
       </div>
 
+      <div v-if="selection.count" class="sfd-batchbar">
+        <span>{{ tr`已选择 ${selection.count} 项` }}</span>
+        <button type="button" class="secondary" :disabled="busy" @click="clearSelection">
+          {{ t("取消全选") }}
+        </button>
+        <button type="button" class="danger-button" :disabled="busy || !canWrite" @click="pendingBatchDelete = true">
+          <Trash2 :size="14" />{{ t("批量删除") }}
+        </button>
+      </div>
+
       <div
         class="sfd-body"
         :class="{ dragging: dragOver }"
@@ -351,6 +419,16 @@ onBeforeUnmount(() => {
         <table class="sfd-table">
           <thead>
             <tr>
+              <th class="check">
+                <input
+                  type="checkbox"
+                  :checked="selection.all"
+                  :indeterminate="selection.some"
+                  :disabled="busy || !visibleEntries.length"
+                  :aria-label="t('全选当前目录')"
+                  @change="selectAll(($event.target as HTMLInputElement).checked)"
+                />
+              </th>
               <th>{{ t("名称") }}</th>
               <th class="num">{{ t("大小") }}</th>
               <th class="mtime">{{ t("修改时间") }}</th>
@@ -359,19 +437,28 @@ onBeforeUnmount(() => {
           </thead>
           <tbody>
             <tr v-if="path">
-              <td colspan="4">
+              <td colspan="5">
                 <button type="button" class="sfd-up" @click="goUp">
                   <ArrowUp :size="15" /> {{ t("返回上级") }}
                 </button>
               </td>
             </tr>
             <tr v-if="loading">
-              <td colspan="4" class="sfd-empty">
+              <td colspan="5" class="sfd-empty">
                 <Loader2 :size="16" class="spin" /> {{ t("加载中…") }}
               </td>
             </tr>
             <template v-else>
               <tr v-for="entry in visibleEntries" :key="entry.path">
+                <td class="check">
+                  <input
+                    type="checkbox"
+                    :checked="selectedPaths.has(entry.path)"
+                    :disabled="busy"
+                    :aria-label="t('选择')"
+                    @change="selectEntry(entry, ($event.target as HTMLInputElement).checked)"
+                  />
+                </td>
                 <td>
                   <button
                     type="button"
@@ -409,7 +496,7 @@ onBeforeUnmount(() => {
                 </td>
               </tr>
               <tr v-if="!visibleEntries.length">
-                <td colspan="4" class="sfd-empty">{{ t("目录为空") }}</td>
+                <td colspan="5" class="sfd-empty">{{ t("目录为空") }}</td>
               </tr>
             </template>
           </tbody>
@@ -440,6 +527,28 @@ onBeforeUnmount(() => {
           {{ t("支持多选、整个文件夹与 ZIP（自动解压）；同名文件会先确认。") }}
         </p>
       </footer>
+
+      <div
+        v-if="pendingBatchDelete"
+        class="sfd-confirm-backdrop"
+        @click.self="pendingBatchDelete = false"
+      >
+        <div class="sfd-confirm" role="alertdialog" aria-modal="true">
+          <span class="sfd-confirm-icon"><AlertTriangle :size="22" /></span>
+          <p>
+            {{ tr`确认删除选中的 ${selection.count} 项？` }}
+            <small>{{ t("其中文件夹会被递归删除，此操作不可撤销。") }}</small>
+          </p>
+          <div class="sfd-confirm-actions">
+            <button type="button" class="secondary" @click="pendingBatchDelete = false">
+              {{ t("取消") }}
+            </button>
+            <button type="button" class="danger-button" :disabled="busy" @click="confirmBatchDelete">
+              {{ t("批量删除") }}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div
         v-if="pendingDelete"
@@ -753,6 +862,30 @@ onBeforeUnmount(() => {
 .sfd-table tbody tr:last-child td {
   border-bottom: 0;
 }
+.sfd-table th.check,
+.sfd-table td.check {
+  width: 36px;
+  text-align: center;
+  padding-left: 12px;
+  padding-right: 4px;
+}
+.sfd-table input[type="checkbox"] {
+  accent-color: var(--accent, #6d8cff);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.sfd-batchbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--subtle, rgba(255,255,255,0.04));
+  font-size: 13px;
+}
+.sfd-batchbar > span { margin-right: auto; font-weight: 600; }
+
 .sfd-table th.num,
 .sfd-table td.num {
   text-align: right;

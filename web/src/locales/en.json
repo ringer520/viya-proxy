@@ -1831,5 +1831,15 @@
   "确认删除 Web 服务“{0}”？": "Delete Web service \"{0}\"?",
   "确认删除文件服务“{0}”？共享目录里的文件会保留。": "Delete file service \"{0}\"? Files in the shared directory will be kept.",
   "证书将在 {0} 天后到期": "Certificate expires in {0} day(s)",
-  "请求缺少 Host": "Request is missing Host header"
+  "请求缺少 Host": "Request is missing Host header",
+  "全选当前目录": "Select all in this folder",
+  "选择": "Select",
+  "取消全选": "Clear selection",
+  "批量删除": "Delete selected",
+  "部分项目删除失败": "Some items could not be deleted",
+  "已删除 {0} 项": "Deleted {0} item(s)",
+  "确认删除选中的 {0} 项？": "Delete {0} selected item(s)?",
+  "其中文件夹会被递归删除，此操作不可撤销。": "Folders are deleted recursively. This cannot be undone.",
+  "已选择 {0} 项": "Selected {0} item(s)",
+  "无法读取站点列表": "Unable to read the site list"
 }
