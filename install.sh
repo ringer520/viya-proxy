@@ -69,11 +69,12 @@ download_once() {
   if command -v curl >/dev/null 2>&1; then
     case "$mode" in
       big)
-        # Abort once the transfer stays below 30 KB/s for 20 seconds: the old
-        # --max-time 600 alone let a 25 MB archive crawl for ten minutes before
-        # the mirror fallback ever ran.
-        curl -fL --retry 1 --connect-timeout 10 --max-time 600 \
-          --speed-limit 30720 --speed-time 20 --progress-bar "$url" -o "$dest"
+        # Abort once the transfer stays below 120 KB/s for 15 seconds. The
+        # release is 27 MB, so at 40 KB/s --max-time alone would burn the full
+        # ten minutes and then fail; retries are left to the mirror loop, since
+        # --retry would restart that same stopwatch on the same slow host.
+        curl -fL --connect-timeout 10 --max-time 900 \
+          --speed-limit 122880 --speed-time 15 --progress-bar "$url" -o "$dest"
         ;;
       slow)
         curl -fL --retry 1 --connect-timeout 15 --max-time 1800 --progress-bar "$url" -o "$dest"
@@ -137,7 +138,8 @@ download() {
   # guard removed and a much longer ceiling: a genuinely slow line must still be
   # able to install, which the old --max-time 600 download allowed.
   if [ "$mode" = big ]; then
-    echo "==> Every mirror was too slow; retrying $url without the speed guard"
+    echo "==> No route reached 120 KB/s; downloading from $url without the speed guard."
+    echo "    This can take several minutes on a slow link; progress is shown below."
     if download_once "$url" "$dest" slow; then
       return 0
     fi

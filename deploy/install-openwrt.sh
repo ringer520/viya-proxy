@@ -62,7 +62,7 @@ download_once(){
  url=$1;dest=$2;mode=${3:-fast}
  if command -v curl >/dev/null 2>&1;then
   case "$mode" in
-   big) curl -fL --retry 2 --connect-timeout 15 --max-time 900 --speed-limit 30720 --speed-time 20 --progress-bar "$url" -o "$dest";;
+   big) curl -fL --connect-timeout 15 --max-time 900 --speed-limit 122880 --speed-time 15 --progress-bar "$url" -o "$dest";;
    slow) curl -fL --retry 2 --connect-timeout 15 --max-time 1800 --progress-bar "$url" -o "$dest";;
    *) curl -fL --retry 2 --connect-timeout 15 --max-time 120 --progress-bar "$url" -o "$dest";;
   esac
@@ -87,7 +87,7 @@ download(){
  done
  # Slow but working link: retry the original URL with the guard removed.
  if [ "$mode" = big ];then
-  echo "==> Every mirror was too slow; retrying $url without the speed guard"
+  echo "==> No route reached 120 KB/s; downloading from $url without the speed guard."
   download_once "$url" "$dest" slow && return 0
  fi
  return 1
