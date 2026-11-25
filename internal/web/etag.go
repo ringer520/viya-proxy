@@ -34,10 +34,11 @@ func etagFor(root fs.FS, name string) string {
 	return etag
 }
 
-// gzipETag marks the compressed representation. Both variants carry the same
-// bytes, so etagMatches ignores the suffix: a weak validator may cover either.
-func gzipETag(etag string) string {
-	return strings.TrimSuffix(strings.TrimSpace(etag), `"`) + `-gzip"`
+// variantETag marks a compressed representation while keeping the weak
+// validator well formed. etagMatches ignores the suffix, so a cached identity
+// response can be reused for either encoding.
+func variantETag(etag, encoding string) string {
+	return strings.TrimSuffix(strings.TrimSpace(etag), `"`) + "-" + encoding + `"`
 }
 
 // etagMatches reports whether an If-None-Match header covers etag.
@@ -64,7 +65,8 @@ func etagCore(etag string) string {
 	value := strings.TrimSpace(etag)
 	value = strings.TrimPrefix(value, "W/")
 	value = strings.Trim(value, `"`)
-	return strings.TrimSuffix(value, "-gzip")
+	value = strings.TrimSuffix(value, "-gzip")
+	return strings.TrimSuffix(value, "-br")
 }
 
 // serveNotModified reports whether the request already holds this file and, if

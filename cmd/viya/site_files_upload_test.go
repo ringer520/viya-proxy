@@ -199,3 +199,31 @@ func TestExtractZipRejectsBombAndMkdirBadJSONReturns400(t *testing.T) {
 		t.Fatalf("expected 400 for invalid JSON in mkdirSiteFile, got %d", rec.Code)
 	}
 }
+
+func TestBatchSiteFileStats(t *testing.T) {
+	a, db, root := newStaticFilesApp(t, "batch.test")
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO proxy_hosts(id,domain,type,root_path) VALUES(2,'proxy.test','proxy','')`); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/api/v1/proxy-hosts/files/stats", nil)
+	rec := httptest.NewRecorder()
+	a.batchSiteFileStats(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]struct {
+		Files int64 `json:"files"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out["2"]; ok {
+		t.Fatal("proxy host must not appear in the file stats")
+	}
+	if got := out["1"].Files; got != 1 {
+		t.Fatalf("static site file count = %d, want 1", got)
+	}
+}

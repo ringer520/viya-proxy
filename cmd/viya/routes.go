@@ -50,6 +50,7 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/proxy-hosts/{id}/files", a.requireAuth(http.HandlerFunc(a.listSiteFiles)))
 	mux.Handle("GET /api/v1/proxy-hosts/{id}/files/text", a.requireAuth(http.HandlerFunc(a.siteFileText)))
 	mux.Handle("PUT /api/v1/proxy-hosts/{id}/files/text", a.requireAuthUnlocked(http.HandlerFunc(a.siteFileText)))
+	mux.Handle("GET /api/v1/proxy-hosts/files/stats", a.requireAuth(http.HandlerFunc(a.batchSiteFileStats)))
 	mux.Handle("GET /api/v1/proxy-hosts/{id}/files/stat", a.requireAuth(http.HandlerFunc(a.siteFileStats)))
 	mux.Handle("GET /api/v1/proxy-hosts/{id}/files/download", a.requireAuth(http.HandlerFunc(a.downloadSiteFile)))
 	mux.Handle("POST /api/v1/proxy-hosts/{id}/files/upload", a.requireAuthUnlocked(http.HandlerFunc(a.uploadSiteFiles)))

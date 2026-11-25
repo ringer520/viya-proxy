@@ -168,7 +168,7 @@ func TestETagCore(t *testing.T) {
 // must be able to revalidate against the other.
 func TestETagMatchesIgnoresEncodingSuffix(t *testing.T) {
 	identity := `W/"100-abcdef"`
-	gzipETagValue := gzipETag(identity)
+	gzipETagValue := variantETag(identity, "gzip")
 
 	if !etagMatches(identity, identity) {
 		t.Error("identity validator should match itself")
@@ -243,5 +243,37 @@ func TestHandlerGzipETagDiffersFromIdentity(t *testing.T) {
 	}
 	if identity == compressed {
 		t.Error("压缩与非压缩表示的 ETag 必须不同")
+	}
+}
+
+func TestBrotliPreferredWithGzipFallback(t *testing.T) {
+	js := findAsset(t, ".js")
+	root, err := fs.Sub(files, "dist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fs.Stat(root, js+".br"); err != nil {
+		t.Skip("build did not produce a brotli asset")
+	}
+	for _, tc := range []struct{ accept, want string }{
+		{"br, gzip", "br"},
+		{"gzip", "gzip"},
+	} {
+		req := httptest.NewRequest("GET", "/"+js, nil)
+		req.Header.Set("Accept-Encoding", tc.accept)
+		rec := httptest.NewRecorder()
+		Handler().ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("%s: status %d", tc.want, rec.Code)
+		}
+		if got := rec.Header().Get("Content-Encoding"); got != tc.want {
+			t.Errorf("Accept-Encoding %q -> %q, want %q", tc.accept, got, tc.want)
+		}
+		if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
+			t.Errorf("%s response missing Vary", tc.want)
+		}
+		if etag := rec.Header().Get("ETag"); !strings.HasSuffix(etag, "-"+tc.want+`"`) {
+			t.Errorf("%s etag %q does not mark the variant", tc.want, etag)
+		}
 	}
 }

@@ -409,10 +409,14 @@ export async function refreshSiteStat(id: number) {
     // A single site's stat failing must not disturb the rest of the dashboard.
   }
 }
-export function refreshStaticSiteStats() {
-  for (const h of hosts.value) {
-    // Static sites and file services both serve a directory worth counting.
-    if (h.type === "static" || h.type === "files") void refreshSiteStat(h.id);
+export async function refreshStaticSiteStats() {
+  // One request for every static site instead of one directory walk per card.
+  try {
+    const r = await fetch("/api/v1/proxy-hosts/files/stats", { credentials: "same-origin" });
+    if (!r.ok) return;
+    hostContentStats.value = { ...hostContentStats.value, ...(await r.json()) };
+  } catch {
+    // A single failed stat must not disturb the dashboard.
   }
 }
 export function closeSiteFiles() {
@@ -792,4 +796,4 @@ export function resetHostsState() {
   webSearchOpen.value = false;
 }
 
-registerRefreshTask("hosts",async()=>{await loadWebListeners();void refreshStaticSiteStats()},"sites");
+registerRefreshTask("hosts",async()=>{await loadWebListeners();void refreshStaticSiteStats()},"sites",true);

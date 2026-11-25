@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -517,5 +518,50 @@ func TestTrafficDailyCutoffAndTimezoneAlignment(t *testing.T) {
 	}
 	if dailyReq != s.Recent.Requests || dailyUp != s.Recent.Upload || dailyDown != s.Recent.Download {
 		t.Fatalf("Recent (%+v) != Daily sum (req=%d up=%d down=%d)", s.Recent, dailyReq, dailyUp, dailyDown)
+	}
+}
+
+func TestTrafficResponsesAreCachedBriefly(t *testing.T) {
+	oldTTL := trafficCacheTTL
+	trafficCacheTTL = 30 * time.Millisecond
+	defer func() { trafficCacheTTL = oldTTL; trafficCache = sync.Map{} }()
+	trafficCache = sync.Map{}
+
+	a := stabilityApp(t)
+	if err := a.initTraffic(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`INSERT INTO proxy_hosts(id,domain,upstream) VALUES(1,'cache.test','http://127.0.0.1:9000')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`INSERT INTO traffic_hours(site_id,hour,requests,errors,upload,download) VALUES(1,?,5,0,10,20)`, time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+
+	call := func() int64 {
+		req := httptest.NewRequest("GET", "/api/v1/proxy-hosts/traffic?range=24h&tz=0", nil)
+		rec := httptest.NewRecorder()
+		a.siteTraffic(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("status %d", rec.Code)
+		}
+		var res map[string]trafficSummary
+		if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
+		return res["1"].Total.Requests
+	}
+	if got := call(); got != 5 {
+		t.Fatalf("initial requests = %d", got)
+	}
+	if _, err := a.db.Exec(`UPDATE traffic_hours SET requests=9 WHERE site_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if got := call(); got != 5 {
+		t.Fatalf("cache should still hold 5, got %d", got)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if got := call(); got != 9 {
+		t.Fatalf("cache should have expired, got %d", got)
 	}
 }

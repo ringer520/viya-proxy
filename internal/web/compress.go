@@ -67,11 +67,13 @@ func gzipBytes(src []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// acceptsGzip 解析 Accept-Encoding，正确处理 gzip;q=0 这类显式拒绝。
-func acceptsGzip(header string) bool {
+// acceptsEncoding 解析 Accept-Encoding，正确处理 gzip;q=0 这类显式拒绝。
+// Brotli is preferred where the build produced a .br variant; gzip remains the
+// fallback for clients (and proxies) that do not advertise it.
+func acceptsEncoding(header, encoding string) bool {
 	for _, part := range strings.Split(header, ",") {
 		part = strings.TrimSpace(part)
-		if !strings.HasPrefix(part, "gzip") {
+		if !strings.HasPrefix(part, encoding) {
 			continue
 		}
 		if i := strings.Index(part, "q="); i >= 0 {
@@ -84,6 +86,9 @@ func acceptsGzip(header string) bool {
 	}
 	return false
 }
+
+func acceptsGzip(header string) bool   { return acceptsEncoding(header, "gzip") }
+func acceptsBrotli(header string) bool { return acceptsEncoding(header, "br") }
 
 // setCacheControl 为带内容哈希的构建产物设置长缓存，
 // 其余无哈希的资源（index.html、theme-init.js、图标、主题图）每次回源校验。
@@ -102,7 +107,7 @@ func serveCompressed(w http.ResponseWriter, r *http.Request, root fs.FS, cache *
 		return false
 	}
 	// Range 请求针对的是原始字节，压缩后语义会错位，直接回退。
-	if r.Header.Get("Range") != "" || !acceptsGzip(r.Header.Get("Accept-Encoding")) {
+	if r.Header.Get("Range") != "" {
 		return false
 	}
 	info, err := fs.Stat(root, name)
@@ -110,27 +115,48 @@ func serveCompressed(w http.ResponseWriter, r *http.Request, root fs.FS, cache *
 		return false
 	}
 
-	w.Header().Add("Vary", "Accept-Encoding")
-
-	body := cache.get(name)
-	if body == nil {
-		src, readErr := fs.ReadFile(root, name)
-		if readErr != nil {
+	encoding := ""
+	if acceptsBrotli(r.Header.Get("Accept-Encoding")) {
+		if _, err = fs.Stat(root, name+".br"); err == nil {
+			encoding = "br"
+		}
+	}
+	if encoding == "" {
+		if !acceptsGzip(r.Header.Get("Accept-Encoding")) {
 			return false
 		}
-		body, err = gzipBytes(src)
+		encoding = "gzip"
+	}
+
+	w.Header().Add("Vary", "Accept-Encoding")
+
+	var body []byte
+	if encoding == "br" {
+		body, err = fs.ReadFile(root, name+".br")
 		if err != nil {
 			return false
 		}
-		cache.put(name, body)
+	} else {
+		body = cache.get(name)
+		if body == nil {
+			src, readErr := fs.ReadFile(root, name)
+			if readErr != nil {
+				return false
+			}
+			body, err = gzipBytes(src)
+			if err != nil {
+				return false
+			}
+			cache.put(name, body)
+		}
 	}
 
-	w.Header().Set("Content-Encoding", "gzip")
+	w.Header().Set("Content-Encoding", encoding)
 	w.Header().Set("Content-Type", contentType)
 	// The validator was computed for the identity bytes; mark the variant so a
 	// cache never mixes the two representations.
 	if etag := w.Header().Get("ETag"); etag != "" {
-		w.Header().Set("ETag", gzipETag(etag))
+		w.Header().Set("ETag", variantETag(etag, encoding))
 	}
 	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(body))
 	return true

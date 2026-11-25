@@ -243,10 +243,51 @@ func (a *App) siteFileStats(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
+	writeJSON(w, 200, statSiteRoot(root))
+}
+
+// batchSiteFileStats answers the whole host list in one request. The previous
+// per-site endpoint turned a page with many static sites into an N+1 burst of
+// directory walks, all of them waiting on the same disk.
+func (a *App) batchSiteFileStats(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,root_path FROM proxy_hosts WHERE type IN ('static','files')`)
+	if err != nil {
+		fail(w, 500, errors.New("无法读取站点列表"))
+		return
+	}
+	type row struct {
+		id   int64
+		root string
+	}
+	var sites []row
+	for rows.Next() {
+		var item row
+		if err = rows.Scan(&item.id, &item.root); err != nil {
+			break
+		}
+		sites = append(sites, item)
+	}
+	queryErr := rows.Err()
+	rows.Close()
+	if err != nil || queryErr != nil {
+		fail(w, 500, errors.New("无法读取站点列表"))
+		return
+	}
+	out := map[int64]any{}
+	for _, site := range sites {
+		root := strings.TrimSpace(site.root)
+		if validateStaticRoot(root) != nil {
+			continue
+		}
+		out[site.id] = statSiteRoot(filepath.Clean(root))
+	}
+	writeJSON(w, 200, out)
+}
+
+func statSiteRoot(root string) map[string]any {
 	info, err := os.Stat(root)
 	if err != nil || !info.IsDir() {
-		writeJSON(w, 200, map[string]any{"files": 0, "total_size": 0, "empty": true})
-		return
+		return map[string]any{"files": 0, "total_size": 0, "empty": true}
 	}
 	var files int64
 	var total int64
@@ -269,15 +310,14 @@ func (a *App) siteFileStats(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		fail(w, 500, errors.New("无法检查站点目录"))
-		return
+		return map[string]any{"files": 0, "total_size": 0, "empty": true, "truncated": true}
 	}
-	writeJSON(w, 200, map[string]any{
+	return map[string]any{
 		"files":      files,
 		"total_size": total,
 		"empty":      files == 0,
 		"truncated":  truncated,
-	})
+	}
 }
 
 func relPath(root, full string) string {

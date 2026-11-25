@@ -574,6 +574,10 @@ func parseDaysWindow(raw string) (int, bool) {
 }
 
 func (a *App) siteTraffic(w http.ResponseWriter, r *http.Request) {
+	cachedTraffic(w, r, "site", func(target http.ResponseWriter) { a.siteTrafficUncached(target, r) })
+}
+
+func (a *App) siteTrafficUncached(w http.ResponseWriter, r *http.Request) {
 	window, hours := trafficWindow(r)
 	loc := trafficLocation(r)
 	cutoff := trafficCutoff(window, hours, loc)
@@ -682,6 +686,10 @@ func addTraffic(to *trafficCounters, from trafficCounters) {
 // l4Traffic mirrors siteTraffic for layer4 rules. "requests" carries the
 // connection count so the panel can reuse the same rendering for both.
 func (a *App) l4Traffic(w http.ResponseWriter, r *http.Request) {
+	cachedTraffic(w, r, "l4", func(target http.ResponseWriter) { a.l4TrafficUncached(target, r) })
+}
+
+func (a *App) l4TrafficUncached(w http.ResponseWriter, r *http.Request) {
 	window, hours := trafficWindow(r)
 	loc := trafficLocation(r)
 	cutoff := trafficCutoff(window, hours, loc)
